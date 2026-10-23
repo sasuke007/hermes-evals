@@ -1,0 +1,23 @@
+{
+  "name": "hermes-evals",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "turbo run db:generate --filter=@hermes-evals/api"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.0"
+  }
+}

@@ -1,0 +1,244 @@
+name: hermes-evals
+
+# Trial slot networks: internal (no route out) and with an isolated gateway
+# (the host has no address on them either), so a trial can reach nothing but
+# the egress service, which is attached to every slot. Engine 28+ is needed
+# for the isolated gateway mode; the worker's self-test proves the isolation
+# on every machine before any experiment runs.
+x-trial-network: &trial-network
+  driver: bridge
+  internal: true
+  driver_opts:
+    com.docker.network.bridge.gateway_mode_ipv4: isolated
+    com.docker.network.bridge.gateway_mode_ipv6: isolated
+  labels:
+    hermes-evals.role: trial-network
+
+x-trial-settings: &trial-settings
+  TRIAL_IMAGE: hermes-evals/trial:v0.22.4-4d04303
+  TRIAL_VOLUME: hermes-evals-trials
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: hermes
+      POSTGRES_DB: hermes_evals
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Loopback only, for local development; trials have no route to the host.
+    ports:
+      - '127.0.0.1:5432:5432'
+    networks: [backend]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hermes -d hermes_evals']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
+      SUITES_DIR: /data/suites
+      DATA_DIR: /data
+      CORS_ORIGIN: http://localhost:8080
+    volumes:
+      - ./suites:/data/suites:ro
+      - evaldata:/data
+    ports:
+      - '127.0.0.1:3000:3000'
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://localhost:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      <<: *trial-settings
+      NODE_ENV: production
+      DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
+      SUITES_DIR: /data/suites
+      DATA_DIR: /data
+      TRIALS_DIR: /trials
+      WORKER_CONCURRENCY: '3'
+      DOCKER_SOCKET: /run/guard/docker.sock
+      EGRESS_ADMIN_SOCKET: /run/egress/admin.sock
+      TRIAL_SLOTS: hermes-evals-trial-0,hermes-evals-trial-1,hermes-evals-trial-2,hermes-evals-trial-3
+    volumes:
+      - ./suites:/data/suites:ro
+      - evaldata:/data
+      - trials:/trials
+      - guard-sock:/run/guard
+      - egress-admin:/run/egress
+    networks: [backend]
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      trial-image:
+        condition: service_completed_successfully
+      docker-guard:
+        condition: service_started
+      egress:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    ports:
+      - '127.0.0.1:8080:80'
+    networks: [backend]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Builds the trial image, checks it starts, and exits.
+  trial-image:
+    image: hermes-evals/trial:v0.22.4-4d04303
+    build:
+      context: .
+      dockerfile: docker/trial.Dockerfile
+    network_mode: none
+    restart: 'no'
+
+  # The only process with the Docker socket. No network; serves a filtered
+  # Docker API on a unix socket that only the worker mounts.
+  docker-guard:
+    image: hermes-evals/docker-guard
+    build:
+      context: .
+      dockerfile: docker/node-service.Dockerfile
+      args:
+        APP: docker-guard
+    environment:
+      <<: *trial-settings
+      TRIAL_NETWORKS: hermes-evals-trial-0,hermes-evals-trial-1,hermes-evals-trial-2,hermes-evals-trial-3
+      LISTEN: /run/guard/docker.sock
+      DOCKER_SOCK: /var/run/docker.sock
+    user: '0:0'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    network_mode: none
+    volumes:
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+      - guard-sock:/run/guard
+    restart: unless-stopped
+
+  # The only network path out of a trial: forward proxy (:3128) and model
+  # gateway (:8080). Provider credentials live here, never in a trial.
+  egress:
+    image: hermes-evals/egress
+    build:
+      context: .
+      dockerfile: docker/node-service.Dockerfile
+      args:
+        APP: egress
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ADMIN_SOCKET: /run/egress/admin.sock
+      MODEL_UPSTREAMS: >-
+        {"nous":{"baseUrl":"http://nous-proxy:8645/v1","bodyDefaults":{"reasoning":{"enabled":true,"effort":"medium"}}},
+         "openrouter":{"baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"},
+         "mock":{"baseUrl":"http://mock-model:8090/v1"}}
+    user: node
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    volumes:
+      - egress-admin:/run/egress
+    networks:
+      edge: {}
+      llm: {}
+      trial-0: { aliases: [egress] }
+      trial-1: { aliases: [egress] }
+      trial-2: { aliases: [egress] }
+      trial-3: { aliases: [egress] }
+    restart: unless-stopped
+
+  # Holds the single Nous Portal login. For development you can instead reuse
+  # this machine's Hermes login: run `hermes proxy start --provider nous` on the
+  # host and set NOUS_HOST_PROXY=host.docker.internal:8645 in .env (egress then
+  # forwards to it; see apps/egress/src/host-forward.ts). One-time setup:
+  #   docker compose --profile nous run --rm nous-proxy auth add nous --type oauth --no-browser
+  nous-proxy:
+    image: hermes-evals/trial:v0.22.4-4d04303
+    profiles: [nous]
+    init: true
+    command: ['proxy', 'start', '--provider', 'nous', '--host', '0.0.0.0', '--port', '8645']
+    environment:
+      HOME: /opt/data
+      HERMES_HOME: /opt/data
+    volumes:
+      - nous-home:/opt/data
+    networks: [edge, llm]
+    restart: unless-stopped
+
+  # Scripted OpenAI-compatible model for the isolation smoke test.
+  mock-model:
+    image: hermes-evals/egress
+    profiles: [test]
+    command: ['node', 'dist/mock-model.js']
+    user: node
+    read_only: true
+    cap_drop: [ALL]
+    environment:
+      MOCK_STEPS: >-
+        [{"tool":"terminal","arguments":{"command":"id; echo HOST=$(hostname); ls /; ls -a /opt/data; head -3 /workspace/invoices.csv; echo PG=$(curl -sS -m 3 http://postgres:5432 2>&1 | head -c 120); echo META=$(curl -sS -m 3 --noproxy '*' http://169.254.169.254/ 2>&1 | head -c 120); echo WEB=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' https://example.com 2>&1 | head -c 120); echo SECRETS=$(env | grep -c -i -E 'nous_api|openrouter_api|anthropic_api|openai_api'); echo PROBE_DONE"}},
+         {"content":"The invoices total 1042.00.\n```json\n{\"total\": 1042.00}\n```"}]
+    networks: [llm]
+
+volumes:
+  pgdata:
+  evaldata:
+  trials:
+    name: hermes-evals-trials
+  guard-sock:
+  egress-admin:
+  nous-home:
+
+networks:
+  backend: {}
+  # egress and nous-proxy only: the way to the internet.
+  edge: {}
+  # egress to nous-proxy and the mock model; no route out.
+  llm:
+    internal: true
+  trial-0:
+    <<: *trial-network
+    name: hermes-evals-trial-0
+  trial-1:
+    <<: *trial-network
+    name: hermes-evals-trial-1
+  trial-2:
+    <<: *trial-network
+    name: hermes-evals-trial-2
+  trial-3:
+    <<: *trial-network
+    name: hermes-evals-trial-3

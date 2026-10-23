@@ -1,0 +1,6 @@
+name: invoices-v1
+version_label: '0.1'
+description: >-
+  Accounts-payable questions over one family of invoice fixtures. Each task
+  has a trap that a careful method avoids. This first task is hand-seeded;
+  the fixture generator in Phase 6 replaces it with the full twelve.

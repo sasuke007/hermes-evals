@@ -1,0 +1,82 @@
+name: hermes-evals
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: hermes
+      POSTGRES_DB: hermes_evals
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hermes -d hermes_evals']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
+      SUITES_DIR: /data/suites
+      DATA_DIR: /data
+      CORS_ORIGIN: http://localhost:8080
+    volumes:
+      - ./suites:/data/suites:ro
+      - evaldata:/data
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://localhost:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
+      SUITES_DIR: /data/suites
+      DATA_DIR: /data
+      WORKER_CONCURRENCY: '3'
+    volumes:
+      - ./suites:/data/suites:ro
+      - evaldata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    ports:
+      - '8080:80'
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  evaldata:

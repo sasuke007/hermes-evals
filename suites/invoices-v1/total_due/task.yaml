@@ -1,0 +1,13 @@
+summary: Total amount still due across invoices that are not paid
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: total_due
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: total_due, abs: 0.01 }

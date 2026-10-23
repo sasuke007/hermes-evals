@@ -1,0 +1,87 @@
+/* Design tokens from the Hermes Evals visual direction ("bench instrument").
+   Switched by data-theme on <html> (stamped before first paint by index.html, then kept by
+   src/stores/theme.ts); components never use raw hex values.
+   Verified against the .he and .he[data-theme="dark"] variables on every artboard of the
+   design canvas (23 Oct 2026): all 34 tokens match in both themes; the canvas defines no others.
+   Neutrals: --bg --surface --surface-2 --surface-3 --border --border-strong --text --text-2
+   --text-3. Action: --accent --accent-hover --accent-soft --on-accent --focus. Floating: --scrim
+   --shadow. Evidence tones, each as solid / -soft fill / -text on its soft fill: pass (passed,
+   better), fail (failed, worse), err (error, execution_error), ung (ungradable; also "act now"
+   amber), run (running, scoring, waiting), que (queued, neutral, inconclusive). */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --surface-3: #e5e8ed;
+  --border: #dde1e7;
+  --border-strong: #c3c9d2;
+  --text: #12151a;
+  --text-2: #475061;
+  --text-3: #636c7c;
+  --accent: #3350d0;
+  --accent-hover: #2840ae;
+  --accent-soft: #e9edfc;
+  --on-accent: #ffffff;
+  --focus: #3350d0;
+  --scrim: rgba(18, 21, 26, 0.38);
+  --pass: #13805c;
+  --pass-soft: #e2f3eb;
+  --pass-text: #0a6145;
+  --fail: #e0571e;
+  --fail-soft: #fdede5;
+  --fail-text: #ae3a0b;
+  --err: #7c3fe0;
+  --err-soft: #f1eafd;
+  --err-text: #6224c4;
+  --ung: #c29000;
+  --ung-soft: #faf1d6;
+  --ung-text: #7a5a00;
+  --run: #2f6ce8;
+  --run-soft: #e6eefd;
+  --run-text: #1d52c0;
+  --que: #8b94a3;
+  --que-soft: #eef0f3;
+  --que-text: #475061;
+  --shadow: 0 8px 24px rgba(18, 21, 26, 0.12), 0 1px 2px rgba(18, 21, 26, 0.08);
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d0f13;
+  --surface: #14171d;
+  --surface-2: #1a1e25;
+  --surface-3: #232831;
+  --border: #2a303a;
+  --border-strong: #3b4351;
+  --text: #e5e8ee;
+  --text-2: #a7afbc;
+  --text-3: #8a93a2;
+  --accent: #8197ff;
+  --accent-hover: #a3b3ff;
+  --accent-soft: #1c2445;
+  --on-accent: #0d0f13;
+  --focus: #8197ff;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --pass: #2db07f;
+  --pass-soft: #0f2a20;
+  --pass-text: #5ed2a4;
+  --fail: #f27a43;
+  --fail-soft: #34190d;
+  --fail-text: #ff9f70;
+  --err: #a47bff;
+  --err-soft: #231a3b;
+  --err-text: #c4a6ff;
+  --ung: #d8a52b;
+  --ung-soft: #2e2510;
+  --ung-text: #eec662;
+  --run: #5a8bff;
+  --run-soft: #142247;
+  --run-text: #8fb1ff;
+  --que: #6a7384;
+  --que-soft: #1d2129;
+  --que-text: #a7afbc;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px #2a303a;
+  color-scheme: dark;
+}

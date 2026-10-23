@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/.turbo
+.git
+data
+*.md
+requirements.pdf
+.env

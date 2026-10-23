@@ -1,0 +1,33 @@
+{
+  "name": "@hermes-evals/docker-guard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The only holder of the Docker socket: serves a filtered Docker API that can start nothing but sandboxed trial containers",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/ test/",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "~1.82.0",
+    "typescript": "~6.0.0",
+    "vitest": "^4.1.11"
+  },
+  "exports": {
+    "./policy": {
+      "types": "./dist/policy.d.ts",
+      "import": "./dist/policy.js",
+      "default": "./dist/policy.js"
+    }
+  }
+}
