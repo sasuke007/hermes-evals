@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import type { HealthResponse } from '@hermes-evals/shared';
+import { ApiTags } from '@nestjs/swagger';
+import { HealthResponseSchema, type HealthResponse } from '@hermes-evals/shared';
+import { ApiJsonResponse } from '../openapi/decorators.js';
 import { HealthService } from './health.service.js';
 
 @ApiTags('system')
@@ -9,7 +10,7 @@ export class HealthController {
   constructor(private readonly health: HealthService) {}
 
   @Get()
-  @ApiOkResponse({ description: 'Liveness plus dependency checks' })
+  @ApiJsonResponse(HealthResponseSchema, { description: 'Liveness plus dependency checks' })
   get(): Promise<HealthResponse> {
     return this.health.check();
   }

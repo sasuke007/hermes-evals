@@ -70,15 +70,23 @@ export const CONFIGURATIONS_USING_NOUS = ['baseline', 'with-skill', 'with-mcp'];
 export const LOGIN_OUTCOMES = ['approve', 'decline', 'expire', 'subscription', 'fail'] as const;
 export type LoginOutcome = (typeof LOGIN_OUTCOMES)[number];
 
-/** Running experiments for the AppShell pill: "2 running · 127 / 300 scored". */
+/**
+ * Running experiments for the AppShell pill: "2 running · 127 / 300 scored". The ids match
+ * EXPERIMENT_IDS.mcpVsBaseline and .skillMcp in src/fixtures/experiments.ts (copied, not
+ * imported, to keep this module free of the experiment fixtures).
+ */
 export const RUNNING_EXPERIMENTS = [
-  { id: 'exp-mcp-vs-baseline', name: 'MCP vs baseline, invoices-v1', scored: 87, total: 120 },
-  { id: 'exp-skill-plus-mcp', name: 'Skill + MCP, invoices-v1', scored: 40, total: 180 },
+  { id: 'exp_01JBFMCPVB', name: 'MCP vs baseline, invoices-v1', scored: 87, total: 120 },
+  { id: 'exp_01JBFSKMCP', name: 'Skill + MCP, invoices-v1', scored: 40, total: 180 },
 ];
 
 /** The 15 isolation checks the worker runs at start-up, in their fixed order (System board). */
 const CHECK_ROWS: [id: string, name: string, detail: string][] = [
-  ['unprivileged-user', 'runs as an unprivileged user (uid 10000)', 'id -u → 10000 · no capabilities'],
+  [
+    'unprivileged-user',
+    'runs as an unprivileged user (uid 10000)',
+    'id -u → 10000 · no capabilities',
+  ],
   ['read-only-image', 'image is read-only', 'touch /usr/local/bin/x → read-only file system'],
   [
     'own-mounts-only',

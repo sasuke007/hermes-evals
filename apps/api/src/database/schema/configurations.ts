@@ -5,7 +5,15 @@
  * exactly what it tested.
  */
 import { sql } from 'drizzle-orm';
-import { boolean, check, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  check,
+  foreignKey,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { PROVIDERS, type Provider } from '@hermes-evals/shared';
 import { createdAt, emptyTextArray, id, isSha256, oneOf, tstz } from './_columns.js';
 
@@ -57,6 +65,12 @@ export const configurationVersions = pgTable(
     /** sha256 of the normalised settings plus the hashes of every referenced resource. */
     configHash: text('config_hash').notNull(),
     changeNote: text('change_note'),
+    /**
+     * The version this one was duplicated from (POST /configurations/:id/duplicate),
+     * for the "differs from" tag and the history line. Null for a version
+     * created from scratch or saved as the next version of its own configuration.
+     */
+    duplicatedFromVersionId: text('duplicated_from_version_id'),
     /** Set once, when the first experiment that uses this version is created. */
     frozenAt: tstz('frozen_at'),
     createdAt: createdAt(),
@@ -64,6 +78,11 @@ export const configurationVersions = pgTable(
   },
   (t) => [
     uniqueIndex('configuration_versions_config_version_uq').on(t.configurationId, t.version),
+    foreignKey({
+      name: 'configuration_versions_duplicated_from_fk',
+      columns: [t.duplicatedFromVersionId],
+      foreignColumns: [t.id],
+    }),
     check('configuration_versions_version_ck', sql`${t.version} >= 1`),
     check('configuration_versions_provider_ck', oneOf(t.provider, PROVIDERS)),
     check('configuration_versions_model_ck', sql`${t.model} <> ''`),

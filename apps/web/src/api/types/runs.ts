@@ -225,8 +225,13 @@ export interface TimelineView {
 export interface FinalResponseView {
   /** The final text Hermes recorded, verbatim. Never rebuilt from streamed pieces. */
   text: string;
-  /** Character range of the fenced block the scorer used, or null when none was found. */
+  /**
+   * Character range (UTF-16, half-open) of the JSON body the scorer parsed, as the API stores
+   * it; null when no block was found.
+   */
   extracted: { start: number; end: number } | null;
+  /** Range of the whole fenced block, fences included: what JsonBlock highlights. */
+  fence: { start: number; end: number } | null;
   extraction: 'found' | 'missing' | 'invalid';
   parsed: JsonValue | null;
   parseError: { message: string; position: number | null } | null;

@@ -62,8 +62,8 @@ function connect(): void {
   <div v-else-if="variant === 'empty'" class="panel setup-empty">
     <div class="se-title">No experiments yet</div>
     <p class="t2 se-body">
-      An experiment runs every task in a suite under two or more configurations, several times
-      each, and tells you which configuration did better.
+      An experiment runs every task in a suite under two or more configurations, several times each,
+      and tells you which configuration did better.
     </p>
     <ol class="t2 se-steps">
       <li>

@@ -52,12 +52,13 @@ function connect(): void {
     <span class="pn-text">
       <template v-if="effective === 'renewal'">
         <b class="pn-lead">Login needs renewing.</b>
-        {{ ' ' }}<span class="t2">Experiments that use it are paused.</span>
-        {{ ' ' }}<button type="button" class="linkbtn" @click="connect">Reconnect</button>
+        {{ ' ' }}<span class="t2">Experiments that use it are paused.</span> {{ ' '
+        }}<button type="button" class="linkbtn" @click="connect">Reconnect</button>
       </template>
       <template v-else-if="effective === 'missing'">
         <b class="pn-lead">Not configured.</b>
-        {{ ' ' }}<span class="t2"
+        {{ ' '
+        }}<span class="t2"
           >Add <code>{{ info?.envVar ?? 'the API key' }}=…</code> to <code>.env</code>, then run
           <code>{{ info?.applyCommand ?? 'docker compose up -d egress worker' }}</code
           >.</span
@@ -65,9 +66,8 @@ function connect(): void {
       </template>
       <template v-else>
         <b class="pn-lead">Not connected.</b>
-        {{ ' ' }}<span class="t2"
-          >You can save this configuration now and connect before you launch.</span
-        >
+        {{ ' '
+        }}<span class="t2">You can save this configuration now and connect before you launch.</span>
         {{ ' ' }}<button type="button" class="linkbtn" @click="connect">Connect now</button>
       </template>
     </span>

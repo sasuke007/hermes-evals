@@ -1,0 +1,15 @@
+summary: List the open ids
+limits:
+  max_turns: 10
+  run_budget_seconds: 120
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: ids, unordered: true }
+  - key: reads_fixture
+    type: trajectory_match
+    params: { tool: read_file, args: { path: items.csv }, min_calls: 1 }

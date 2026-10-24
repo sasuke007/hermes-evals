@@ -18,7 +18,9 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/suites/**"],
+      "env": ["RUN_SANDBOX_TESTS", "DOCKER_SOCKET", "TRIALS_DIR", "TRIAL_IMAGE", "TRIAL_VOLUME"]
     },
     "db:generate": {
       "dependsOn": ["^build"],

@@ -35,8 +35,12 @@ const props = withDefaults(
 );
 defineEmits<{ retry: [] }>();
 
-const role = computed(() => (props.tone === 'error' || props.tone === 'violet' ? 'alert' : 'status'));
-const detailMono = computed(() => props.mono ?? (props.tone === 'error' || props.tone === 'violet'));
+const role = computed(() =>
+  props.tone === 'error' || props.tone === 'violet' ? 'alert' : 'status',
+);
+const detailMono = computed(
+  () => props.mono ?? (props.tone === 'error' || props.tone === 'violet'),
+);
 </script>
 
 <template>

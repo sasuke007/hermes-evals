@@ -12,7 +12,8 @@
  * apply to every fixture-backed call: `loading` never resolves and `error`
  * rejects with an ApiError like the one a stopped `api` service produces.
  */
-import { ApiError } from './client';
+import { z, type ZodType } from 'zod';
+import { ApiError, apiGet } from './client';
 
 export type ApiMode = 'fixtures' | 'live';
 
@@ -65,8 +66,15 @@ export function hasScenario(name: string): boolean {
   return active.split(',').some((s) => s.trim() === name);
 }
 
+const UNDER_TEST = import.meta.env.MODE === 'test';
+
 /** Simulated latency for fixtures: short in the browser, none under Vitest. */
-export const FIXTURE_LATENCY_MS = import.meta.env.MODE === 'test' ? 0 : 180;
+export const FIXTURE_LATENCY_MS = UNDER_TEST ? 0 : 180;
+
+/** Latency of one fixture call; per-call overrides also drop to 0 under Vitest. */
+function latencyOf(override: number | undefined): number {
+  return UNDER_TEST ? 0 : (override ?? FIXTURE_LATENCY_MS);
+}
 
 export interface FixtureOptions {
   /**
@@ -103,7 +111,7 @@ function cloneJson<T>(value: T): T {
  */
 export async function fixture<T>(value: T | (() => T), options: FixtureOptions = {}): Promise<T> {
   if (hasScenario('loading')) return new Promise<T>(() => {});
-  await sleep(options.latencyMs ?? FIXTURE_LATENCY_MS);
+  await sleep(latencyOf(options.latencyMs));
   if (hasScenario('error')) {
     const { status, detail } = options.error ?? DEFAULT_FIXTURE_ERROR;
     throw new ApiError(status, options.request ?? 'GET /api', detail);
@@ -123,6 +131,83 @@ export async function fixtureFailure(
   latencyMs?: number,
 ): Promise<never> {
   if (hasScenario('loading')) return new Promise<never>(() => {});
-  await sleep(latencyMs ?? FIXTURE_LATENCY_MS);
+  await sleep(latencyOf(latencyMs));
   throw new ApiError(status, request, detail);
+}
+
+/** The 404 a fixture lookup throws when an id does not exist, worded like the API's. */
+export function notFound(request: string, what: string): ApiError {
+  return new ApiError(404, request, `${what} not found`);
+}
+
+// ---------------------------------------------------------------------------
+// Live mode
+// ---------------------------------------------------------------------------
+
+type QueryValue = string | number | boolean | string[] | null | undefined;
+
+/** `path?a=1&b=x,y`: drops null and undefined; arrays are comma-joined; booleans become 1 or 0. */
+export function withQuery(path: string, params: Record<string, QueryValue>): string {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === '') continue;
+    if (Array.isArray(value)) q.set(key, value.join(','));
+    else if (typeof value === 'boolean') q.set(key, value ? '1' : '0');
+    else q.set(key, String(value));
+  }
+  const qs = q.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+/**
+ * The planned endpoints return these view models directly; they have no shared
+ * zod schema yet, so live reads trust the response shape.
+ */
+function trusted<T>(): ZodType<T> {
+  return z.custom<T>(() => true);
+}
+
+/** Live mode: GET a planned endpoint through client.ts. `path` excludes the /api prefix. */
+export function liveGet<T>(path: string): Promise<T> {
+  return apiGet(path, trusted<T>());
+}
+
+/**
+ * Live mode: a state-changing call. JSON bodies are sent as application/json,
+ * FormData as multipart. Every call carries X-Requested-With, which the API
+ * requires so another site cannot trigger it (plan section 6.1).
+ */
+export async function liveSend<T>(
+  method: 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const multipart = typeof FormData !== 'undefined' && body instanceof FormData;
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+    'x-requested-with': 'hermes-evals',
+  };
+  if (!multipart) headers['content-type'] = 'application/json';
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers,
+    body: multipart ? (body as FormData) : JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${method} /api${path.split('?')[0]}`, await errorDetail(res));
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+/** The API's error body is `{ statusCode, message }`; fall back to the raw text. */
+async function errorDetail(res: Response): Promise<string> {
+  const text = (await res.text()).slice(0, 300);
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown };
+    if (typeof parsed.message === 'string') return parsed.message;
+  } catch {
+    /* not JSON */
+  }
+  return text || res.statusText;
 }

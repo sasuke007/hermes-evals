@@ -15,9 +15,12 @@ export interface TrialOutcome {
   containerId: string;
   exitCode: number;
   oomKilled: boolean;
-  /** Why the container stopped: on its own, at the deadline, on cancel, or for writing too much. */
-  stopReason: 'exited' | 'deadline' | 'cancelled' | 'disk_limit';
-  /** Which disk cap was passed, when stopReason is disk_limit. */
+  /**
+   * Why the container stopped: on its own, at the deadline, on cancel, for
+   * writing too much to disk, or for printing too much output.
+   */
+  stopReason: 'exited' | 'deadline' | 'cancelled' | 'disk_limit' | 'output_limit';
+  /** Which cap was passed, when stopReason is disk_limit or output_limit. */
   limitDetail?: string;
   /** Set when the output stream failed, so events may be missing. */
   logError?: string;
@@ -44,6 +47,13 @@ export interface RunTrialOptions {
    * what it writes in one interval.
    */
   diskLimit?: DiskLimit;
+  /**
+   * Stops the trial when its stdout and stderr together pass `maxBytes`, and
+   * forwards nothing past it. The output is decoded in the worker's memory,
+   * and what runs in the container is arbitrary code that can write to its
+   * streams at pipe speed; without a cap it could exhaust the worker's heap.
+   */
+  outputLimit?: { maxBytes: number };
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -128,8 +138,9 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
     let stopReason: TrialOutcome['stopReason'] = 'exited';
     const stop = (reason: TrialOutcome['stopReason']) => {
       if (stopReason === 'exited') stopReason = reason;
-      // A runaway writer gets no grace period: every second of it is more disk.
-      if (reason === 'disk_limit') void engine.kill(containerId).catch(() => {});
+      // A runaway writer gets no grace period: every second of it is more disk or memory.
+      if (reason === 'disk_limit' || reason === 'output_limit')
+        void engine.kill(containerId).catch(() => {});
       else void engine.stop(containerId, grace).catch(() => engine.kill(containerId));
     };
     const timer = setTimeout(() => stop('deadline'), options.deadlineMs);
@@ -157,7 +168,30 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
     watch();
 
     const lines = new LineSplitter(options.onStdoutLine);
-    const frames = new FrameDecoder((chunk) => lines.push(chunk), options.onStderr);
+    const maxOutput = options.outputLimit?.maxBytes;
+    let outputBytes = 0;
+    let overOutput = false;
+    /** Counts a stream's bytes against the output cap; past it, forwards nothing more. */
+    const counted =
+      (forward: (chunk: Buffer) => void) =>
+      (chunk: Buffer): void => {
+        if (maxOutput === undefined) return forward(chunk);
+        if (overOutput) return;
+        const room = maxOutput - outputBytes;
+        if (chunk.length <= room) {
+          outputBytes += chunk.length;
+          return forward(chunk);
+        }
+        if (room > 0) forward(chunk.subarray(0, room));
+        outputBytes = maxOutput;
+        overOutput = true;
+        limitDetail = `stdout and stderr passed ${maxOutput} bytes`;
+        stop('output_limit');
+      };
+    const frames = new FrameDecoder(
+      counted((chunk) => lines.push(chunk)),
+      counted(options.onStderr),
+    );
     const logs = engine.logs(containerId);
     const drained = logs.then(async (stream) => {
       for await (const chunk of stream) frames.push(chunk as Buffer);

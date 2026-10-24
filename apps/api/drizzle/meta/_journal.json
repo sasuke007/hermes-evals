@@ -15,6 +15,20 @@
       "when": 1792777697006,
       "tag": "0001_integrity_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792833200174,
+      "tag": "0002_phase1_definitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792848513259,
+      "tag": "0003_phase1_worker_slots",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,15 @@
+
+  Testing 'odd'...
+  Transport: stdio → /opt/hermes/.venv/bin/python
+  Auth: none
+  ✓ Connected (1114ms)
+  ✓ Tools discovered: 4
+
+    a_very_long_tool_name_that_goes_past_the_column_width First line of a docstring.
+
+Args:
+    x: a number that ...
+    no_description                       
+    unicode_desc                         Ünïcödé — and a tab	here and    many   spaces
+    dotted.name-with-dash                short
+

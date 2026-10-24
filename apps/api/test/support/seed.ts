@@ -75,11 +75,21 @@ const VERIFICATION: VerificationEntry[] = [
   { key: 'answer', type: 'json_match', primary: true, params: { path: 'duplicates' } },
 ];
 
+const TASK_YAML = `summary: Find invoices billed twice
+limits: { max_turns: 20, run_budget_seconds: 300, toolsets_needed: [file] }
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: duplicates }
+`;
+
 export async function seedExperiment(db: TestDb) {
   const [suite] = await db
     .insert(suites)
     .values({
       sourcePath: 'invoices-v1',
+      versionNumber: 1,
       name: 'invoices-v1',
       versionLabel: '1',
       contentHash: sha('suite v1'),
@@ -99,6 +109,8 @@ export async function seedExperiment(db: TestDb) {
     .values({
       suiteId: suite!.id,
       key: 'dup_invoices',
+      versionNumber: 1,
+      introducedInSuiteId: suite!.id,
       position: 0,
       summary: 'Find invoices billed twice',
       prompt: 'Find duplicates. Reply with a fenced JSON block.',
@@ -106,6 +118,7 @@ export async function seedExperiment(db: TestDb) {
       // A JSON string that looks like a number: must read back as a string.
       reference: '1042',
       verification: VERIFICATION,
+      taskYaml: TASK_YAML,
       selfCheck: SELF_CHECK,
       valid: true,
       contentHash: sha('task dup_invoices'),
@@ -149,6 +162,7 @@ export async function seedExperiment(db: TestDb) {
     .values({
       hostname: 'worker-1',
       concurrency: 3,
+      slots: 4,
       hermesVersion: '0.22.4',
       hermesRevision: HERMES_REVISION,
       toolsets: ['file', 'terminal', 'web'],

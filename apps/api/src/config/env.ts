@@ -7,6 +7,12 @@ import { z } from 'zod';
 export const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
+  /**
+   * Interface the API listens on. Loopback by default, so `pnpm dev` is not
+   * reachable from the network; Compose sets 0.0.0.0 for nginx and the
+   * published port.
+   */
+  HOST: z.string().min(1).default('127.0.0.1'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   /** Postgres connection string. Optional so the API can boot and report "unavailable". */
   DATABASE_URL: z.string().url().optional(),
@@ -36,6 +42,23 @@ export const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  /**
+   * More host names the API answers, comma-separated, beside loopback, `api`
+   * and CORS_ORIGIN's host (common/host-allowlist.ts): for a machine name or
+   * address the web app is opened by. Any other Host is refused.
+   */
+  ALLOWED_HOSTS: z.string().optional(),
+  /**
+   * How long POST /suites/reload waits for the worker's load-suites job. At
+   * most the job's own expiry (900 s); the load goes on after a timeout.
+   */
+  SUITE_RELOAD_TIMEOUT_S: z.coerce.number().int().min(1).max(900).default(180),
+  /** How long an MCP "Test start" waits for its test-mcp-server job; at most its expiry (300 s). */
+  MCP_TEST_TIMEOUT_S: z.coerce.number().int().min(1).max(300).default(120),
+  /** Model price table (plan 7.2). The file may not exist; then no model has a price. */
+  PRICES_FILE: z.string().default('./config/prices.yaml'),
+  /** How long a validated skill upload waits for its confirm before it is discarded. */
+  SKILL_UPLOAD_TTL_S: z.coerce.number().int().min(60).max(86_400).default(1800),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

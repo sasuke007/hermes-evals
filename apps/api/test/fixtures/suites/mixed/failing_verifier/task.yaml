@@ -1,0 +1,12 @@
+summary: A verifier that rejects the reference answer
+limits:
+  max_turns: 5
+  run_budget_seconds: 60
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  - key: check
+    type: verifier_script
+    primary: true
+    params: { script: check.py }

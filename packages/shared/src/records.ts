@@ -89,6 +89,7 @@ export const SelfCheckResultSchema = z.object({
   stdout_tail: z.string().optional(),
   stderr_tail: z.string().optional(),
 });
+export type SelfCheckResult = z.infer<typeof SelfCheckResultSchema>;
 
 export const SelfCheckSchema = z.object({
   /** `skipped` when the task has load errors, so no check could run. */
@@ -112,6 +113,12 @@ export const LoadIssueSchema = z.object({
     'params_invalid',
     'file_missing',
     'prompt_no_fenced_json',
+    /** reference.json is missing or is not valid JSON. */
+    'reference_invalid',
+    /** A symlink, special file or oversized file in the task folder; never read. */
+    'unsafe_file',
+    /** A check that cannot be self-checked as declared, e.g. file_check without an expected workspace. */
+    'self_check_unsupported',
   ]),
   /** Verification key the issue belongs to, when it belongs to one. */
   key: z.string().optional(),
@@ -134,6 +141,8 @@ export type SuiteLoadError = z.infer<typeof SuiteLoadErrorSchema>;
 export const SuiteChangesSchema = z.object({
   added: z.array(z.string()),
   removed: z.array(z.string()),
+  /** Tasks present in both versions whose own content hash differs. */
+  changed: z.array(z.string()),
   now_invalid: z.array(z.string()),
   now_valid: z.array(z.string()),
 });
@@ -144,6 +153,21 @@ export type SuiteChanges = z.infer<typeof SuiteChangesSchema>;
 // ---------------------------------------------------------------------------
 
 const McpToolSchema = z.object({ name: z.string(), description: z.string().optional() });
+
+/** An environment variable name, as MCP definitions and configurations reference secrets. */
+export const ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+
+/**
+ * One header of an http MCP server: the header name and the environment
+ * variable that holds its value. Egress reads the value from its own
+ * environment and adds the header on the way to the server (plan 5.3);
+ * the value never enters a trial.
+ */
+export const McpHeaderSchema = z.object({
+  header: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
+  env: z.string().regex(ENV_NAME_PATTERN),
+});
+export type McpHeader = z.infer<typeof McpHeaderSchema>;
 
 /** Result of the last "Test start" of one MCP server version. Never holds secret values. */
 export const McpTestStateSchema = z.discriminatedUnion('status', [
@@ -165,7 +189,7 @@ export const McpTestStateSchema = z.discriminatedUnion('status', [
     started_ms: count.optional(),
     error: z.string(),
     stderr_tail: z.string().optional(),
-    /** Env or header names the worker environment lacks. Names only. */
+    /** Env or header variable names the worker (stdio) or egress (http) lacks. Names only. */
     missing_secret_names: z.array(z.string()),
   }),
 ]);

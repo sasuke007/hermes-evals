@@ -1,0 +1,13 @@
+summary: Sum the amounts
+limits:
+  max_turns: 10
+  run_budget_seconds: 120
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: total
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { abs: 0.01 }

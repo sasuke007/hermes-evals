@@ -9,3 +9,5 @@ coverage/
 .DS_Store
 /data/
 *.tsbuildinfo
+# Temporary suite directories scripts/phase1-smoke.sh creates (and removes)
+/suites/zz-smoke-*/

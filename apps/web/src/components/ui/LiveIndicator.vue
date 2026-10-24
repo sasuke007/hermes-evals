@@ -80,13 +80,7 @@ const text = computed(() => {
 
 <template>
   <span v-if="!hidden" class="live" :class="`live-${state}`" role="status" :data-state="state">
-    <svg
-      v-if="state === 'finished'"
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-    >
+    <svg v-if="state === 'finished'" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
       <path
         d="M2 6.5l2.5 2.5L10 3.5"
         fill="none"

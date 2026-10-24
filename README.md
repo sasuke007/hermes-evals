@@ -25,6 +25,19 @@ Model access, once:
 - **Nous Portal, reusing this machine's Hermes login** (development): run `hermes proxy start --provider nous` on the host and set `NOUS_HOST_PROXY=host.docker.internal:8645` in `.env`. Nothing is copied: the host proxy keeps the login, and egress forwards to it from its own loopback. Any container in the Docker VM can reach that host proxy, so use this only on a machine you trust.
 - **OpenRouter** (API key): set `OPENROUTER_API_KEY` in `.env`.
 
+MCP server secrets also go in `.env`, by the env name the server definition lists: a stdio server's values are read by the worker, an http server's header values by egress. The database and the UI only ever see the names. The sample stdio server needs `INVOICE_DB_URL` (see `.env.example`).
+
+The API has no login, so every POST, PUT and DELETE must carry an `X-Requested-With` header and a JSON or multipart body; another site open in the browser cannot send those. The web app and the "Try it out" button at `/api/docs` add them.
+
+Check a running stack end to end (suites and their versioning, skills, documents, MCP servers and "Test start", secrets, configurations, system), one PASS/FAIL line per step:
+
+```bash
+scripts/phase1-smoke.sh                            # curl and python3; BASE_URL defaults to http://localhost:3000/api
+EXPECT_INVOICE_DB_URL=set scripts/phase1-smoke.sh  # the worker has INVOICE_DB_URL: the invoice-db test must pass
+```
+
+It writes to the stack it checks, so use a development stack: skills, documents, MCP servers and configurations named `smoke-<timestamp>-…`, and a temporary suite directory `suites/zz-smoke-<timestamp>` that it deletes again, which the suite list then keeps showing as "Missing from disk".
+
 ## How a trial is isolated
 
 Every trial runs Hermes in its own container, started from the pinned `nousresearch/hermes-agent:v0.22.4` image. The container sees only that attempt's home and workspace, runs as an unprivileged user on a read-only image, and sits on an internal network whose only reachable host is `egress`. Egress refuses every private, loopback, host and Docker address, and forwards model calls with the real credential, which never enters the trial. Only `docker-guard` holds the Docker socket, and it lets the worker start nothing but such containers.
@@ -46,16 +59,18 @@ docker compose exec worker node dist/sandbox-cli.js task /data/suites/invoices-v
 
 ## Local development
 
-Requires Node 22+ and pnpm 11 (`corepack enable`). Postgres can come from `docker compose up postgres`.
+Requires Node 22+ and pnpm 11 (`corepack enable`), and python3 for the API tests (verifier self-checks run it, as the worker image does; the test run stops at once without it). Postgres can come from `docker compose up postgres`.
 
 ```bash
 pnpm install
 pnpm dev            # shared (tsc --watch), api (nest --watch), web (vite) via Turbo
-pnpm --filter @hermes-evals/api dev:worker   # the worker, in a second terminal
+pnpm --filter @hermes-evals/api dev:worker   # the worker, in a second terminal: loads suites, tests MCP servers
 ```
 
-- Web dev server: http://localhost:5173 (proxies `/api` to the API on :3000)
-- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` run across all packages in dependency order.
+- Web dev server: http://localhost:5173 (proxies `/api` to the API on :3000). The API listens on 127.0.0.1 (`HOST`) and answers only the host names it is reached by: loopback, `api`, the host of `CORS_ORIGIN` and any in `ALLOWED_HOSTS` (comma-separated). To open the Compose web app by another name, add it to `ALLOWED_HOSTS` and to `server_name` in docker/nginx.conf.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` run across all packages in dependency order. `pnpm test` runs the unit tests and the integration tests on PGlite (real migrations and triggers, in process).
+- Postgres 17 end-to-end tests, including the whole API and worker on a fresh database: `TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e` against a throwaway server (`docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine`). Each spec creates and drops its own database; never point it at the Compose database.
+- Tests that start real trial containers run only with `RUN_SANDBOX_TESTS=1` and a docker-guard socket (`DOCKER_SOCKET`, `TRIALS_DIR`, `TRIAL_IMAGE`, `TRIAL_VOLUME`); Turbo passes these through and keys its cache on them.
 
 ## Layout
 
@@ -65,7 +80,7 @@ apps/docker-guard The only holder of the Docker socket: a filtered Docker API fo
 apps/egress       The trials' only way out: forward proxy, model gateway, scripted mock model
 apps/web          Vue 3 + Vite + Pinia + vue-router
 packages/shared   Domain types, zod schemas, API contracts used by both apps
-suites/           Task suites loaded by the API (read-only in the UI)
+suites/           Task suites, loaded by the worker at start and on POST /api/suites/reload (read-only in the UI)
 docker/           Dockerfiles: api, worker, web, trial (pinned Hermes image), node services; nginx config
 ```
 

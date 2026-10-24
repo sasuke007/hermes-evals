@@ -47,12 +47,15 @@ services:
     environment:
       NODE_ENV: production
       PORT: '3000'
+      # All interfaces inside the container, for nginx and the published
+      # port (itself bound to loopback on the host).
+      HOST: 0.0.0.0
       DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
-      SUITES_DIR: /data/suites
       DATA_DIR: /data
       CORS_ORIGIN: http://localhost:8080
+    # No suites mount: the worker loads suites (verifiers are user code) and
+    # the API serves what it stored, from Postgres and the blobs in evaldata.
     volumes:
-      - ./suites:/data/suites:ro
       - evaldata:/data
     ports:
       - '127.0.0.1:3000:3000'
@@ -74,6 +77,11 @@ services:
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
+    # stdio MCP env values (and provider keys for the LLM judge) come from .env;
+    # the worker records only their names on its workers row.
+    env_file:
+      - path: .env
+        required: false
     environment:
       <<: *trial-settings
       NODE_ENV: production
@@ -85,6 +93,8 @@ services:
       DOCKER_SOCKET: /run/guard/docker.sock
       EGRESS_ADMIN_SOCKET: /run/egress/admin.sock
       TRIAL_SLOTS: hermes-evals-trial-0,hermes-evals-trial-1,hermes-evals-trial-2,hermes-evals-trial-3
+    # Suites load here, at every start and on POST /suites/reload; read-only,
+    # the loader never writes to them.
     volumes:
       - ./suites:/data/suites:ro
       - evaldata:/data

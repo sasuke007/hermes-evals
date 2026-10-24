@@ -1,0 +1,6 @@
+
+  Testing 'ghost'...
+  Transport: stdio → no-such-mcp-server
+  Auth: none
+  ✗ Connection failed (0.8s): missing executable 'no-such-mcp-server'
+  Install that command, or set mcp_servers.ghost.command in ~/./config.yaml to its full path.

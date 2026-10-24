@@ -1,8 +1,9 @@
 /**
  * Resource library fixtures: the skill invoice-method, the document
- * vendor-policy-v3.pdf, the MCP server invoice-db and its secret
- * INVOICE_DB_URL (UI design brief section 7; Resources artboards and the
- * Library states board).
+ * vendor-policy-v3.pdf, the stdio MCP server invoice-db with its secret
+ * INVOICE_DB_URL, and the http MCP server vendor-api with its header secret
+ * VENDOR_API_TOKEN (UI design brief section 7; Resources artboards, the
+ * Library states board and the secrets canvas).
  *
  * Scenarios handled here (see scenarios.ts): empty, upload-invalid,
  * upload-new-version, upload-same-version-different-hash, mcp-test-failed,
@@ -36,6 +37,8 @@ export const DOCUMENT_POLICY_HASH = sha('vendor-policy-v3.pdf', '3be7d1f0', '91a
 
 export const MCP_INVOICE_DB_ID = 'mcp_01JAYINVDB0';
 export const MCP_INVOICE_DB_V1_ID = 'mcpv_01JAYINVDB1';
+export const MCP_VENDOR_API_ID = 'mcp_01JBAVNDAPI0';
+export const MCP_VENDOR_API_V1_ID = 'mcpv_01JBAVNDAPI1';
 
 /** Configuration ids, duplicated here so resources can name what uses them without an import cycle. */
 export const CONFIG_IDS = {
@@ -280,14 +283,20 @@ export function documentUploadFixture(name: string, sizeBytes: number, type: str
 // MCP servers
 // ---------------------------------------------------------------------------
 
-const ALL_TOOLS = ['list_invoices', 'get_invoice', 'update_invoice', 'delete_invoice'];
+const INVOICE_DB_TOOLS = ['list_invoices', 'get_invoice', 'update_invoice', 'delete_invoice'];
+const VENDOR_API_TOOLS = ['lookup_vendor', 'list_vendors', 'get_vendor_terms'];
+
+/** The tools a fixture server lists: the http sample is vendor-api, any stdio one invoice-db. */
+function toolsOf(input: McpServerInput): string[] {
+  return input.transport === 'http' ? VENDOR_API_TOOLS : INVOICE_DB_TOOLS;
+}
 
 export const MCP_TEST_PASSED: McpTestView = {
   status: 'passed',
   requestedAt: at(22, '17:04:40'),
   finishedAt: at(22, '17:04:42'),
   startedMs: 1800,
-  tools: ALL_TOOLS.map((name) => ({
+  tools: INVOICE_DB_TOOLS.map((name) => ({
     name,
     description: null,
     included: name === 'list_invoices' || name === 'get_invoice',
@@ -313,7 +322,7 @@ export const MCP_INVOICE_DB_INPUT: McpServerInput = {
   args: ['invoice-db-mcp'],
   envNames: ['INVOICE_DB_URL'],
   url: null,
-  headerNames: [],
+  headers: [],
   include: ['list_invoices', 'get_invoice'],
   exclude: [],
   timeoutS: 30,
@@ -330,12 +339,57 @@ export const MCP_INVOICE_DB: McpServerRow = {
   lastTest: MCP_TEST_PASSED,
 };
 
+/**
+ * The http sample: egress adds the Authorization header from its own
+ * VENDOR_API_TOKEN, so the run never sees the value. No configuration uses it.
+ */
+export const MCP_VENDOR_API_INPUT: McpServerInput = {
+  name: 'vendor-api',
+  transport: 'http',
+  command: null,
+  args: [],
+  envNames: [],
+  url: 'https://vendor-api.example.com/mcp',
+  headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }],
+  include: [],
+  exclude: [],
+  timeoutS: 30,
+};
+
+export const MCP_VENDOR_API: McpServerRow = {
+  ...MCP_VENDOR_API_INPUT,
+  id: MCP_VENDOR_API_ID,
+  versionId: MCP_VENDOR_API_V1_ID,
+  version: 1,
+  definedAt: at(23, '10:12:44'),
+  frozen: false,
+  usedBy: [],
+  lastTest: {
+    status: 'passed',
+    requestedAt: at(23, '10:13:02'),
+    finishedAt: at(23, '10:13:03'),
+    startedMs: 900,
+    tools: VENDOR_API_TOOLS.map((name) => ({ name, description: null, included: true })),
+  },
+};
+
 export function mcpServersFixture(empty: boolean): McpServerRow[] {
-  return empty ? [] : [MCP_INVOICE_DB];
+  return empty ? [] : [MCP_INVOICE_DB, MCP_VENDOR_API];
 }
 
-/** Save: a new server gets version 1; editing a frozen one creates the next version. */
+/**
+ * Save: a new server gets version 1; editing a frozen one creates the next
+ * version; editing one no configuration uses changes it in place.
+ */
 export function mcpSaveFixture(input: McpServerInput, id?: string): McpServerRow {
+  if (id === MCP_VENDOR_API_ID) {
+    return {
+      ...MCP_VENDOR_API,
+      ...input,
+      definedAt: at(23, '15:49:30'),
+      lastTest: { status: 'untested' },
+    };
+  }
   if (id === MCP_INVOICE_DB_ID) {
     return {
       ...MCP_INVOICE_DB,
@@ -362,13 +416,14 @@ export function mcpSaveFixture(input: McpServerInput, id?: string): McpServerRow
 /** Test start: lists the tools the server exposes, marking which the filter includes. */
 export function mcpTestFixture(input: McpServerInput, failed: boolean): McpTestView {
   if (failed) return MCP_TEST_FAILED;
-  const include = input.include.length ? input.include : ALL_TOOLS;
+  const tools = toolsOf(input);
+  const include = input.include.length ? input.include : tools;
   return {
     status: 'passed',
     requestedAt: at(23, '15:47:03'),
     finishedAt: at(23, '15:47:05'),
     startedMs: 1800,
-    tools: ALL_TOOLS.map((name) => ({
+    tools: tools.map((name) => ({
       name,
       description: null,
       included: include.includes(name) && !input.exclude.includes(name),
@@ -380,21 +435,49 @@ export function mcpTestFixture(input: McpServerInput, failed: boolean): McpTestV
 // Secrets
 // ---------------------------------------------------------------------------
 
+/**
+ * One row per name referenced by an MCP server, sorted by name. `set` is
+ * INVOICE_DB_URL's presence in the worker; VENDOR_API_TOKEN is always set in egress.
+ */
 export function secretsFixture(options: { empty: boolean; set: boolean; checkedNow?: boolean }) {
   if (options.empty) return [] as SecretRow[];
-  const row: SecretRow = {
-    name: 'INVOICE_DB_URL',
-    set: options.set,
-    source: 'worker environment',
-    referencedBy: [{ kind: 'mcp_server', id: MCP_INVOICE_DB_ID, name: 'invoice-db', via: 'env' }],
+  const checked = {
     lastCheckedAt: options.checkedNow ? at(23, '15:50:02') : at(23, '15:02:00'),
     checkedWhen: options.checkedNow ? 'on request' : 'at worker start',
   };
-  return [row];
+  const rows: SecretRow[] = [
+    {
+      name: 'INVOICE_DB_URL',
+      set: options.set,
+      source: 'worker',
+      exposure: 'readable_by_agent',
+      referencedBy: [
+        { kind: 'mcp_server', id: MCP_INVOICE_DB_ID, name: 'invoice-db', via: 'env', header: null },
+      ],
+      ...checked,
+    },
+    {
+      name: 'VENDOR_API_TOKEN',
+      set: true,
+      source: 'egress',
+      exposure: 'egress_only',
+      referencedBy: [
+        {
+          kind: 'mcp_server',
+          id: MCP_VENDOR_API_ID,
+          name: 'vendor-api',
+          via: 'header',
+          header: 'Authorization',
+        },
+      ],
+      ...checked,
+    },
+  ];
+  return rows;
 }
 
 export function resourceCountsFixture(empty: boolean): ResourceCounts {
   return empty
     ? { skills: 0, documents: 0, mcpServers: 0, secrets: 0 }
-    : { skills: 1, documents: 1, mcpServers: 1, secrets: 1 };
+    : { skills: 1, documents: 1, mcpServers: 2, secrets: 2 };
 }

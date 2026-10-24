@@ -1,0 +1,4 @@
+name: complete
+version_label: '1.0'
+description: Every scorer type, each proven by its self-check.
+tasks: [numeric, json_unordered, exact, summary_file, answer_verifier]

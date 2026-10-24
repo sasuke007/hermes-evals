@@ -135,7 +135,12 @@ describe('migrations', () => {
       recorded.rows.map((r) => r.hash),
     );
     expect(migrationsInSync(report)).toBe(true);
-    expect(readMigrations().map((m) => m.tag)).toEqual(['0000_init', '0001_integrity_triggers']);
+    expect(readMigrations().map((m) => m.tag)).toEqual([
+      '0000_init',
+      '0001_integrity_triggers',
+      '0002_phase1_definitions',
+      '0003_phase1_worker_slots',
+    ]);
     const tables = await t.pg.query<{ table_name: string }>(
       "select table_name from information_schema.tables where table_schema = 'public' order by 1",
     );

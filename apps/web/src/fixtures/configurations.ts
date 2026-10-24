@@ -6,7 +6,7 @@
  *
  * Scenarios handled here (see scenarios.ts): empty.
  */
-import { PROVIDERS, type Provider } from '@hermes-evals/shared';
+import { CONFIG_FIELDS, PROVIDERS, type Provider } from '@hermes-evals/shared';
 import type {
   ConfigDiff,
   ConfigDiffRow,
@@ -21,11 +21,12 @@ import {
   CONFIG_IDS,
   DOCUMENT_POLICY,
   MCP_INVOICE_DB,
+  MCP_VENDOR_API,
   SKILL_INVOICE_METHOD,
 } from './resources';
 import { at, sha } from './suites';
 
-export { CONFIG_IDS };
+export { CONFIG_FIELDS, CONFIG_IDS };
 
 export type ConfigName = keyof typeof CONFIG_IDS;
 
@@ -198,19 +199,6 @@ export function fieldValue(c: ConfigurationVersion, field: ConfigField): string 
   }
 }
 
-export const CONFIG_FIELDS: ConfigField[] = [
-  'name',
-  'model',
-  'provider',
-  'toolsets',
-  'memory',
-  'skills',
-  'documents',
-  'mcp_servers',
-  'max_turns',
-  'time_budget_s',
-];
-
 /** ConfigDiffTable data: the first column is the reference. */
 export function configDiffFixture(versions: ConfigurationVersion[]): ConfigDiff {
   const rows: ConfigDiffRow[] = CONFIG_FIELDS.map((field) => {
@@ -249,11 +237,27 @@ export function formOptionsFixture(empty: boolean): ConfigurationFormOptions {
             typeLabel: '214 KB',
           },
         ],
-    mcpServers: empty ? [] : [{ ...mcpRef, endpoint: 'npx invoice-db-mcp' }],
+    mcpServers: empty
+      ? []
+      : [
+          { ...mcpRef, endpoint: 'npx invoice-db-mcp', latest: true },
+          {
+            mcpServerId: MCP_VENDOR_API.id,
+            versionId: MCP_VENDOR_API.versionId,
+            name: MCP_VENDOR_API.name,
+            version: MCP_VENDOR_API.version,
+            transport: MCP_VENDOR_API.transport,
+            endpoint: MCP_VENDOR_API.url ?? '',
+            latest: true,
+          },
+        ],
   };
 }
 
-function inputFrom(c: ConfigurationVersion): ConfigurationInput {
+function inputFrom(
+  c: ConfigurationVersion,
+  duplicatedFromVersionId: string | null,
+): ConfigurationInput {
   return {
     name: c.name,
     model: c.model,
@@ -266,6 +270,7 @@ function inputFrom(c: ConfigurationVersion): ConfigurationInput {
     mcpServerVersionIds: c.mcpServers.map((m) => m.versionId),
     maxTurns: c.maxTurns,
     timeBudgetS: c.timeBudgetS,
+    duplicatedFromVersionId,
   };
 }
 
@@ -281,7 +286,14 @@ export const NEW_CONFIGURATION_INPUT: ConfigurationInput = {
   mcpServerVersionIds: [],
   maxTurns: 20,
   timeBudgetS: 300,
+  duplicatedFromVersionId: null,
 };
+
+/** The version a configuration was duplicated from, or null. */
+function originOf(c: ConfigurationVersion): string | null {
+  const from = DUPLICATED_FROM[c.name as ConfigName];
+  return from ? CONFIG_VERSIONS[from].versionId : null;
+}
 
 /**
  * The form's starting point. Experiments that keep the current version are
@@ -301,12 +313,12 @@ export function draftFixture(
       experimentsKeepingVersion: [],
     };
   }
-  const values = inputFrom(source);
   if (mode === 'duplicate') {
     return {
       mode,
       source: versionRef(source),
-      values: { ...values, name: `${source.name}-copy` },
+      // A duplicate records where it came from; the copy's own origin does not carry over.
+      values: { ...inputFrom(source, source.versionId), name: `${source.name}-copy` },
       createsNewVersion: false,
       nextVersion: null,
       experimentsKeepingVersion: [],
@@ -316,7 +328,7 @@ export function draftFixture(
   return {
     mode,
     source: versionRef(source),
-    values,
+    values: inputFrom(source, originOf(source)),
     createsNewVersion: frozen,
     nextVersion: frozen ? source.version + 1 : null,
     experimentsKeepingVersion: [],

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launcher for the sample invoice-db stdio MCP server (docker/mcp/invoice-db).
+# A configuration names it as `command: invoice-db-mcp` with env INVOICE_DB_URL.
+exec /opt/hermes/.venv/bin/python /opt/mcp/invoice-db/server.py "$@"

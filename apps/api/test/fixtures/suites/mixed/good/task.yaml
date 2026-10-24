@@ -1,0 +1,12 @@
+summary: The answer is 42
+limits:
+  max_turns: 5
+  run_budget_seconds: 60
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: value
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true

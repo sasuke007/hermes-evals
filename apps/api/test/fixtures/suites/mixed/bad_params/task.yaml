@@ -1,0 +1,14 @@
+summary: Params the scorer does not accept
+limits:
+  max_turns: 5
+  run_budget_seconds: 60
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params:
+      path: ids
+      pass_at: 2

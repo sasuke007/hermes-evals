@@ -2,10 +2,11 @@
  * Model access (plan section 6.1): provider status and the Nous Portal device login.
  * Serves fixtures by default (src/fixtures/system.ts); VITE_API_MODE=live calls the API.
  * Only a user code, a link, an expiry and a state ever reach the browser; never a token.
+ * The state-changing calls go through liveSend, which adds the JSON body and the
+ * X-Requested-With header the API requires.
  */
-import { z } from 'zod';
-import { ApiError, apiGet } from './client';
-import { apiMode, FIXTURE_LATENCY_MS, fixture } from './source';
+import { apiGet } from './client';
+import { apiMode, FIXTURE_LATENCY_MS, fixture, liveSend } from './source';
 import {
   NousLoginSchema,
   ProvidersResponseSchema,
@@ -25,29 +26,6 @@ import {
 export type { LoginOutcome } from '@/fixtures/system';
 export { LOGIN_OUTCOMES } from '@/fixtures/system';
 
-/**
- * State-changing provider calls need a JSON body and X-Requested-With, so another site open in
- * the browser cannot log the user in or out (plan 6.1).
- */
-async function send<T>(
-  method: 'POST' | 'DELETE',
-  path: string,
-  schema: z.ZodType<T> | null,
-): Promise<T | undefined> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      'x-requested-with': 'hermes-evals-web',
-    },
-    body: '{}',
-  });
-  if (!res.ok) throw new ApiError(res.status, `${method} /api${path}`, (await res.text()).slice(0, 300));
-  if (!schema || res.status === 204) return undefined;
-  return schema.parse(await res.json());
-}
-
 /** GET /providers: every provider, how it authenticates, and its status. */
 export function listProviders(): Promise<ProviderInfo[]> {
   if (apiMode === 'live') return apiGet('/providers', ProvidersResponseSchema);
@@ -57,7 +35,7 @@ export function listProviders(): Promise<ProviderInfo[]> {
 /** POST /providers/nous/login: start a login; returns the code, the link and the expiry. */
 export async function startNousLogin(): Promise<NousLogin> {
   if (apiMode === 'live') {
-    return (await send('POST', '/providers/nous/login', NousLoginSchema)) as NousLogin;
+    return NousLoginSchema.parse(await liveSend<unknown>('POST', '/providers/nous/login'));
   }
   // "Requesting" is usually under a second; long enough here to be seen.
   return fixture(startNousLoginFixture, {
@@ -75,7 +53,7 @@ export function getNousLogin(): Promise<NousLogin> {
 /** DELETE /providers/nous/login: cancel a pending login. */
 export async function cancelNousLogin(): Promise<void> {
   if (apiMode === 'live') {
-    await send('DELETE', '/providers/nous/login', null);
+    await liveSend<unknown>('DELETE', '/providers/nous/login');
     return;
   }
   await fixture(cancelNousLoginFixture, { request: 'DELETE /api/providers/nous/login' });
@@ -84,7 +62,7 @@ export async function cancelNousLogin(): Promise<void> {
 /** POST /providers/nous/logout: disconnect (what `hermes logout --provider nous` does). */
 export async function logoutNous(): Promise<void> {
   if (apiMode === 'live') {
-    await send('POST', '/providers/nous/logout', null);
+    await liveSend<unknown>('POST', '/providers/nous/logout');
     return;
   }
   await fixture(logoutNousFixture, { request: 'POST /api/providers/nous/logout' });

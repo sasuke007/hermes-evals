@@ -8,5 +8,12 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    // Fails the run at once without python3 (verifiers), instead of skipping or misleading.
+    globalSetup: ['./test/support/require-python.ts'],
+    // Most specs boot PGlite and apply every migration, about a second alone
+    // but several when `pnpm test` runs every package at once; the 5 s
+    // default then fails tests that are only slow.
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
 });

@@ -13,14 +13,7 @@
 export type Tone = 'pass' | 'fail' | 'err' | 'ung' | 'run' | 'que';
 export type DotMode = 'solid' | 'hollow' | 'pulse' | 'square' | 'none';
 export type StatusKind =
-  | 'run'
-  | 'score'
-  | 'experiment'
-  | 'verdict'
-  | 'provider'
-  | 'pauseReason'
-  | 'sandbox'
-  | 'worker';
+  'run' | 'score' | 'experiment' | 'verdict' | 'provider' | 'pauseReason' | 'sandbox' | 'worker';
 
 export interface StatusTone {
   tone: Tone;
@@ -110,7 +103,10 @@ const ALIASES: Partial<Record<StatusKind, Record<string, string>>> = {
 };
 
 function normalise(value: string): string {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
 }
 
 export interface StatusToneOptions {

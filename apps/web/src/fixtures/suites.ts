@@ -24,6 +24,7 @@ import type {
   TaskFixtureFile,
   TaskSelfCheckView,
   TaskVersionEntry,
+  TextDiffLine,
   VerificationEntryView,
 } from '@/api/types/suites';
 
@@ -536,7 +537,8 @@ End your answer with a fenced JSON block of the form \`{"rows": 0}\` giving the 
           columns: ['vendor', 'outstanding'],
           row_count: 5,
         },
-        sentence: 'file_check: summary.csv exists with columns vendor, outstanding; 1 row per vendor',
+        sentence:
+          'file_check: summary.csv exists with columns vendor, outstanding; 1 row per vendor',
       },
       {
         key: 'answer',
@@ -753,9 +755,12 @@ function seedFor(state: SuiteState, suiteId: string): SuiteVersionSeed | null {
 }
 
 /** The newer suite version an older experiment's snapshot strip mentions, if any. */
-export function newerSuiteVersion(
-  state: SuiteState,
-): { suiteId: string; versionNumber: number; changedTasks: string[]; invalidTasks: string[] } | null {
+export function newerSuiteVersion(state: SuiteState): {
+  suiteId: string;
+  versionNumber: number;
+  changedTasks: string[];
+  invalidTasks: string[];
+} | null {
   if (state !== 'invalid-task' && state !== 'newer-version') return null;
   const seed = currentSeed(state);
   return {
@@ -1037,8 +1042,7 @@ export function taskDetailFixture(
   const version = taskVersion(suite, key);
   const invalid = suite.invalidTasks.includes(key);
   const ranAt = suite.versionNumber === 2 ? V2_LOADED_AT : V1_LAST_LOAD_AT;
-  const reference =
-    key === 'total_due' && version === 2 ? { total_due: 48526.05 } : seed.reference;
+  const reference = key === 'total_due' && version === 2 ? { total_due: 48526.05 } : seed.reference;
   return {
     suite: refFor(suite),
     key,
@@ -1144,7 +1148,7 @@ export function taskDiffFixture(
   }
   if (key === 'total_due') {
     const promptLines = seed.prompt.split('\n');
-    const prompt = promptLines.flatMap((line, i) => {
+    const prompt = promptLines.flatMap((line, i): TextDiffLine[] => {
       if (line.startsWith('An invoice is settled')) {
         return [
           { kind: 'removed' as const, text: line, oldLine: i + 1, newLine: null },
@@ -1193,4 +1197,18 @@ export function taskDiffFixture(
 /** Preview of a fixture file: invoices.csv is tabular; other files have none. */
 export function fixturePreviewFixture(path: string): TablePreview | null {
   return path === 'invoices.csv' ? INVOICES_PREVIEW : null;
+}
+
+/** The suite state the active scenarios select. */
+export function suiteStateFrom(active: (name: string) => boolean): SuiteState {
+  if (active('invalid-task')) return 'invalid-task';
+  if (active('reverted')) return 'reverted';
+  if (active('newer-version')) return 'newer-version';
+  if (active('reload-failed')) return 'reload-failed';
+  return 'v1';
+}
+
+/** True when the suites directory reads as empty (the `empty` scenario). */
+export function noSuitesFrom(active: (name: string) => boolean): boolean {
+  return active('empty');
 }

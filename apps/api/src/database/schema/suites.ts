@@ -36,6 +36,7 @@ import {
   isSha256,
   jsonValue,
   oneOf,
+  storableText,
   tstz,
 } from './_columns.js';
 import { blobs } from './blobs.js';
@@ -51,7 +52,15 @@ export const suites = pgTable(
     id: id(),
     /** Directory the version was loaded from; matches suite_sources.path. */
     sourcePath: text('source_path').notNull(),
+    /**
+     * v1, v2, ... per directory, assigned by the loader as the directory's
+     * highest number plus one (plan 4.5), so a version gets a new number even
+     * when the author forgets to change `version_label`. A reload that reuses
+     * an existing row (unchanged or reverted) reuses its number.
+     */
+    versionNumber: integer('version_number').notNull(),
     name: text('name').notNull(),
+    /** `version` from suite.yaml, the author's label; shown muted beside the number. */
     versionLabel: text('version_label').notNull(),
     description: text('description'),
     /** sha256 over suite.yaml and every file of every task, sorted by path. */
@@ -67,6 +76,9 @@ export const suites = pgTable(
     uniqueIndex('suites_source_hashes_uq').on(t.sourcePath, t.contentHash, t.checkHash),
     // Target of suite_sources' pointer, which must stay within its own directory.
     unique('suites_id_source_uq').on(t.id, t.sourcePath),
+    // Two loads racing on one directory cannot both take the next number.
+    uniqueIndex('suites_source_version_uq').on(t.sourcePath, t.versionNumber),
+    check('suites_version_number_ck', sql`${t.versionNumber} >= 1`),
     check('suites_content_hash_ck', isSha256(t.contentHash)),
     check('suites_check_hash_ck', isSha256(t.checkHash)),
     check('suites_counts_ck', sql`${t.validCount} >= 0 and ${t.validCount} <= ${t.taskCount}`),
@@ -129,11 +141,28 @@ export const tasks = pgTable(
       .references(() => suites.id),
     /** Folder name, unique within the suite. */
     key: text('key').notNull(),
+    /**
+     * v1, v2, ... per directory and task key. Goes up only when this task's
+     * own content hash changes, so editing one task leaves the others'
+     * numbers alone (plan 4.5).
+     */
+    versionNumber: integer('version_number').notNull(),
+    /**
+     * The suite version where this task content first appeared: this row's
+     * own suite when the content is new, an earlier version of the same
+     * directory when it is carried over unchanged.
+     */
+    introducedInSuiteId: text('introduced_in_suite_id').notNull(),
     /** Display order: suite.yaml `tasks` list first, then remaining keys sorted. */
     position: integer('position').notNull(),
     summary: text('summary'),
     /** prompt.md, exactly what the agent receives. */
     prompt: text('prompt'),
+    /**
+     * task.yaml exactly as read from disk, for version diffs and for showing
+     * each verification entry's YAML verbatim. Null when it could not be read.
+     */
+    taskYaml: storableText('task_yaml'),
     limits: jsonValue<TaskLimits>('limits'),
     /** reference.json. SQL NULL when missing; JSON null is stored as 'null'::jsonb. */
     reference: jsonValue<JsonValue>('reference'),
@@ -147,9 +176,15 @@ export const tasks = pgTable(
   },
   (t) => [
     uniqueIndex('tasks_suite_key_uq').on(t.suiteId, t.key),
+    foreignKey({
+      name: 'tasks_introduced_in_suite_fk',
+      columns: [t.introducedInSuiteId],
+      foreignColumns: [suites.id],
+    }),
     uniqueIndex('tasks_suite_position_uq').on(t.suiteId, t.position),
     check('tasks_key_ck', sql`${t.key} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]*$'`),
     check('tasks_position_ck', sql`${t.position} >= 0`),
+    check('tasks_version_number_ck', sql`${t.versionNumber} >= 1`),
     check('tasks_content_hash_ck', isSha256(t.contentHash)),
     check('tasks_invalid_reason_ck', sql`${t.valid} = (${t.invalidReason} is null)`),
     check(

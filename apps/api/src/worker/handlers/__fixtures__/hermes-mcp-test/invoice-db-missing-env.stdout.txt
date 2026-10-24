@@ -1,0 +1,6 @@
+
+  Testing 'invoice-db'...
+  Transport: stdio → invoice-db-mcp
+  Auth: none
+  ✗ Connection failed (9.2s): Connection closed
+  Check the server is running and the URL/command in its config, then run: hermes mcp test invoice-db

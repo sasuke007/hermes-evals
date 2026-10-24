@@ -123,7 +123,13 @@ defineExpose({ start, close: back });
   <div class="confirm-inline">
     <template v-if="!open">
       <slot name="trigger" :open="start">
-        <button v-if="triggerLabel" ref="triggerEl" type="button" :class="triggerClass" @click="start">
+        <button
+          v-if="triggerLabel"
+          ref="triggerEl"
+          type="button"
+          :class="triggerClass"
+          @click="start"
+        >
           {{ triggerLabel }}
         </button>
       </slot>

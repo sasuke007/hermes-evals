@@ -61,7 +61,18 @@ describe('ensureQueues', () => {
       deadLetter: QUEUES.evaluateRunDead,
     });
     expect(await boss.getQueue(QUEUES.evaluateRunDead)).toMatchObject({ policy: 'standard' });
-    expect(await boss.getQueue(QUEUES.testMcpServer)).toMatchObject({ policy: 'exclusive' });
+    expect(await boss.getQueue(QUEUES.testMcpServer)).toMatchObject({
+      policy: 'exclusive',
+      expireInSeconds: 300,
+      heartbeatSeconds: 30,
+    });
+    expect(await boss.getQueue(QUEUES.loadSuites)).toMatchObject({
+      policy: 'exclusive',
+      retryLimit: 0,
+      expireInSeconds: 900,
+      heartbeatSeconds: 30,
+      deleteAfterSeconds: 86_400,
+    });
   });
 
   it('re-applies settings to queues that already exist', async () => {

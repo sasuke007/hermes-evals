@@ -48,8 +48,8 @@ const text = computed(() => {
     @click="$emit('open')"
   >
     <span class="dot pulse tone-run" aria-hidden="true" />
-    <span>Waiting for Nous approval</span><span aria-hidden="true">·</span
-    ><span class="mono">{{ text }} left</span>
+    <span>Waiting for Nous approval</span>{{ ' ' }}<span aria-hidden="true">·</span>{{ ' '
+    }}<span class="mono">{{ text }} left</span>
   </button>
 </template>
 

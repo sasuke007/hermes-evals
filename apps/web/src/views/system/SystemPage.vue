@@ -1,4 +1,9 @@
 <script setup lang="ts">
+/**
+ * System page placeholder: the API health check (GET /api/health, the one
+ * endpoint that exists). The system builder replaces this page with model
+ * access, sandbox and workers.
+ */
 import { onMounted, ref } from 'vue';
 import type { HealthResponse } from '@hermes-evals/shared';
 import { getHealth } from '@/api/system';
@@ -29,6 +34,7 @@ const tone = (v: string): string => (v === 'ok' ? 'pass' : v === 'unavailable' ?
       <h1 class="page-title">System</h1>
       <button type="button" class="btn" :disabled="loading" @click="load">Refresh</button>
     </div>
+    <p class="t2">Model access, sandbox and workers are being built.</p>
     <div v-if="error" role="alert" class="panel alert">
       <b>Could not reach the API</b>
       <code>{{ error }}</code>
@@ -105,17 +111,5 @@ const tone = (v: string): string => (v === 'ok' ? 'pass' : v === 'unavailable' ?
   border-color: var(--fail);
   background: var(--fail-soft);
   max-width: 640px;
-}
-.tone-pass {
-  background: var(--pass-soft);
-  color: var(--pass-text);
-}
-.tone-fail {
-  background: var(--fail-soft);
-  color: var(--fail-text);
-}
-.tone-que {
-  background: var(--que-soft);
-  color: var(--que-text);
 }
 </style>

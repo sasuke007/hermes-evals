@@ -1,0 +1,9 @@
+invoice_no,vendor_name,invoice_date,due_date,amount,currency,po_number,status
+INV-1001,Acme Supplies,2026-09-01,2026-10-01,1250.00,EUR,PO-501,paid
+INV-1002,Acme Supplies,2026-09-15,2026-10-15,980.50,EUR,PO-502,open
+INV-1003,Borealis Logistics,2026-09-03,2026-10-03,4200.00,EUR,PO-503,open
+INV-1004,Borealis Logistics,2026-09-20,2026-10-20,310.75,EUR,,disputed
+INV-1005,Cobalt Software,2026-08-28,2026-09-27,7800.00,USD,PO-505,open
+INV-1006,Cobalt Software,2026-09-28,2026-10-28,7800.00,USD,PO-506,open
+INV-1007,Delta Print,2026-09-10,2026-10-10,145.20,EUR,PO-507,paid
+INV-1008,Delta Print,2026-10-02,2026-11-01,560.00,EUR,PO-999,open

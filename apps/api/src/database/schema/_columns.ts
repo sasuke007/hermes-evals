@@ -24,9 +24,10 @@ const VOCABULARY_VALUE = /^[a-z0-9_-]+$/;
  * CHECK expression `col in ('a', 'b', ...)` for a closed vocabulary from
  * @hermes-evals/shared. The values are inlined with sql.raw because a CHECK is
  * DDL: drizzle-kit would otherwise write `$1` placeholders into the migration.
- * Only compile-time constants may be passed; each value is validated.
+ * Only compile-time constants may be passed; each value is validated. `col`
+ * may also be an expression, such as a parenthesised `(doc ->> 'state')`.
  */
-export function oneOf(col: AnyPgColumn, values: readonly string[]): SQL {
+export function oneOf(col: AnyPgColumn | SQL, values: readonly string[]): SQL {
   for (const value of values) {
     if (!VOCABULARY_VALUE.test(value)) throw new Error(`unsafe vocabulary value: ${value}`);
   }

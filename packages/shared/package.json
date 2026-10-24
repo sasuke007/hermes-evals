@@ -17,11 +17,11 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint src/",
-    "test": "vitest run --passWithNoTests"
+    "lint": "oxlint src/ test/",
+    "test": "vitest run"
   },
   "dependencies": {
     "zod": "^4.6.7"

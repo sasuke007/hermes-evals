@@ -1,12 +1,27 @@
 /**
  * Things a configuration can give the agent: skills, documents and MCP servers.
- * Secrets have no table: MCP servers name the environment variables they need,
- * and values come from the worker's environment at run time.
+ * Secrets have no table: MCP servers name the environment variables they need.
+ * Values come from the worker's environment (stdio env) or from egress's
+ * (http headers) at run time, and are never stored (plan 5.3).
  */
 import { sql } from 'drizzle-orm';
 import { bigint, check, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
-import { MCP_TRANSPORTS, type McpTestState, type McpTransport } from '@hermes-evals/shared';
-import { createdAt, emptyTextArray, id, isSha256, jsonValue, oneOf, tstz } from './_columns.js';
+import {
+  MCP_TRANSPORTS,
+  type McpHeader,
+  type McpTestState,
+  type McpTransport,
+} from '@hermes-evals/shared';
+import {
+  createdAt,
+  emptyJsonArray,
+  emptyTextArray,
+  id,
+  isSha256,
+  jsonValue,
+  oneOf,
+  tstz,
+} from './_columns.js';
 import { blobs } from './blobs.js';
 
 /**
@@ -87,7 +102,15 @@ export const mcpServers = pgTable(
  * rows, so a definition is frozen once a configuration uses it; editing a
  * frozen definition creates the next version. Env and header entries are
  * variable names only, never values.
+ *
+ * jsonpath for mcp_server_versions_headers_ck: an entry that is not
+ * `{ header, env }` with both strings in the shapes McpHeaderSchema accepts.
+ * The check refuses the row when any entry matches.
  */
+const BAD_HEADER_ENTRY =
+  '$[*] ? (!(@.header.type() == "string" && @.env.type() == "string"' +
+  ' && @.header like_regex "^[A-Za-z0-9-]{1,64}$" && @.env like_regex "^[A-Z_][A-Z0-9_]*$"))';
+
 export const mcpServerVersions = pgTable(
   'mcp_server_versions',
   {
@@ -105,8 +128,13 @@ export const mcpServerVersions = pgTable(
     envNames: text('env_names').array().notNull().default(emptyTextArray),
     /** http: a server the user hosts. */
     url: text('url'),
-    /** http: names of worker environment variables sent as headers. */
-    headerNames: text('header_names').array().notNull().default(emptyTextArray),
+    /**
+     * http: header name and the egress environment variable holding its
+     * value, e.g. `{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }`.
+     * Egress adds the header on the way to the server; the value never
+     * enters a trial (plan 5.3).
+     */
+    headers: jsonValue<McpHeader[]>('headers').notNull().default(emptyJsonArray),
     /** Tool allow and deny lists passed to Hermes. */
     include: text('include').array().notNull().default(emptyTextArray),
     exclude: text('exclude').array().notNull().default(emptyTextArray),
@@ -125,10 +153,17 @@ export const mcpServerVersions = pgTable(
     uniqueIndex('mcp_server_versions_server_version_uq').on(t.mcpServerId, t.version),
     check('mcp_server_versions_version_ck', sql`${t.version} >= 1`),
     check('mcp_server_versions_transport_ck', oneOf(t.transport, MCP_TRANSPORTS)),
+    // stdio: a command, args and env names, no headers. http: a URL and
+    // headers, nothing to spawn. `= '[]'` rather than jsonb_array_length,
+    // which raises instead of failing the check when headers is not an array.
     check(
       'mcp_server_versions_shape_ck',
-      sql`(${t.transport} = 'stdio' and ${t.command} is not null and ${t.command} <> '' and ${t.url} is null and cardinality(${t.headerNames}) = 0)
+      sql`(${t.transport} = 'stdio' and ${t.command} is not null and ${t.command} <> '' and ${t.url} is null and ${t.headers} = '[]'::jsonb)
        or (${t.transport} = 'http' and ${t.url} is not null and ${t.command} is null and cardinality(${t.args}) = 0 and cardinality(${t.envNames}) = 0)`,
+    ),
+    check(
+      'mcp_server_versions_headers_ck',
+      sql`jsonb_typeof(${t.headers}) = 'array' and not jsonb_path_exists(${t.headers}, ${sql.raw(`'${BAD_HEADER_ENTRY}'`)})`,
     ),
     // http(s) only, and no user:password@ in the URL.
     check(

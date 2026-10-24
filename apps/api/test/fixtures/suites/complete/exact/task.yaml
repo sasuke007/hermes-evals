@@ -1,0 +1,16 @@
+summary: Name the currency
+limits:
+  max_turns: 5
+  run_budget_seconds: 60
+  toolsets_needed: []
+answer:
+  format: fenced_json
+  path: code
+verification:
+  - key: answer
+    type: exact_match
+    primary: true
+    params: { case_sensitive: false }
+  - key: method
+    type: llm_judge
+    params: { rubric: rubric.md, pass_at: 0.8 }

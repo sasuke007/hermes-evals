@@ -3,7 +3,7 @@ import net from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAdminServer } from '../src/admin.js';
 import { createGatewayServer } from '../src/gateway.js';
 import { createProxyServer } from '../src/proxy.js';
@@ -183,8 +183,15 @@ describe('forward proxy', () => {
   it('tunnels to an allowed public host and logs it', async () => {
     const result = await tunnel('example.com:443', basic(ATTEMPT, TOKEN));
     expect(result).toEqual({ status: 200, echoed: 'ping' });
-    await new Promise((r) => setTimeout(r, 20));
-    const entry = registry.get(ATTEMPT)!.log.find((e) => e.decision === 'allowed');
+    // The entry is written as the tunnel closes; under load that can trail the echo.
+    const entry = await vi.waitFor(
+      () => {
+        const found = registry.get(ATTEMPT)!.log.find((e) => e.decision === 'allowed');
+        if (!found) throw new Error('no allowed entry yet');
+        return found;
+      },
+      { timeout: 2000, interval: 10 },
+    );
     expect(entry).toMatchObject({
       kind: 'connect',
       host: 'example.com',

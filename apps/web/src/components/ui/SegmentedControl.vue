@@ -13,6 +13,11 @@ withDefaults(
   { size: 'sm' },
 );
 const model = defineModel<T>({ required: true });
+
+const textOf = (option: SegmentOption<T>): string =>
+  option.count === null || option.count === undefined
+    ? option.label
+    : `${option.label} ${option.count}`;
 </script>
 
 <template>
@@ -24,10 +29,7 @@ const model = defineModel<T>({ required: true });
       :aria-pressed="option.value === model ? 'true' : 'false'"
       @click="model = option.value"
     >
-      {{ option.label
-      }}<template v-if="option.count !== null && option.count !== undefined">
-        {{ option.count }}</template
-      >
+      {{ textOf(option) }}
     </button>
   </div>
 </template>

@@ -124,7 +124,10 @@ export const useProvidersStore = defineStore('providers', () => {
 
   /** Nous status with the live login applied (waiting while a code is out, then its outcome). */
   const nousStatus = computed<NousStatus>(
-    () => STATUS_OF_PHASE[loginPhase.value] ?? nous.value?.status ?? 'not_connected',
+    () =>
+      STATUS_OF_PHASE[loginPhase.value] ??
+      (nous.value?.status as NousStatus | undefined) ??
+      'not_connected',
   );
   const nousConnected = computed(
     () => nousStatus.value === 'connected' || nousStatus.value === 'host',
@@ -296,8 +299,7 @@ export const useProvidersStore = defineStore('providers', () => {
     followUpHandler = onFollowUp ?? null;
     dialogOpen.value = true;
     if (loginPhase.value === 'waiting' || loginPhase.value === 'requesting') return;
-    reconnecting.value =
-      from === 'paused-experiment' || nous.value?.status === 'relogin_required';
+    reconnecting.value = from === 'paused-experiment' || nous.value?.status === 'relogin_required';
     if (nousConnected.value) {
       // Already connected (a stale page): offer the follow-up straight away.
       loginPhase.value = 'connected';
