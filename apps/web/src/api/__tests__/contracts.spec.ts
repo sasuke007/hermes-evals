@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z, type ZodType } from 'zod';
 import {
+  BulkRescoreResultSchema,
   BulkRunActionInputSchema,
   BulkRunActionResultSchema,
   COMPARISON_FILTERS,
@@ -37,6 +38,7 @@ import {
   ResourceCountsSchema,
   ResumeExperimentInputSchema,
   RUN_SORT_KEYS,
+  RescoreRunResultSchema,
   RunActionResultSchema,
   RunDetailSchema,
   RunEventsPageSchema,
@@ -125,6 +127,7 @@ import {
   retryRun,
   retryRuns,
 } from '@/api/runs';
+import { rescoreRunFixture } from '@/fixtures/runs';
 import {
   getFixturePreview,
   getSuite,
@@ -452,7 +455,13 @@ describe('fixtures conform to the shared contracts', { timeout: 120_000 }, () =>
         const runIds = all.rows.map((r) => r.id);
         conforms(BulkRunActionInputSchema, { runIds }, label('the bulk body'));
         const rescored = await rescoreRuns(experiment.id, runIds);
-        conforms(BulkRunActionResultSchema, rescored, label('POST /experiments/:id/runs/rescore'));
+        conforms(BulkRescoreResultSchema, rescored, label('POST /experiments/:id/runs/rescore'));
+        for (const row of all.rows.filter((r) => r.status === 'scored').slice(0, 3)) {
+          for (const joined of [false, true]) {
+            const single = rescoreRunFixture(row.id, joined);
+            conforms(RescoreRunResultSchema, single, label(`POST /runs/${row.id}/rescore`));
+          }
+        }
         const retried = await retryRuns(experiment.id, runIds);
         conforms(BulkRunActionResultSchema, retried, label('POST /experiments/:id/runs/retry'));
       }

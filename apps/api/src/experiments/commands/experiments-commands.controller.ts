@@ -70,6 +70,13 @@ export class ExperimentsCommandsController {
   @ApiQuery({ name: 'tasks', type: Number, required: true, description: 'Selected task count' })
   @ApiQuery({ name: 'repetitions', type: Number, required: true })
   @ApiQuery({ name: 'concurrency', type: Number, required: true })
+  @ApiQuery({
+    name: 'budget',
+    type: Number,
+    required: false,
+    description:
+      "Time budget override in seconds (30 to 3600): replaces every configuration's per-run budget",
+  })
   @ApiJsonResponse(ExperimentEstimateViewSchema, {
     description: 'Runs, waves, duration and cost; history medians or the budget fallback',
   })

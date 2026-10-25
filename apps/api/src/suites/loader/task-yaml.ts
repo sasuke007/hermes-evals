@@ -7,7 +7,15 @@
  * - keys are unique (duplicate_key);
  * - every type is a known scorer (unknown_type, from the schema's enum);
  * - params validate against that type's strict schema (params_invalid), after
- *   `answer.path` is applied to an answer-type primary that names no path.
+ *   `answer.path` is applied to an answer-type primary that names no path;
+ * - the rules a schema cannot state (paramRuleIssues): a text_match pattern
+ *   must compile (params_invalid, with the compiler's reason), and a
+ *   trajectory_match `max_calls` beside `mode` is reported as unused (a
+ *   warning);
+ * - the checks' declared worst case fits one scoring pass
+ *   (scoring/scoring-time.ts, schema_invalid on `verification`): pg-boss
+ *   fails an evaluate-run job at its expiry, so a task that could outlast it
+ *   would be graded `error` on every run however correct its checks.
  *
  * Issue paths point into the file: `task.yaml#verification[1].params.path`,
  * with 0-based list indices. Messages end with the line they refer to.
@@ -18,11 +26,14 @@ import {
   TaskYamlSchema,
   VerificationYamlSchema,
   type LoadIssue,
+  type ScorerParams,
   type ScorerType,
   type TaskYaml,
   type VerificationEntry,
 } from '@hermes-evals/shared';
 import { isAnswerScorerType, parseScorerParams } from '../../scoring/registry.js';
+import { scoringTimeProblem, type TimedKey } from '../../scoring/scoring-time.js';
+import { compileTextPattern } from '../../scoring/text-match.js';
 import { TASK_YAML } from './limits.js';
 import { formatPath, issueTarget, positionOf } from './yaml-source.js';
 
@@ -135,23 +146,30 @@ export function checkTaskYaml(
       : undefined;
   const verification: VerificationEntry[] = [];
   const indices: number[] = [];
+  const timed: TimedKey[] = [];
   rawEntries.forEach((entry, index) => {
     if (!isRecord(entry) || !isScorerType(entry.type)) return;
     const written = entry.params === undefined ? {} : entry.params;
     if (!isRecord(written)) return; // the schema reported it
     const params = withAnswerPath(entry.type, entry.primary === true, written, answerPath);
     const result = parseScorerParams(entry.type, params);
-    if (!result.success) {
-      for (const issue of result.error.issues) {
-        const target = ['verification', index, 'params', ...issueTarget(issue)];
-        issues.push({
-          severity: 'error',
-          code: 'params_invalid',
-          ...(keyOf(index) !== undefined ? { key: keyOf(index) } : {}),
-          path: at(target),
-          message: `${keyOf(index) ?? `entry ${index}`}: ${formatPath(target.slice(2))}: ${issue.message}${lineOf(target)}`,
-        });
-      }
+    if (result.success) timed.push({ type: entry.type, params: result.data });
+    const problems = result.success
+      ? paramRuleIssues(entry.type, result.data)
+      : result.error.issues.map((issue) => ({
+          severity: 'error' as const,
+          path: issueTarget(issue),
+          message: issue.message,
+        }));
+    for (const problem of problems) {
+      const target = ['verification', index, 'params', ...problem.path];
+      issues.push({
+        severity: problem.severity,
+        code: 'params_invalid',
+        ...(keyOf(index) !== undefined ? { key: keyOf(index) } : {}),
+        path: at(target),
+        message: `${keyOf(index) ?? `entry ${index}`}: ${formatPath(target.slice(2))}: ${problem.message}${lineOf(target)}`,
+      });
     }
     const shaped = VerificationYamlSchema.safeParse(entry);
     if (shaped.success) {
@@ -164,6 +182,16 @@ export function checkTaskYaml(
       indices.push(index);
     }
   });
+
+  const tooSlow = scoringTimeProblem(timed);
+  if (tooSlow !== null) {
+    issues.push({
+      severity: 'error',
+      code: 'schema_invalid',
+      path: at(['verification']),
+      message: `${tooSlow}${lineOf(['verification'])}`,
+    });
+  }
 
   return { data: parsed.success ? parsed.data : null, verification, indices, issues };
 }
@@ -183,4 +211,41 @@ export function withAnswerPath(
     return params;
   }
   return { ...params, path: answerPath };
+}
+
+/** A problem with schema-valid params, at a path inside `params`. */
+export interface ParamRuleIssue {
+  severity: LoadIssue['severity'];
+  path: Path;
+  message: string;
+}
+
+/**
+ * Rules on params that already passed their type's schema:
+ * - text_match: the pattern must compile as the scorer compiles it, so an
+ *   invalid one is a load error with the compiler's reason ("The pattern is
+ *   not valid: unterminated group.") instead of an `error` on every run;
+ * - trajectory_match: with `mode`, the whole trajectory is compared against
+ *   `min_calls` calls and `max_calls` is not read, which is worth a warning
+ *   because an ignored setting changes what a run is graded on.
+ */
+export function paramRuleIssues(type: ScorerType, params: unknown): ParamRuleIssue[] {
+  if (type === 'text_match') {
+    const { pattern, case_sensitive } = params as ScorerParams<'text_match'>;
+    if (pattern === undefined) return [];
+    const compiled = compileTextPattern(pattern, case_sensitive);
+    return compiled.ok ? [] : [{ severity: 'error', path: ['pattern'], message: compiled.message }];
+  }
+  if (type === 'trajectory_match') {
+    const { mode, max_calls } = params as ScorerParams<'trajectory_match'>;
+    if (mode === undefined || max_calls === undefined) return [];
+    return [
+      {
+        severity: 'warning',
+        path: ['max_calls'],
+        message: `max_calls is not used with mode: ${mode}; the trajectory is compared with min_calls calls of the tool`,
+      },
+    ];
+  }
+  return [];
 }

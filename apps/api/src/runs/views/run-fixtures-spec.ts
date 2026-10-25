@@ -14,13 +14,30 @@ import type {
   Tokens,
   VerificationEntry,
 } from '@hermes-evals/shared';
+import type { ConfigService } from '@nestjs/config';
 import { HERMES_REVISION, sha } from '../../../test/support/seed.js';
+import type { Env } from '../../config/env.js';
 
 export const INVOICES_CSV = 'invoice_no,amount\nINV-1,10.00\nINV-2,20.00\n';
 export const SUMMARY_CSV = 'vendor,outstanding\nBrightline,6215.00\nKestrel,1486.65\n';
 export const REPORT_HTML = '<script>alert(1)</script>';
 export const MOCK_BASE_URL = 'http://mock-model:8090/v1';
 export const TRIAL_IMAGE = 'hermes-evals/trial:v0.22.4-4d04303';
+/** The platform judge the view specs run with: the mock model, as the live check sets it. */
+export const JUDGE_ENV = {
+  JUDGE_PROVIDER: 'custom',
+  JUDGE_MODEL: 'mock/scripted',
+  JUDGE_BASE_URL: MOCK_BASE_URL,
+} as const;
+
+/** The settings RunViewsService reads, as ConfigService hands them out (unset keys undefined). */
+export const viewsConfig = (
+  env: Partial<Record<keyof Env, unknown>> = JUDGE_ENV,
+): ConfigService<Env, true> =>
+  ({
+    get: (key: keyof Env) => (key === 'TRIAL_IMAGE' ? TRIAL_IMAGE : env[key]),
+  }) as unknown as ConfigService<Env, true>;
+
 /** What argv held for the token in a careless runner; it must never be shown. */
 export const LEAKED_TOKEN = 'tok_must_never_be_shown';
 

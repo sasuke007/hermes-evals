@@ -5,7 +5,8 @@
  * worker, with the task's folders materialised on disk.
  *
  * Per mode (registry.selfCheckModeFor):
- * - `answer`: reference.json scored as if it were the answer.
+ * - `answer`: reference.json scored as if it were the answer (text_match: the
+ *   reference's text must hold the phrases and the pattern).
  * - `script`: the verifier with reference.json against the fixtures.
  * - `workspace`: file_check or the verifier against the expected workspace
  *   (fixtures overlaid with `expected/`), which must pass; then, as a negative
@@ -126,7 +127,8 @@ export async function runSelfChecks(input: SelfCheckInput): Promise<SelfCheckRes
         continue;
       case 'numeric_tolerance':
       case 'json_match':
-      case 'exact_match': {
+      case 'exact_match':
+      case 'text_match': {
         const key = parsedEntry;
         const [result, ms] = await timed(async () => scoreReferenceAsAnswer(key, input.reference));
         results.push(toResult(entry, mode, result, ms));

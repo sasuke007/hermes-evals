@@ -3,14 +3,12 @@
  * whose 20 runs sit in every state (run-states-spec.ts), filtered and
  * sorted the way the Runs tab asks, through the shared query schema.
  */
-import type { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RunListQuerySchema, RunListResultSchema, type RunListResult } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
-import type { Env } from '../../config/env.js';
 import { RunViewsService } from './run-views.service.js';
 import { seedAllStates, type AllStates } from './run-states-spec.js';
-import { TRIAL_IMAGE } from './run-fixtures-spec.js';
+import { viewsConfig } from './run-fixtures-spec.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
@@ -21,8 +19,7 @@ let views: RunViewsService;
 beforeAll(async () => {
   t = await createTestDatabase();
   seed = await seedAllStates(t.db);
-  const config = { get: () => TRIAL_IMAGE } as unknown as ConfigService<Env, true>;
-  views = new RunViewsService(t.db, seed.store, config);
+  views = new RunViewsService(t.db, seed.store, viewsConfig());
 });
 
 afterAll(async () => {
@@ -93,6 +90,19 @@ describe('rows', () => {
       provider: 'custom',
       judgeKeys: ['method'],
       judgeProvider: 'custom',
+    });
+  });
+
+  it('names no judge provider when no judge model is configured', async () => {
+    const bare = new RunViewsService(t.db, seed.store, viewsConfig({}));
+    const result = await bare.list(
+      seed.experimentId,
+      RunListQuerySchema.parse({ task: 'total_due' }),
+    );
+    expect(RunListResultSchema.parse(result).rows[0]!.needs).toEqual({
+      provider: 'custom',
+      judgeKeys: ['method'],
+      judgeProvider: null,
     });
   });
 

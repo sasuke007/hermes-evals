@@ -11,6 +11,7 @@
  */
 import {
   ApiErrorBodySchema,
+  BulkRescoreResultSchema,
   BulkRunActionInputSchema,
   BulkRunActionResultSchema,
   ConfigDiffSchema,
@@ -37,6 +38,7 @@ import {
   NewExperimentOptionsSchema,
   NousLoginSchema,
   ProviderInfoSchema,
+  RescoreRunResultSchema,
   ResourceCountsSchema,
   ResumeExperimentInputSchema,
   RunActionResultSchema,
@@ -112,6 +114,8 @@ export const RESPONSE_SCHEMAS = {
   RunEventsPage: RunEventsPageSchema,
   RunActionResult: RunActionResultSchema,
   BulkRunActionResult: BulkRunActionResultSchema,
+  RescoreRunResult: RescoreRunResultSchema,
+  BulkRescoreResult: BulkRescoreResultSchema,
 } as const satisfies Record<string, ZodType>;
 
 /** Request bodies, by the name the documentation shows. */

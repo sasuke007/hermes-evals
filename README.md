@@ -28,7 +28,13 @@ Model access:
 - **API keys** (OpenRouter, the Nous API, OpenAI, Anthropic): set `OPENROUTER_API_KEY`, `NOUS_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`, then `docker compose up -d egress worker`.
 - **A custom OpenAI-compatible endpoint**: a configuration with provider `custom` and its base URL; egress sends `CUSTOM_API_KEY` from `.env` when it is set. A configuration on `custom` with base URL `http://mock-model:8090/v1` runs against the mock model (`docker compose --profile test up -d mock-model`) at no cost, which is how the platform is checked without a real model; `MOCK_SCRIPTS` in `.env` gives chosen prompts their own scripted answers.
 
-Model prices for cost and the spend guard come from `config/prices.yaml`; an experiment freezes it when it launches. A model it does not list is unpriced: its cost shows as unknown, never as zero.
+Model prices for cost and the spend guard come from `config/prices.yaml`; an experiment freezes it when it launches. A model it does not list is unpriced: its cost shows as unknown, never as zero. The model gateway serves one attempt at most `MODEL_TOKEN_CAP_PER_ATTEMPT` tokens (2,000,000 by default), then answers 429. Every call counts toward it: streamed calls are sent with `stream_options.include_usage` on, and a call that answers without reporting usage is charged an estimate from its size, so an agent calling the gateway itself cannot slip past the cap or the spend guard.
+
+Scoring and re-score:
+
+- The worker scores each executed run from its stored evidence, never by running Hermes again. A task's checks can be any of eight types: `numeric_tolerance`, `json_match`, `exact_match`, `text_match` (phrases and a regular expression looked for in the answer), `file_check`, `verifier_script`, `trajectory_match` (the agent's tool calls) and `llm_judge` (a rubric graded by a model).
+- The LLM judge's model is a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset); `JUDGE_BASE_URL` only for `custom`. All three are unset by default, so an `llm_judge` check without `model:` is graded `error` until they are set (`.env`, then `docker compose up -d api worker`). The judge's calls go through egress's admin socket like a trial's model calls: the worker holds no provider key, and each call is metered and priced into its score's evidence as grading cost, outside the spend guard. Launch and Re-score answer 409 while the judge's provider is not ready. To grade with the mock model: `JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1`.
+- Re-score (`POST /api/runs/:id/rescore`, or several runs at once with `POST /api/experiments/:id/runs/rescore`) grades a scored run again with the scorers as they are now, as a new evaluation generation. The run keeps its previous result until the new one publishes, and a second request while one is pending joins it.
 
 MCP server secrets also go in `.env`, by the env name the server definition lists: a stdio server's values are read by the worker, an http server's header values by egress, which adds them in its MCP gateway (`http://egress:8080/mcp/<name>`). The database and the UI only ever see the names. The sample stdio server needs `INVOICE_DB_URL` (see `.env.example`).
 
@@ -54,6 +60,17 @@ scripts/phase2-smoke.sh                            # curl and python3; BASE_URL 
 ```
 
 Its experiments, configurations and skill are named `smoke-<timestamp>-…`, and its suite directory `suites/zz-smoke-exec-<timestamp>` is deleted again at the end. Only `mock-model` reads `MOCK_SCRIPTS`; stop it afterwards with `docker compose --profile test rm -sf mock-model`.
+
+Check scoring live (Phase 3, about 2 minutes, nothing costs money): a temporary suite whose three tasks use all eight check types, two configurations that answer every check right and wrong (json_match 4 of 5 keys, text_match 1 of 3, no `read_file` for trajectory_match, the judge's low score), a reply without the JSON block (`ungradable` answer checks, `error` verifier and judge), the evidence behind each score, the judge's calls going through egress's admin socket to the mock model, no judge registration left and no credential in a score, event or launch record, then re-score: one run (generation 2 supersedes 1), a double request that collapses into one, a bulk re-score with a refusal, and the 409 while the judge's provider is not ready (the script recreates the api for that step with the judge on a provider without a key, then puts it back; `SMOKE_RESTART=0` skips it). The judge must point at the mock, and the mock needs both script files (the Phase 3 ones first):
+
+```bash
+MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase3-mock-scripts.json")) + json.load(open("scripts/phase2-mock-scripts.json"))))')" \
+JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
+  docker compose --profile test up -d
+scripts/phase3-smoke.sh                            # curl and python3; BASE_URL defaults to http://localhost:3000/api
+```
+
+Its configurations, skill and experiments are named `smoke-<timestamp>-…`, and its suite directory `suites/zz-smoke-score-<timestamp>` is deleted again at the end. Afterwards return to the normal configuration with `docker compose up -d` (from a shell without those variables) and `docker compose --profile test rm -sf mock-model`.
 
 ## How a trial is isolated
 
@@ -86,7 +103,7 @@ pnpm --filter @hermes-evals/api dev:worker   # the worker, in a second terminal:
 
 - Web dev server: http://localhost:5173 (proxies `/api` to the API on :3000). The API listens on 127.0.0.1 (`HOST`) and answers only the host names it is reached by: loopback, `api`, the host of `CORS_ORIGIN` and any in `ALLOWED_HOSTS` (comma-separated). To open the Compose web app by another name, add it to `ALLOWED_HOSTS` and to `server_name` in docker/nginx.conf.
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` run across all packages in dependency order. `pnpm test` runs the unit tests and the integration tests on PGlite (real migrations and triggers, in process).
-- Postgres 17 end-to-end tests, including the whole API and worker on a fresh database (`test/phase2.e2e-spec.ts` launches an experiment over HTTP and runs it to scored, with an in-process fake container engine that plays canned Hermes output): `TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e` against a throwaway server (`docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine`). Each spec creates and drops its own database; never point it at the Compose database. The suite stops at once without `TEST_DATABASE_URL` (every file would otherwise skip and read as green) or with port 5432, and runs four files at a time, which peaks at about 70 of the server's 100 connections.
+- Postgres 17 end-to-end tests, including the whole API and worker on a fresh database (`test/phase2.e2e-spec.ts` launches an experiment over HTTP and runs it to scored, with an in-process fake container engine that plays canned Hermes output; `test/phase3.e2e-spec.ts` scores all eight check types right and wrong, with the LLM judge behind a fake egress judge path, and re-scores): `TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e` against a throwaway server (`docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine`). Each spec creates and drops its own database; never point it at the Compose database. The suite stops at once without `TEST_DATABASE_URL` (every file would otherwise skip and read as green) or with port 5432, and runs four files at a time, which peaks at about 70 of the server's 100 connections.
 - Tests that start real trial containers run only with `RUN_SANDBOX_TESTS=1` and a docker-guard socket (`DOCKER_SOCKET`, `TRIALS_DIR`, `TRIAL_IMAGE`, `TRIAL_VOLUME`); Turbo passes these through and keys its cache on them.
 
 ## Layout

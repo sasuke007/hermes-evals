@@ -14,10 +14,17 @@ import {
   RUN_STATUSES,
   SCORE_STATUSES,
 } from '../status.js';
-import { ARTIFACT_ORIGINS, ARTIFACT_SKIP_REASONS, MCP_TRANSPORTS, SCORER_TYPES } from '../vocab.js';
+import {
+  ARTIFACT_ORIGINS,
+  ARTIFACT_SKIP_REASONS,
+  MCP_TRANSPORTS,
+  NETWORK_DECISIONS,
+  NETWORK_EVENT_KINDS,
+  SCORER_TYPES,
+} from '../vocab.js';
 import { countView, isoTimeView, rateView, secondsView, sha256View, usdView } from './common.js';
 import { ExperimentConfigRefSchema } from './experiments.js';
-import { RunModelNeedsSchema, TokenCountsSchema } from './runs.js';
+import { RunEvaluationViewSchema, RunModelNeedsSchema, TokenCountsSchema } from './runs.js';
 import { SuiteVersionRefSchema, TablePreviewSchema } from './suites.js';
 
 const executionErrorCategory = z.enum(EXECUTION_ERROR_CATEGORIES);
@@ -111,51 +118,91 @@ export const TIMELINE_EVENT_KINDS = [
 export const TimelineEventKindSchema = z.enum(TIMELINE_EVENT_KINDS);
 export type TimelineEventKind = z.infer<typeof TimelineEventKindSchema>;
 
-/** One row of EventTimeline and one tick of TimelineScrubber. */
-export const TimelineEventSchema = z.object({
-  seq,
-  kind: TimelineEventKindSchema,
-  /** `hermes-background` for Hermes's own requests (drawn neutral, tagged). */
-  origin: z.enum(['agent', 'hermes-background']),
-  /** Milliseconds since the attempt started; pages show "+00:04.2". */
-  atMs: countView,
-  title: z.string(),
-  /** MCP server name when the tool comes from one (drawn with its prefix tag). */
+/**
+ * One entry of egress's connection log, as a timeline row shows it
+ * (NetworkEventPayloadSchema in records.ts; Phase 2 question 4): a model
+ * call, an MCP gateway call, a CONNECT tunnel or a plain-HTTP request.
+ * Fields the log does not record for that kind are null: a CONNECT has no
+ * URL or model, a refused connection no status, an MCP call no tokens.
+ */
+export const TimelineNetworkSchema = z.object({
+  kind: z.enum(NETWORK_EVENT_KINDS),
+  decision: z.enum(NETWORK_DECISIONS),
+  /** `POST` for a model call; the MCP request's method; null for a CONNECT. */
+  method: z.string().nullable(),
+  /** The gateway URL the trial called (model, MCP); null for a CONNECT or a plain-HTTP target. */
+  url: z.string().nullable(),
+  /** Target host as the trial named it; the MCP server's host for `mcp`. */
+  host: z.string().nullable(),
+  port: z.number().int().min(1).max(65535).nullable(),
+  /** MCP server name (the `/mcp/<name>` route), for `mcp`. */
   server: z.string().nullable(),
-  summary: z.string(),
-  durationMs: countView.nullable(),
-  error: z.boolean(),
-  /** Still running (live timeline). */
-  running: z.boolean(),
-  /** Tool input, verbatim JSON text. */
-  input: z.string().nullable(),
-  output: z.string().nullable(),
-  outputChars: countView.nullable(),
-  /** Output cut by the runtime at 5,000 characters. */
-  truncated: z.boolean(),
-  /** Free text for text, final, network and platform rows. */
-  text: z.string().nullable(),
-  /** Model call detail for network rows; null for other network rows (a CONNECT, an MCP call). */
-  network: z
-    .object({
-      method: z.string(),
-      url: z.string(),
-      status: z.number().int().min(100).max(599),
-      model: z.string(),
-      tokensIn: countView,
-      tokensOut: countView,
-      forwardedTo: z.string().nullable(),
-    })
-    .nullable(),
-  /** A connection the sandbox refused: its own row (background) or a sub-row on a tool call. */
-  refusal: z
-    .object({
-      host: z.string(),
-      port: z.number().int().min(1).max(65535),
-      reason: z.string(),
-    })
-    .nullable(),
+  /** HTTP status egress or the upstream answered; null when there was no answer. */
+  status: z.number().int().min(100).max(599).nullable(),
+  /** Why egress refused it, or its note on an allowed call. */
+  reason: z.string().nullable(),
+  /** Model the call named, for `model`. */
+  model: z.string().nullable(),
+  /** The call's own usage, for `model`, when the upstream reported it. */
+  tokensIn: countView.nullable(),
+  tokensOut: countView.nullable(),
+  /** Where the model gateway sent it, e.g. `Nous Portal`, for `model`. */
+  forwardedTo: z.string().nullable(),
 });
+export type TimelineNetwork = z.infer<typeof TimelineNetworkSchema>;
+
+/** Row kinds drawn from egress's connection log; each carries `network`. */
+const NETWORK_ROW_KINDS: readonly TimelineEventKind[] = ['network', 'refused'];
+
+/** One row of EventTimeline and one tick of TimelineScrubber. */
+export const TimelineEventSchema = z
+  .object({
+    seq,
+    kind: TimelineEventKindSchema,
+    /** `hermes-background` for Hermes's own requests (drawn neutral, tagged). */
+    origin: z.enum(['agent', 'hermes-background']),
+    /** Milliseconds since the attempt started; pages show "+00:04.2". */
+    atMs: countView,
+    title: z.string(),
+    /** MCP server name when the tool comes from one (drawn with its prefix tag). */
+    server: z.string().nullable(),
+    summary: z.string(),
+    durationMs: countView.nullable(),
+    error: z.boolean(),
+    /** Still running (live timeline). */
+    running: z.boolean(),
+    /** Tool input, verbatim JSON text. */
+    input: z.string().nullable(),
+    output: z.string().nullable(),
+    outputChars: countView.nullable(),
+    /** Output cut by the runtime at 5,000 characters. */
+    truncated: z.boolean(),
+    /** Free text for text, final, network and platform rows. */
+    text: z.string().nullable(),
+    /**
+     * The connection log entry behind a `network` or `refused` row, of any
+     * kind; null on every other row. A refusal drawn as a sub-row of a tool
+     * call is in `refusal`, not here.
+     */
+    network: TimelineNetworkSchema.nullable(),
+    /** A connection the sandbox refused: its own row (background) or a sub-row on a tool call. */
+    refusal: z
+      .object({
+        host: z.string(),
+        port: z.number().int().min(1).max(65535),
+        reason: z.string(),
+      })
+      .nullable(),
+  })
+  .superRefine((e, ctx) => {
+    if (NETWORK_ROW_KINDS.includes(e.kind) !== (e.network !== null)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['network'],
+        message: 'network is set exactly on network and refused rows',
+      });
+    }
+  });
 export type TimelineEvent = z.infer<typeof TimelineEventSchema>;
 
 export const TimelineViewSchema = z.object({
@@ -329,6 +376,8 @@ export const RunDetailSchema = z.object({
     .nullable(),
   executionError: ExecutionErrorViewSchema.nullable(),
   outcomeNotice: OutcomeNoticeSchema.nullable(),
+  /** The evaluation `scores` come from, and a re-score in flight or failed (plan 9.4). */
+  evaluation: RunEvaluationViewSchema,
   scores: z.array(ScoreRowViewSchema),
   timeline: TimelineViewSchema,
   finalResponse: FinalResponseViewSchema.nullable(),

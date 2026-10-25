@@ -12,7 +12,7 @@
  */
 import { z } from 'zod';
 import { JsonValueSchema, TaskLimitsSchema, VerificationEntrySchema } from './records.js';
-import type { ScorerType } from './vocab.js';
+import { TRAJECTORY_MODES, type ScorerType } from './vocab.js';
 
 /**
  * A suite or task directory name, and the shape of suite.yaml's `name`. The
@@ -138,9 +138,6 @@ export const FileCheckParamsSchema = z
   });
 export type FileCheckParams = z.infer<typeof FileCheckParamsSchema>;
 
-export const TRAJECTORY_MODES = ['strict', 'unordered', 'subset', 'superset'] as const;
-export type TrajectoryMode = (typeof TRAJECTORY_MODES)[number];
-
 export const TrajectoryMatchParamsSchema = z
   .strictObject({
     /** Tool name as the run's tool_use events report it. */
@@ -177,6 +174,52 @@ export const LlmJudgeParamsSchema = z.strictObject({
 export type LlmJudgeParams = z.infer<typeof LlmJudgeParamsSchema>;
 
 /**
+ * text_match (plan 9.3, DESIGN_CHECKS_FIX_PROMPT.md Part F): phrases and an
+ * optional regular expression looked for in the answer's text. Each phrase
+ * and the pattern count once; the score is the share found, and the key
+ * passes at or above `pass_at`. A string value is matched as it is, any
+ * other value as its JSON text.
+ *
+ * The pattern is only checked to be non-empty here: whether it compiles,
+ * and is safe to run on the agent's text, depends on the regular expression
+ * engine, so the api loader checks that and reports a load issue with the
+ * compiler's message (scoring/text-match.ts compileTextPattern).
+ */
+export const TextMatchParamsSchema = z
+  .strictObject({
+    path: answerPath,
+    /** Phrases the text must contain, each counted once. */
+    contains: z.array(z.string().min(1, 'a phrase must not be empty')).optional(),
+    /** A regular expression found anywhere in the text; counts once. */
+    pattern: z.string().min(1, 'the pattern must not be empty').optional(),
+    /** Applies to the phrases and the pattern. Off by default (Part F). */
+    case_sensitive: z.boolean().default(false),
+    /** Minimum share of the phrases and pattern found. */
+    pass_at: passAt(1),
+  })
+  .superRefine((p, ctx) => {
+    if ((p.contains?.length ?? 0) === 0 && p.pattern === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['contains'],
+        message: 'Add at least one phrase or a pattern.',
+      });
+    }
+    // Case-insensitive phrases that differ only in case are one phrase counted twice.
+    const folded = (p.contains ?? []).map((c) => (p.case_sensitive ? c : c.toLowerCase()));
+    if (!unique(folded)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['contains'],
+        message: p.case_sensitive
+          ? 'phrases must not repeat'
+          : 'phrases must not repeat (case is ignored)',
+      });
+    }
+  });
+export type TextMatchParams = z.infer<typeof TextMatchParamsSchema>;
+
+/**
  * The params schema of every scorer type. The registry and the loader look a
  * type up here; a type missing from this map is a compile error.
  */
@@ -188,6 +231,7 @@ export const SCORER_PARAM_SCHEMAS = {
   trajectory_match: TrajectoryMatchParamsSchema,
   verifier_script: VerifierScriptParamsSchema,
   llm_judge: LlmJudgeParamsSchema,
+  text_match: TextMatchParamsSchema,
 } as const satisfies Record<ScorerType, z.ZodType>;
 
 /** Parsed (defaulted) params of one scorer type, e.g. `ScorerParams<'json_match'>`. */

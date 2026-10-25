@@ -1,0 +1,16 @@
+summary: State the late fee rule
+limits:
+  max_turns: 5
+  run_budget_seconds: 60
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: rule
+verification:
+  - key: answer
+    type: text_match
+    primary: true
+    params: { contains: ['1.5%', '30 days'], pattern: 'after \d+ days' }
+  - key: tone
+    type: llm_judge
+    params: { rubric: rubric.md }

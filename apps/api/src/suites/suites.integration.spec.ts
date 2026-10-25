@@ -21,6 +21,7 @@ import {
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import {
   finishAttempt,
+  rescoreRun,
   runningClaim,
   seedExperiment,
   startAttempt,
@@ -419,6 +420,22 @@ describe('experiments on a suite version', () => {
       expect(detail.verification[0]!.yaml).toBe(
         '- key: answer\n  type: json_match\n  primary: true\n  params: { path: duplicates }',
       );
+
+      // Re-scores count each run once, with its current result: baseline's pass
+      // becomes a fail, and its fail is re-scored twice and stays one.
+      await rescoreRun(t.db, runOf(seed.baselineVersionId, 1).id, 'failed');
+      await rescoreRun(t.db, runOf(seed.baselineVersionId, 2).id, 'failed');
+      await rescoreRun(t.db, runOf(seed.baselineVersionId, 2).id, 'failed');
+      const rescored = TaskDetailSchema.parse(
+        await new SuiteTasksService(t.db, new BlobStore(dataDir)).detail(
+          seed.suite.id,
+          'dup_invoices',
+        ),
+      );
+      expect(rescored.experiments[0]!.rows).toEqual([
+        { configuration: 'baseline', role: 'baseline', passRate: 0, scored: 2, total: 2 },
+        { configuration: 'with-skill', role: 'candidate', passRate: 1, scored: 1, total: 2 },
+      ]);
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }

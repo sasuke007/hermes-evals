@@ -327,7 +327,7 @@ describe('getRun: the states board', () => {
 
 describe('run actions', () => {
   it('re-scores, retries and cancels single runs', async () => {
-    await expect(rescoreRun(SAMPLE_RUN_ID)).resolves.toMatchObject({ status: 'scoring' });
+    await expect(rescoreRun(SAMPLE_RUN_ID)).resolves.toMatchObject({ status: 'scored' });
     await expect(retryRun(id(SVN, 'disputed', 'baseline', 4))).resolves.toMatchObject({
       status: 'queued',
       attempt: 3,
@@ -341,9 +341,9 @@ describe('run actions', () => {
   it('refuses model-needing actions while Nous Portal is not connected', async () => {
     setScenario('nous-not-connected');
     await expect(rescoreRun(id(SVN, 'credit_notes', 'with-skill', 4))).rejects.toThrow(
-      'Re-score needs Nous Portal for the method judge.',
+      'Re-score needs Nous Portal for the method judge: Nous Portal is not connected.',
     );
-    await expect(rescoreRun(SAMPLE_RUN_ID)).resolves.toMatchObject({ status: 'scoring' });
+    await expect(rescoreRun(SAMPLE_RUN_ID)).resolves.toMatchObject({ status: 'scored' });
     await expect(retryRun(id(SVN, 'disputed', 'baseline', 4))).rejects.toThrow(
       'Retry needs Nous Portal.',
     );
@@ -357,7 +357,10 @@ describe('run actions', () => {
       { runId: SAMPLE_RUN_ID, reason: 'run is scored, not execution_error' },
     ]);
     const rescore = await rescoreRuns(SVN, [SAMPLE_RUN_ID]);
-    expect(rescore).toEqual({ action: 'rescore', enqueued: [SAMPLE_RUN_ID], refused: [] });
+    expect(rescore).toMatchObject({ action: 'rescore', enqueued: [SAMPLE_RUN_ID], refused: [] });
+    expect(rescore.evaluations).toEqual([
+      expect.objectContaining({ runId: SAMPLE_RUN_ID, generation: 2, joinedPending: false }),
+    ]);
     setScenario('bulk-refused');
     const refused = await rescoreRuns(SVN, [SAMPLE_RUN_ID]);
     expect(refused.enqueued).toEqual([]);

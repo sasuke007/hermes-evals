@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { stringify } from 'yaml';
 import type { McpServerInput } from '@hermes-evals/shared';
 import { newId } from '../../database/ids.js';
+import { TOOL_SEARCH_OFF } from '../../execution/attempt/trial-config.js';
 import { ATTEMPT_TOKEN_ENV } from '../../execution/providers-map.js';
 import { hermesMcpEntry } from '../../resources/mcp/hermes-config.js';
 import {
@@ -118,10 +119,14 @@ const TOKEN_GRACE_MS = 60_000;
  * config.yaml for the test: only this server, and nothing that phones home.
  * An http server's entry carries the gateway's Authorization header as a
  * `${HERMES_EVALS_ATTEMPT_TOKEN}` reference (hermesMcpEntry), as a run's does.
+ * tool_search is off as in a run's config (trial-config.ts); `hermes mcp test`
+ * lists the server's tools directly either way, so this only keeps the two
+ * configs from disagreeing.
  */
 export function mcpTestConfig(definition: McpServerInput): Record<string, unknown> {
   return {
     mcp_servers: { [definition.name]: hermesMcpEntry(definition) },
+    tools: { tool_search: { ...TOOL_SEARCH_OFF } },
     updates: { check: false },
     plugins: { auto_update_check_hours: 0 },
     security: { allow_lazy_installs: false },

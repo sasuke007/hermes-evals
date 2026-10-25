@@ -9,14 +9,21 @@
  * - `verifierDirs()`: a fresh workspace, `verify/` folder and scratch folder
  *   for each verifier run, because a verifier may write to what it is given
  *   and the next check must still see the agent's files;
- * - `events()`: the attempt's event stream (trajectory_match, Phase 3).
+ * - `events()`: the attempt's event stream (trajectory_match);
+ * - `rubric(path)`: an llm_judge rubric's text, read from its blob.
+ *
+ * The judge (llm_judge) comes with its settings: the JudgeClient that calls
+ * the judge model through egress's admin socket (Phase 3 S2), or null where
+ * there is none, and JUDGE_PROVIDER, JUDGE_MODEL and JUDGE_BASE_URL. The
+ * experiment's frozen price table prices the judge's calls.
  *
  * `close()` removes every directory the context made, whatever happened.
  */
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ExtractedAnswer } from '@hermes-evals/shared';
+import type { ExtractedAnswer, PriceTable } from '@hermes-evals/shared';
 import type { AppDb } from '../database/types.js';
+import type { JudgeClient, JudgeSettings } from '../scoring/judge/contracts.js';
 import type { BlobStore, ScratchDir } from '../storage/blob-store.js';
 import {
   loadEvents,
@@ -24,7 +31,7 @@ import {
   type EvaluationEvidence,
   type EventRecord,
 } from './evidence.js';
-import { materialiseVerifyDir, materialiseWorkspace } from './workspace.js';
+import { materialiseVerifyDir, materialiseWorkspace, normaliseRelativePath } from './workspace.js';
 
 /** Folders for one verifier run, all inside one scratch directory. */
 export interface VerifierDirs {
@@ -47,16 +54,29 @@ export interface ScorerContext {
   workspace(): Promise<string>;
   /** Fresh folders for one verifier run; removed by close() or by the returned dispose. */
   verifierDirs(): Promise<VerifierDirs & { dispose(): Promise<void> }>;
+  /**
+   * The text of the rubric at `path` (relative to the task folder, as
+   * params.rubric names it), or null when the task stores no rubric there.
+   */
+  rubric(path: string): Promise<string | null>;
   /** Interpreter for verifier scripts; `python3` on PATH by default. */
   python?: string;
-  /** The LLM judge client, built in Phase 3. */
-  judge: null;
+  /** The LLM judge client; null where no judge can be called, which makes llm_judge keys `error`. */
+  judge: JudgeClient | null;
+  /** The platform's judge default (JUDGE_PROVIDER, JUDGE_MODEL, JUDGE_BASE_URL); see resolveJudgeModel. */
+  judgeSettings: JudgeSettings;
+  /** The experiment's frozen price table, for the judge's cost. */
+  priceTable: PriceTable;
 }
 
 export interface ScorerContextDeps {
   db: AppDb;
   store: BlobStore;
   python?: string;
+  /** The judge client (the worker's egress judge path). Absent: no judge, llm_judge keys are `error`. */
+  judge?: JudgeClient | null;
+  /** judgeSettingsOf(env) in the worker. Absent: no platform default, so only a check's `model:` judges. */
+  judgeSettings?: JudgeSettings;
 }
 
 /** A scorer context and the function that removes every directory it made. */
@@ -85,8 +105,15 @@ export function openScorerContext(
     answer,
     artifacts: evidence.artifacts,
     python: deps.python,
-    judge: null,
+    judge: deps.judge ?? null,
+    judgeSettings: deps.judgeSettings ?? {},
+    priceTable: evidence.priceTable,
     events: () => (events ??= loadEvents(deps.db, evidence.attemptId)),
+    rubric: async (path) => {
+      const wanted = normaliseRelativePath(path);
+      const file = evidence.rubricFiles.find((f) => f.path === wanted);
+      return file ? (await deps.store.read(file.sha256)).toString('utf8') : null;
+    },
     workspace: () =>
       (shared ??= (async () => {
         const dir = await scratch('eval-workspace');

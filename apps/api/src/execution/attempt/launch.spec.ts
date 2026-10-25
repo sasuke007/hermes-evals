@@ -116,6 +116,7 @@ describe('config.yaml', () => {
         },
       },
       agent: { max_turns: 12, run_budget_seconds: 300 },
+      tools: { tool_search: { enabled: 'off' } },
       approvals: { mode: 'off' },
       updates: { check: false },
       plugins: { auto_update_check_hours: 0 },
@@ -134,6 +135,18 @@ describe('config.yaml', () => {
     expect(displayConfigYaml(yaml)).not.toContain('${');
   });
 
+  it('turns tool_search off in the text Hermes reads, whichever YAML version reads it', () => {
+    // Hermes's loader reads a bare `off` as false (YAML 1.1), which its
+    // ToolSearchConfig maps to "off" (_tri_state); a YAML 1.2 reader sees the
+    // string itself. Either way the bridge stays off.
+    const yaml = configYaml(attemptConfig(plan({ mcpServers: [] })));
+    expect(yaml).toMatch(/^tools:\n {2}tool_search:\n {4}enabled: "?off"?$/m);
+    const read12 = parse(yaml) as { tools: { tool_search: { enabled: unknown } } };
+    expect(read12.tools.tool_search).toEqual({ enabled: 'off' });
+    const read11 = parse(yaml, { version: '1.1' }) as typeof read12;
+    expect([false, 'off']).toContain(read11.tools.tool_search.enabled);
+  });
+
   it('keeps the sandbox harness on the same builder', () => {
     const config = trialConfig({
       model: 'mock/scripted',
@@ -147,6 +160,7 @@ describe('config.yaml', () => {
       memory: { memory_enabled: false, user_profile_enabled: false },
       mcp_servers: {},
       agent: { max_turns: 6, run_budget_seconds: 180 },
+      tools: { tool_search: { enabled: 'off' } },
       gateway: { unmanaged_idle_exit_seconds: 5 },
     });
   });

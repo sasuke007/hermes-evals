@@ -1,27 +1,45 @@
 /**
- * Run commands (plan 11, UI_FLOWS 17 and 18): Retry and Cancel from the
- * inspector, and bulk Retry execution from the Runs tab. Re-score routes
- * belong to Phase 3. Bodies are checked with the shared schemas, and every
- * answer is parsed with its shared contract on the way out.
+ * Run commands (plan 11, UI_FLOWS 17 and 18): Re-score, Retry and Cancel
+ * from the inspector, and bulk Re-score and Retry execution from the Runs
+ * tab. Bodies are checked with the shared schemas, and every answer is
+ * parsed with its shared contract on the way out.
  */
 import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import {
+  BulkRescoreResultSchema,
   BulkRunActionInputSchema,
   BulkRunActionResultSchema,
+  RescoreRunResultSchema,
   RunActionResultSchema,
+  type BulkRescoreResult,
   type BulkRunActionInput,
   type BulkRunActionResult,
+  type RescoreRunResult,
   type RunActionResult,
 } from '@hermes-evals/shared';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe.js';
 import { ApiJsonBody, ApiJsonResponse } from '../../openapi/decorators.js';
+import { RescoreService } from './rescore.service.js';
 import { RunCommandsService } from './run-commands.service.js';
 
 @ApiTags('runs')
 @Controller()
 export class RunsCommandsController {
-  constructor(private readonly commands: RunCommandsService) {}
+  constructor(
+    private readonly commands: RunCommandsService,
+    private readonly rescores: RescoreService,
+  ) {}
+
+  @Post('runs/:id/rescore')
+  @HttpCode(200)
+  @ApiJsonResponse(RescoreRunResultSchema, {
+    description:
+      'Queues a re-score of a scored run: a new evaluation generation graded from the stored evidence, never re-executed (a RescoreRunResult: the run stays scored, with `evaluation` and `joinedPending`). A re-score already queued or running is answered as is. 409 when the run is not scored, or a task llm_judge key needs a judge provider that is not ready.',
+  })
+  async rescore(@Param('id') id: string): Promise<RescoreRunResult> {
+    return RescoreRunResultSchema.parse(await this.rescores.rescore(id));
+  }
 
   @Post('runs/:id/retry')
   @HttpCode(200)
@@ -55,5 +73,19 @@ export class RunsCommandsController {
     @Body(new ZodValidationPipe(BulkRunActionInputSchema)) input: BulkRunActionInput,
   ): Promise<BulkRunActionResult> {
     return BulkRunActionResultSchema.parse(await this.commands.retryMany(id, input.runIds));
+  }
+
+  @Post('experiments/:id/runs/rescore')
+  @HttpCode(200)
+  @ApiJsonBody(BulkRunActionInputSchema)
+  @ApiJsonResponse(BulkRescoreResultSchema, {
+    description:
+      'Re-scores every listed scored run, or joins its pending re-score; the others are refused with their reason (a BulkRescoreResult, with each accepted run’s `evaluations` entry in `enqueued` order)',
+  })
+  async rescoreMany(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(BulkRunActionInputSchema)) input: BulkRunActionInput,
+  ): Promise<BulkRescoreResult> {
+    return BulkRescoreResultSchema.parse(await this.rescores.rescoreMany(id, input.runIds));
   }
 }

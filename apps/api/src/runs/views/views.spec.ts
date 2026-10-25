@@ -2,7 +2,8 @@
  * The pure pieces of the inspector that the database specs reach only in
  * their common cases: the launch command and config.yaml as shown (secrets
  * masked whatever the stored record holds), expected and observed values,
- * the stderr tail, and the final response's ranges for broken answers.
+ * the stderr tail, the final response's ranges for broken answers, and which
+ * evaluation generation a run shows.
  */
 import { describe, expect, it } from 'vitest';
 import { FinalResponseViewSchema, LaunchRecordViewSchema } from '@hermes-evals/shared';
@@ -14,6 +15,12 @@ import {
   RUN_TOKEN_PLACEHOLDER,
   showSecretRefs,
 } from './launch-record.js';
+import {
+  NO_EVALUATION,
+  rescorePending,
+  runEvaluationView,
+  type EvaluationStateRecord,
+} from './evaluation-view.js';
 import { STDERR_TAIL_LINES, stderrLines, valueSummary } from './outcome.js';
 import { launchRecord } from './run-fixtures-spec.js';
 import type { WorkerRecord } from './rows.js';
@@ -157,5 +164,75 @@ describe('the final response of a broken answer', () => {
     const view = FinalResponseViewSchema.parse(finalResponseView(text, null, null));
     expect(view).toMatchObject({ extraction: 'invalid', reference: null });
     expect(view.fence).toEqual({ start: 8, end: text.length });
+  });
+});
+
+describe('which evaluation a run shows', () => {
+  const at = (minute: number) =>
+    new Date(`2026-10-25T10:${String(minute).padStart(2, '0')}:00.000Z`);
+  const evaluation = (
+    generation: number,
+    status: EvaluationStateRecord['status'],
+    more: Partial<EvaluationStateRecord> = {},
+  ): EvaluationStateRecord => ({
+    id: `eval_${generation}`,
+    runId: 'run_1',
+    generation,
+    status,
+    cause: generation === 1 ? 'initial' : 'rescore',
+    error: null,
+    requestedAt: at(generation),
+    finishedAt: status === 'completed' || status === 'failed' ? at(generation + 1) : null,
+    supersededAt: null,
+    ...more,
+  });
+
+  it('shows nothing before the first publish, and the first evaluation while it runs', () => {
+    expect(runEvaluationView([])).toEqual(NO_EVALUATION);
+    const first = runEvaluationView([evaluation(1, 'running')]);
+    expect(first).toEqual({
+      generation: null,
+      pending: {
+        evaluationId: 'eval_1',
+        generation: 1,
+        status: 'running',
+        cause: 'initial',
+        requestedAt: at(1).toISOString(),
+      },
+      lastFailure: null,
+    });
+    // A first evaluation is not a re-score.
+    expect(rescorePending(first)).toBe(false);
+  });
+
+  it('keeps the current generation while a re-score is pending, in any row order', () => {
+    const view = runEvaluationView([
+      evaluation(3, 'queued'),
+      evaluation(1, 'completed', { supersededAt: at(9) }),
+      evaluation(2, 'completed'),
+    ]);
+    expect(view).toMatchObject({ generation: 2, pending: { generation: 3, cause: 'rescore' } });
+    expect(view.lastFailure).toBeNull();
+    expect(rescorePending(view)).toBe(true);
+  });
+
+  it('names only the newest failure, until a later re-score replaces it', () => {
+    const failed = evaluation(2, 'failed', { error: 'grading failed after 3 tries: boom' });
+    expect(runEvaluationView([evaluation(1, 'completed'), failed]).lastFailure).toEqual({
+      generation: 2,
+      error: 'grading failed after 3 tries: boom',
+      finishedAt: at(3).toISOString(),
+    });
+    expect(
+      runEvaluationView([evaluation(1, 'completed'), failed, evaluation(3, 'queued')]).lastFailure,
+    ).toBeNull();
+    expect(
+      runEvaluationView([evaluation(1, 'completed'), evaluation(2, 'failed', { finishedAt: null })])
+        .lastFailure,
+    ).toEqual({
+      generation: 2,
+      error: 'grading failed; the worker log has the error',
+      finishedAt: at(2).toISOString(),
+    });
   });
 });

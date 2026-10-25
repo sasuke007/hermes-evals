@@ -3,6 +3,11 @@
  * file rules, without touching disk.
  */
 import { LoadIssueSchema, type LoadIssue } from '@hermes-evals/shared';
+import {
+  KEY_SETUP_SECONDS,
+  MAX_SCORING_SECONDS,
+  scoringSeconds,
+} from '../../scoring/scoring-time.js';
 import { sha256Hex } from './hashing.js';
 import { MAX_SUITE_FILE_BYTES } from './limits.js';
 import { analyseTask } from './task.js';
@@ -269,6 +274,45 @@ describe('task.yaml rules', () => {
     // Entries are kept, as declared, for the page to show.
     expect(task.verification.map((v) => v.key)).toEqual(['answer', 'trace']);
     expect(task.plan).toBeNull();
+  });
+
+  it('refuses checks that could outlast one scoring pass', async () => {
+    const verifiers = (count: number) =>
+      Array.from(
+        { length: count },
+        (_, i) => `  - key: v${i}
+    type: verifier_script
+    params: { script: check.py, timeout_s: 300 }
+`,
+      ).join('');
+    const answer = `  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { abs: 0.01 }
+`;
+    const files = { 'verify/check.py': 'print(\'{"passed": true}\')\n' };
+    // 11 x (300 + 10) + 10 = 3420 s fits; one more is 3730 s, above MAX_SCORING_SECONDS.
+    expect(scoringSeconds([{ type: 'numeric_tolerance', params: {} }])).toBe(KEY_SETUP_SECONDS);
+    const fits = await analyse(
+      base({ 'task.yaml': withVerification(answer + verifiers(11)), ...files }),
+    );
+    expect(codes(fits.issues)).toEqual([]);
+    const tooSlow = await analyse(
+      base({ 'task.yaml': withVerification(answer + verifiers(12)), ...files }),
+    );
+    expect(tooSlow.issues).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'schema_invalid',
+        path: 'task.yaml#verification',
+        message: expect.stringMatching(
+          new RegExp(
+            `^the checks may take up to 3730 s to score .* above the ${MAX_SCORING_SECONDS} s`,
+          ),
+        ),
+      }),
+    ]);
+    expect(tooSlow.plan).toBeNull();
   });
 
   it('reports shape errors with the line they are on', async () => {

@@ -1,8 +1,7 @@
 /**
- * The scorer registry (plan 9.2, 9.3): for each of the seven types, its params
+ * The scorer registry (plan 9.2, 9.3): for each of the eight types, its params
  * schema, its behaviour version and how the suite loader self-checks it
- * (plan 4.3). The runtimes live beside this file; trajectory_match and
- * llm_judge are registered for their schemas only until Phase 3.
+ * (plan 4.3). The runtimes live beside this file.
  *
  * `version` is stored on every score row (scores.scorer_version, an integer)
  * and feeds the loader's check hash, so bumping it re-checks every suite on
@@ -73,9 +72,11 @@ export const SCORERS: Registry = {
     selfCheck: 'workspace',
     needsAnswer: false,
   },
+  // Version 1 was Phase 2's placeholder, which published `error` for every
+  // key; 2 is the runtime (trajectory.ts), so its rows are told apart.
   trajectory_match: {
     type: 'trajectory_match',
-    version: 1,
+    version: 2,
     params: SCORER_PARAM_SCHEMAS.trajectory_match,
     selfCheck: 'none',
     needsAnswer: false,
@@ -87,12 +88,22 @@ export const SCORERS: Registry = {
     selfCheck: 'script',
     needsAnswer: false,
   },
+  // As trajectory_match: 1 was the placeholder, 2 the judge (llm-judge.ts).
+  // It grades the final text, not the extracted answer, so a reply without a
+  // JSON block is still judged.
   llm_judge: {
     type: 'llm_judge',
-    version: 1,
+    version: 2,
     params: SCORER_PARAM_SCHEMAS.llm_judge,
     selfCheck: 'none',
     needsAnswer: false,
+  },
+  text_match: {
+    type: 'text_match',
+    version: 1,
+    params: SCORER_PARAM_SCHEMAS.text_match,
+    selfCheck: 'answer',
+    needsAnswer: true,
   },
 };
 
@@ -107,8 +118,18 @@ export const SCORER_VERSIONS: Readonly<Record<ScorerType, number>> = Object.free
 /** `numeric_tolerance@1`: the version as logs and the UI show it. */
 export const scorerVersionLabel = (type: ScorerType): string => `${type}@${SCORERS[type].version}`;
 
-/** Types graded on the extracted answer alone; their self-check scores reference.json. */
-export const ANSWER_SCORER_TYPES = ['numeric_tolerance', 'json_match', 'exact_match'] as const;
+/**
+ * Types graded on the extracted answer alone: their self-check scores
+ * reference.json, and a primary key of one of them that names no `path`
+ * takes the task's answer path (plan 4.2). text_match reads the value at its
+ * path and ignores the reference's, which must still exist (scoring/answer.ts).
+ */
+export const ANSWER_SCORER_TYPES = [
+  'numeric_tolerance',
+  'json_match',
+  'exact_match',
+  'text_match',
+] as const;
 export type AnswerScorerType = (typeof ANSWER_SCORER_TYPES)[number];
 
 export const isAnswerScorerType = (type: ScorerType): type is AnswerScorerType =>

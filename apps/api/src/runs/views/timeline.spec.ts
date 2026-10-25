@@ -6,7 +6,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { TimelineEventSchema, type TimelineEvent } from '@hermes-evals/shared';
+import { networkEvents } from '../../execution/attempt/network-events.js';
 import { parseStreamLine } from '../../execution/stream-json.js';
+import type { EgressLogEntry } from '../../sandbox/egress-client.js';
 import {
   RECORDED_PROVIDER_FAILURE,
   RECORDED_RUN,
@@ -174,17 +176,67 @@ describe("egress's connection log", () => {
       durationMs: 900,
       error: false,
       network: {
+        kind: 'model',
+        decision: 'allowed',
         method: 'POST',
         url: 'http://egress:8080/v1/chat/completions',
+        host: null,
+        port: null,
+        server: null,
         status: 200,
+        reason: null,
         model: 'mock/scripted',
         tokensIn: 1000,
         tokensOut: 21,
         forwardedTo: 'mock-model:8090',
       },
     });
-    expect(bySeq(9)).toMatchObject({ summary: 'mock/scripted · 200', network: null });
-    expect(bySeq(14)).toMatchObject({ title: 'Model call refused', error: true, network: null });
+    // No usage from the upstream: the entry is still there, without tokens.
+    expect(bySeq(9)).toMatchObject({
+      summary: 'mock/scripted · 200',
+      network: {
+        kind: 'model',
+        status: 200,
+        model: 'mock/scripted',
+        tokensIn: null,
+        tokensOut: null,
+      },
+    });
+    // Refused at the gateway: never forwarded, no status, the reason kept.
+    expect(bySeq(14)).toMatchObject({
+      title: 'Model call refused',
+      error: true,
+      network: {
+        kind: 'model',
+        decision: 'denied',
+        method: 'POST',
+        url: 'http://egress:8080/v1/chat/completions',
+        status: null,
+        reason: 'token budget exhausted',
+        model: null,
+        forwardedTo: null,
+      },
+    });
+  });
+
+  it('gives every row from the log its entry, and no other row one', () => {
+    const fromLog = shown.filter((e) => e.seq >= 8);
+    expect(fromLog.map((e) => [e.seq, e.kind, e.network?.kind])).toEqual(
+      expect.arrayContaining([
+        [8, 'network', 'model'],
+        [9, 'network', 'model'],
+        [10, 'refused', 'connect'],
+        [12, 'refused', 'http'],
+        [13, 'network', 'mcp'],
+        [14, 'network', 'model'],
+      ]),
+    );
+    expect(fromLog).toHaveLength(6);
+    // The refusal drawn on the terminal call (seq 11) is a sub-row, not an entry.
+    expect(shown.filter((e) => e.kind !== 'network' && e.kind !== 'refused')).toSatisfy(
+      (rows: TimelineEvent[]) => rows.every((e) => e.network === null),
+    );
+    expect(bySeq(4).network).toBeNull();
   });
 
   it("labels Hermes's background call and puts it on its own row", () => {
@@ -193,6 +245,21 @@ describe("egress's connection log", () => {
       origin: 'hermes-background',
       summary: 'inference-api.nousresearch.com:443',
       error: false,
+      network: {
+        kind: 'connect',
+        decision: 'denied',
+        method: null,
+        url: null,
+        host: 'inference-api.nousresearch.com',
+        port: 443,
+        server: null,
+        status: null,
+        reason: 'not on the allowlist',
+        model: null,
+        tokensIn: null,
+        tokensOut: null,
+        forwardedTo: null,
+      },
       refusal: {
         host: 'inference-api.nousresearch.com',
         port: 443,
@@ -213,6 +280,16 @@ describe("egress's connection log", () => {
       kind: 'refused',
       origin: 'agent',
       error: true,
+      network: {
+        kind: 'http',
+        decision: 'denied',
+        method: null,
+        url: null,
+        host: '10.0.0.5',
+        port: 80,
+        status: null,
+        reason: 'private address',
+      },
       refusal: { host: '10.0.0.5', port: 80, reason: 'private address' },
     });
   });
@@ -224,6 +301,21 @@ describe("egress's connection log", () => {
       server: 'vendor-api',
       summary: 'vendor-api · 200',
       durationMs: 40,
+      network: {
+        kind: 'mcp',
+        decision: 'allowed',
+        method: null,
+        url: 'http://egress:8080/mcp/vendor-api',
+        host: 'vendor.example',
+        port: null,
+        server: 'vendor-api',
+        status: 200,
+        reason: null,
+        model: null,
+        tokensIn: null,
+        tokensOut: null,
+        forwardedTo: null,
+      },
     });
   });
 
@@ -235,6 +327,173 @@ describe("egress's connection log", () => {
     expect(page.lastSeq).toBe(14);
     expect(timelinePage(rows, 14, 14)).toEqual({ events: [], lastSeq: 14 });
     expect(timelinePage(rows, 20, 14)).toEqual({ events: [], lastSeq: 20 });
+  });
+});
+
+describe('a connection log stored by the worker', () => {
+  // Entries as egress's admin socket reports them, stored through the
+  // runner's own writer (networkEvents), then drawn.
+  const at = (ms: number) => new Date(START + ms).toISOString();
+  const log: EgressLogEntry[] = [
+    { at: at(1_000), kind: 'connect', host: 'pypi.org', port: 443, decision: 'allowed', ms: 120 },
+    {
+      at: at(1_500),
+      kind: 'http',
+      host: 'example.com',
+      port: 80,
+      decision: 'allowed',
+      status: 301,
+    },
+    {
+      at: at(2_000),
+      kind: 'mcp',
+      server: 'invoice-db',
+      method: 'POST',
+      host: 'mcp.vendor.example',
+      decision: 'allowed',
+      status: 200,
+      ms: 35,
+    },
+    {
+      at: at(2_500),
+      kind: 'mcp',
+      server: 'invoice-db',
+      method: 'POST',
+      decision: 'denied',
+      reason: 'too many calls in flight',
+      status: 429,
+    },
+    {
+      at: at(3_000),
+      kind: 'model',
+      model: 'mock/scripted',
+      decision: 'allowed',
+      status: 200,
+      ms: 800,
+      promptTokens: 1_200,
+      completionTokens: 40,
+    },
+    {
+      at: at(3_500),
+      kind: 'model',
+      model: 'mock/scripted',
+      decision: 'denied',
+      reason: 'token cap reached',
+      status: 429,
+    },
+  ];
+  const stored: EventRecord[] = networkEvents(log, 'custom').map((e, i) => ({
+    seq: i + 1,
+    ts: e.ts,
+    type: e.type,
+    payload: e.payload,
+  }));
+  const shown = events(buildTimeline(stored, CTX));
+
+  it('stores every entry as a network event', () => {
+    expect(stored.map((e) => (e.payload as { subtype: string }).subtype)).toEqual(
+      Array(6).fill('network'),
+    );
+  });
+
+  it('fills the entry of each kind from what egress logged', () => {
+    const bySeq = [...shown].sort((a, b) => a.seq - b.seq);
+    expect(bySeq.map((e) => [e.seq, e.kind, e.network])).toEqual([
+      [
+        1,
+        'network',
+        expect.objectContaining({
+          kind: 'connect',
+          decision: 'allowed',
+          method: null,
+          url: null,
+          host: 'pypi.org',
+          port: 443,
+          status: null,
+        }),
+      ],
+      [
+        2,
+        'network',
+        expect.objectContaining({
+          kind: 'http',
+          method: null,
+          url: null,
+          host: 'example.com',
+          port: 80,
+          status: 301,
+        }),
+      ],
+      [
+        3,
+        'network',
+        expect.objectContaining({
+          kind: 'mcp',
+          decision: 'allowed',
+          method: 'POST',
+          url: 'http://egress:8080/mcp/invoice-db',
+          server: 'invoice-db',
+          host: 'mcp.vendor.example',
+          status: 200,
+          model: null,
+        }),
+      ],
+      [
+        4,
+        'network',
+        expect.objectContaining({
+          kind: 'mcp',
+          decision: 'denied',
+          server: 'invoice-db',
+          status: 429,
+          reason: 'too many calls in flight',
+        }),
+      ],
+      [
+        5,
+        'network',
+        {
+          kind: 'model',
+          decision: 'allowed',
+          method: 'POST',
+          url: 'http://egress:8080/v1/chat/completions',
+          host: null,
+          port: null,
+          server: null,
+          status: 200,
+          reason: null,
+          model: 'mock/scripted',
+          tokensIn: 1_200,
+          tokensOut: 40,
+          forwardedTo: 'mock-model:8090',
+        },
+      ],
+      [
+        6,
+        'network',
+        expect.objectContaining({
+          kind: 'model',
+          decision: 'denied',
+          status: 429,
+          reason: 'token cap reached',
+          model: 'mock/scripted',
+          tokensIn: null,
+          forwardedTo: null,
+        }),
+      ],
+    ]);
+  });
+
+  it('reads a stored entry with missing or mistyped fields as nulls, never throwing', () => {
+    const odd = buildTimeline(
+      [
+        network(1, START + 10, { kind: 'mcp', decision: 'allowed', port: 0, status: 42 }),
+        network(2, START + 20, { kind: 'later', decision: 'maybe', host: 7 }),
+      ],
+      CTX,
+    ).map((r) => TimelineEventSchema.parse(r.event));
+    expect(odd[0]!.network).toMatchObject({ kind: 'mcp', url: null, port: null, status: null });
+    expect(odd[1]!.network).toMatchObject({ kind: 'connect', decision: 'allowed', host: null });
   });
 });
 

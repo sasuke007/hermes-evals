@@ -20,7 +20,7 @@ import { DB } from '../../database/db.provider.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { RunViewsModule } from './run-views.module.js';
 import { seedAllStates, type AllStates } from './run-states-spec.js';
-import { REPORT_HTML, SUMMARY_CSV, TRIAL_IMAGE } from './run-fixtures-spec.js';
+import { REPORT_HTML, SUMMARY_CSV, viewsConfig } from './run-fixtures-spec.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
@@ -38,7 +38,7 @@ beforeAll(async () => {
     providers: [
       { provide: DB, useValue: t.db },
       { provide: StorageService, useValue: seed.store },
-      { provide: ConfigService, useValue: { get: () => TRIAL_IMAGE } },
+      { provide: ConfigService, useValue: viewsConfig() },
     ],
     exports: [DB, StorageService, ConfigService],
   })

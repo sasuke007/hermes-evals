@@ -6,7 +6,11 @@
  */
 import { MAX_ARTIFACT_BYTES } from '../../sandbox/trial-files.js';
 
-export const LOADER_VERSION = 1;
+/**
+ * 2: text_match patterns must compile, and a task's checks must fit one
+ * scoring pass (task-yaml.ts).
+ */
+export const LOADER_VERSION = 2;
 
 /** A file larger than this is never read; it is reported as unsafe_file. */
 export const MAX_SUITE_FILE_BYTES = MAX_ARTIFACT_BYTES;

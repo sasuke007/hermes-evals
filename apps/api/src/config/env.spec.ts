@@ -43,3 +43,62 @@ describe('Phase 2 settings', () => {
     expect(validateEnv({ TRIAL_RETENTION_DAYS: '0' }).TRIAL_RETENTION_DAYS).toBe(0);
   });
 });
+
+describe('Phase 3 settings', () => {
+  it('leave the judge unset and cap each attempt at 2,000,000 tokens by default', () => {
+    const env = validateEnv({});
+    expect({
+      JUDGE_PROVIDER: env.JUDGE_PROVIDER,
+      JUDGE_MODEL: env.JUDGE_MODEL,
+      JUDGE_BASE_URL: env.JUDGE_BASE_URL,
+      MODEL_TOKEN_CAP_PER_ATTEMPT: env.MODEL_TOKEN_CAP_PER_ATTEMPT,
+    }).toEqual({
+      JUDGE_PROVIDER: undefined,
+      JUDGE_MODEL: undefined,
+      JUDGE_BASE_URL: undefined,
+      MODEL_TOKEN_CAP_PER_ATTEMPT: 2_000_000,
+    });
+  });
+
+  it('read a judge on any provider, a custom one with its base URL, and empty values as unset', () => {
+    expect(
+      validateEnv({ JUDGE_PROVIDER: 'nous', JUDGE_MODEL: 'openai/gpt-6.1-sol' }),
+    ).toMatchObject({ JUDGE_PROVIDER: 'nous', JUDGE_MODEL: 'openai/gpt-6.1-sol' });
+    expect(
+      validateEnv({
+        JUDGE_PROVIDER: 'custom',
+        JUDGE_MODEL: 'mock/scripted',
+        JUDGE_BASE_URL: 'http://mock-model:8090/v1',
+      }),
+    ).toMatchObject({ JUDGE_PROVIDER: 'custom', JUDGE_BASE_URL: 'http://mock-model:8090/v1' });
+    // A model alone is allowed: it runs on nous (resolveJudgeModel).
+    expect(validateEnv({ JUDGE_MODEL: 'openai/gpt-6.1-sol' }).JUDGE_PROVIDER).toBeUndefined();
+    const blank = validateEnv({ JUDGE_PROVIDER: '', JUDGE_MODEL: '', JUDGE_BASE_URL: '' });
+    expect([blank.JUDGE_PROVIDER, blank.JUDGE_MODEL, blank.JUDGE_BASE_URL]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(validateEnv({ MODEL_TOKEN_CAP_PER_ATTEMPT: '50000' }).MODEL_TOKEN_CAP_PER_ATTEMPT).toBe(
+      50_000,
+    );
+    // Compose passes `${MODEL_TOKEN_CAP_PER_ATTEMPT:-}`; empty means the default, as in egress.
+    expect(validateEnv({ MODEL_TOKEN_CAP_PER_ATTEMPT: '' }).MODEL_TOKEN_CAP_PER_ATTEMPT).toBe(
+      2_000_000,
+    );
+  });
+
+  it('refuse an unknown provider, a base URL that does not match the provider, and a silly cap', () => {
+    for (const [raw, message] of [
+      [{ JUDGE_PROVIDER: 'gemini' }, /JUDGE_PROVIDER/],
+      [{ JUDGE_PROVIDER: 'custom', JUDGE_MODEL: 'm' }, /JUDGE_BASE_URL: is required/],
+      [{ JUDGE_PROVIDER: 'nous', JUDGE_BASE_URL: 'http://x:1/v1' }, /JUDGE_BASE_URL: is only used/],
+      [{ JUDGE_PROVIDER: 'custom', JUDGE_BASE_URL: 'http://u:p@x/v1' }, /JUDGE_BASE_URL/],
+      [{ JUDGE_MODEL: 'x'.repeat(201) }, /JUDGE_MODEL/],
+      [{ MODEL_TOKEN_CAP_PER_ATTEMPT: '0' }, /MODEL_TOKEN_CAP_PER_ATTEMPT/],
+      [{ MODEL_TOKEN_CAP_PER_ATTEMPT: '1500.5' }, /MODEL_TOKEN_CAP_PER_ATTEMPT/],
+    ] as const) {
+      expect(() => validateEnv(raw), JSON.stringify(raw)).toThrow(message);
+    }
+  });
+});

@@ -15,26 +15,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import type { ArtifactOrigin, RunEventPayload } from '@hermes-evals/shared';
-import { HERMES_REVISION, runningClaim, sha } from '../../../test/support/seed.js';
+import { HERMES_REVISION, sha } from '../../../test/support/seed.js';
 import type { TestDb } from '../../../test/support/database.js';
 import {
   artifacts,
   attempts,
   configurationVersions,
   configurations,
-  evaluations,
   experiments,
   runEvents,
   runs,
-  scores,
   suiteSources,
   suites,
   taskFiles,
   tasks,
   workers,
 } from '../../database/schema/index.js';
-import { extractAnswer } from '../../scoring/extraction.js';
 import { BlobStore } from '../../storage/blob-store.js';
+import { publishInitial, seedRescore, type RescoreOutcome } from './evaluation-seed-spec.js';
 import type { EventRecord } from './rows.js';
 import {
   DUP_VERIFICATION,
@@ -359,44 +357,13 @@ export async function seedRunStates(db: TestDb) {
       .set({ status: 'queued', finishedAt: null })
       .where(and(eq(runs.id, cell(name)), eq(runs.status, 'execution_error')));
 
-  /** Scores the executed attempt and publishes, as evaluate-run does. */
-  const score = async (
-    name: RunCell,
-    attemptId: string,
-    finalText: string,
-    list: readonly ScoreSeed[],
-  ) => {
-    const runId = cell(name);
-    await db.transaction(async (tx) => {
-      const [evaluation] = await tx
-        .insert(evaluations)
-        .values({ runId, attemptId, cause: 'initial', generation: 1, ...runningClaim() })
-        .returning({ id: evaluations.id });
-      await tx.insert(scores).values(
-        list.map((s) => ({
-          evaluationId: evaluation!.id,
-          key: s.key,
-          type: s.type,
-          status: s.status,
-          isPrimary: s.primary ?? false,
-          score: s.score ?? (s.status === 'passed' ? 1 : s.status === 'failed' ? 0 : null),
-          comment: s.comment,
-          expected: (s.expected ?? null) as never,
-          observed: (s.observed ?? null) as never,
-          evidence: s.evidence ?? {},
-          scorerVersion: 1,
-        })),
-      );
-      await tx
-        .update(evaluations)
-        .set({ status: 'completed', finishedAt: new Date(), answer: extractAnswer(finalText) })
-        .where(eq(evaluations.id, evaluation!.id));
-      await tx
-        .update(runs)
-        .set({ status: 'scored', finishedAt: new Date() })
-        .where(eq(runs.id, runId));
-    });
-  };
+  /** Scores the executed attempt and publishes, as evaluate-run does (generation 1). */
+  const score = (name: RunCell, attemptId: string, finalText: string, list: readonly ScoreSeed[]) =>
+    publishInitial(db, cell(name), attemptId, finalText, list);
+
+  /** A re-score of a scored run's attempt (evaluation-seed-spec.ts seedRescore). */
+  const rescore = (name: RunCell, attemptId: string, outcome: RescoreOutcome) =>
+    seedRescore(db, cell(name), attemptId, outcome);
 
   return {
     store,
@@ -415,6 +382,7 @@ export async function seedRunStates(db: TestDb) {
     loseWorker,
     requeue,
     score,
+    rescore,
   };
 }
 

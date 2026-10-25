@@ -20,7 +20,11 @@
  * FakeEgress records every registration (the trial's network policy, model
  * route and MCP routes), answers `remove` with a scripted usage and
  * connection log, and answers the names and health checks the worker's
- * provider guard asks it live.
+ * provider guard asks it live. With a `judge` model it also serves the LLM
+ * judge's path (registerJudge, judgeComplete, removeJudge) as egress's
+ * /judges routes do: one model per registration, every call metered and
+ * logged, the report handed back on removal. Without one, the judge path
+ * refuses as an egress without /judges does (404).
  *
  * The integration e2e drives real worker handlers with these:
  *
@@ -36,8 +40,13 @@ import { Socket } from 'node:net';
 import { dirname, join } from 'node:path';
 import { checkCreateBody, type GuardConfig } from '@hermes-evals/docker-guard/policy';
 import {
+  EgressCallError,
   EgressClient,
   type EgressHealth,
+  type EgressJudgeChatBody,
+  type EgressJudgeRegistration,
+  type EgressJudgeReply,
+  type EgressJudgeReport,
   type EgressLogEntry,
   type EgressRegistration,
   type EgressUsage,
@@ -470,6 +479,33 @@ export function hermesRun(
   };
 }
 
+/** How the fake judge model answers one chat completion that egress forwarded. */
+export interface FakeJudgeAnswer {
+  /** The assistant message's content, on a 200. */
+  content?: string;
+  /** The upstream's status; 200 by default. */
+  status?: number;
+  /** The upstream's body for a status other than 200. */
+  body?: unknown;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+/** The model behind the fake judge path: sees each forwarded body and its registration. */
+export type FakeJudgeModel = (
+  body: EgressJudgeChatBody,
+  registration: EgressJudgeRegistration,
+) => FakeJudgeAnswer | Promise<FakeJudgeAnswer>;
+
+/** One judge registration as the fake held it, with every body forwarded under it. */
+export interface FakeJudgeRecord {
+  judgeId: string;
+  registration: EgressJudgeRegistration;
+  bodies: EgressJudgeChatBody[];
+}
+
+const ZERO_USAGE: EgressUsage = { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
 export interface FakeEgressOptions {
   /** Refuse every registration with this message, as egress answers a bad one. */
   registerError?: string;
@@ -482,6 +518,8 @@ export interface FakeEgressOptions {
   envNames?: string[];
   /** The development host forward healthReport() answers with; none by default. */
   hostProxy?: EgressHealth['hostProxy'];
+  /** Serves the judge path with this model; absent, the judge path answers 404. */
+  judge?: FakeJudgeModel;
 }
 
 export class FakeEgress extends EgressClient {
@@ -493,6 +531,12 @@ export class FakeEgress extends EgressClient {
   readonly removed: string[] = [];
   /** Every remove call, in order, including those for attempts egress did not have. */
   readonly removeCalls: string[] = [];
+  /** Judge registrations currently live, with what they used so far. */
+  readonly judges = new Map<string, { usage: EgressUsage; log: EgressLogEntry[] }>();
+  /** Every judge registration ever made, in order, with the bodies forwarded under it. */
+  readonly judgeHistory: FakeJudgeRecord[] = [];
+  /** Judge ids removed, in order. */
+  readonly judgesRemoved: string[] = [];
 
   constructor(private readonly options: FakeEgressOptions = {}) {
     super('/nonexistent/fake-egress.sock');
@@ -520,6 +564,107 @@ export class FakeEgress extends EgressClient {
       usage: { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...report.usage },
       log: report.log ?? [],
     };
+  }
+
+  override async registerJudge(
+    judgeId: string,
+    registration: EgressJudgeRegistration,
+  ): Promise<void> {
+    if (!this.options.judge) {
+      throw new EgressCallError(
+        'refused',
+        'egress refused the judge registration (404): no judge path',
+        404,
+      );
+    }
+    if (registration.kind !== 'judge' || this.judges.has(judgeId)) {
+      throw new EgressCallError(
+        'refused',
+        `egress refused the judge registration (409): ${judgeId} is already registered`,
+        409,
+      );
+    }
+    const copy = JSON.parse(JSON.stringify(registration)) as EgressJudgeRegistration;
+    this.judges.set(judgeId, { usage: { ...ZERO_USAGE }, log: [] });
+    this.judgeHistory.push({ judgeId, registration: copy, bodies: [] });
+  }
+
+  /** Egress's own refusal shape: its status and `{ error }`, no usage. */
+  private judgeRefusal(status: number, message: string): EgressJudgeReply {
+    return { status, body: { error: { message, type: 'invalid_request_error' } }, usage: null };
+  }
+
+  override async judgeComplete(
+    judgeId: string,
+    body: EgressJudgeChatBody,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<EgressJudgeReply> {
+    const held = this.judges.get(judgeId);
+    const record = this.judgeHistory.find((r) => r.judgeId === judgeId);
+    if (!held || !record || !this.options.judge) {
+      return this.judgeRefusal(404, `unknown judge registration ${judgeId}`);
+    }
+    if (body.model !== record.registration.model) {
+      return this.judgeRefusal(403, `model ${body.model} is not this registration's`);
+    }
+    record.bodies.push(JSON.parse(JSON.stringify(body)) as EgressJudgeChatBody);
+    if (options.signal?.aborted) throw new EgressCallError('aborted', 'the judge call was aborted');
+    const answer = await this.options.judge(body, record.registration);
+    const status = answer.status ?? 200;
+    const promptTokens = answer.promptTokens ?? 0;
+    const completionTokens = answer.completionTokens ?? 0;
+    const usage: EgressUsage = {
+      calls: 1,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+    };
+    held.usage = {
+      calls: held.usage.calls + 1,
+      promptTokens: held.usage.promptTokens + promptTokens,
+      completionTokens: held.usage.completionTokens + completionTokens,
+      totalTokens: held.usage.totalTokens + usage.totalTokens,
+    };
+    held.log.push({
+      at: new Date().toISOString(),
+      kind: 'model',
+      model: body.model,
+      decision: 'allowed',
+      status,
+      ms: 5,
+      promptTokens,
+      completionTokens,
+    });
+    if (status !== 200) return { status, body: answer.body ?? null, usage };
+    return {
+      status,
+      body: {
+        id: `chatcmpl-${judgeId}`,
+        object: 'chat.completion',
+        model: body.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: answer.content ?? '' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: usage.totalTokens,
+        },
+      },
+      usage,
+    };
+  }
+
+  override async removeJudge(judgeId: string): Promise<EgressJudgeReport | null> {
+    const held = this.judges.get(judgeId);
+    if (!held) return null;
+    this.judges.delete(judgeId);
+    this.judgesRemoved.push(judgeId);
+    return { usage: held.usage, log: held.log };
   }
 
   override async envNames(): Promise<string[]> {

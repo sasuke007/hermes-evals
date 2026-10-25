@@ -14,6 +14,7 @@ import type { VerificationEntry } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import { evaluations, experiments, runs, scores } from '../database/schema/index.js';
 import { extractAnswer } from '../scoring/extraction.js';
+import { SCORER_VERSIONS } from '../scoring/registry.js';
 import { BlobStore } from '../storage/blob-store.js';
 import { claimEvaluation } from './claim.js';
 import { openScorerContext } from './context.js';
@@ -164,16 +165,16 @@ describe('scoring through the context', () => {
     expect(byKey.summary_file).toMatchObject({ status: 'passed', score: 1 });
     const summaryArtifact = byKey.summary_file!.evidence.artifact_ids;
     expect(summaryArtifact).toHaveLength(1);
-    for (const key of ['reads_fixture', 'quality'] as const) {
-      const type = key === 'reads_fixture' ? 'trajectory_match' : 'llm_judge';
-      expect(byKey[key]).toMatchObject({
-        status: 'error',
-        score: null,
-        comment: `${type} is scored from Phase 3`,
-        evidence: { error: { message: `${type} is scored from Phase 3`, detail: null } },
-      });
+    // The attempt recorded no tool calls, so the trajectory check fails on its count.
+    expect(byKey.reads_fixture).toMatchObject({ status: 'failed', score: 0 });
+    expect(byKey.reads_fixture!.comment).toBe(
+      'no call to read_file (no tool was called); needs at least 1',
+    );
+    // No judge client in these deps: the judge key is an error, never a zero.
+    expect(byKey.quality).toMatchObject({ status: 'error', score: null });
+    for (const row of Object.values(byKey)) {
+      expect(row.scorerVersion).toBe(SCORER_VERSIONS[row.type]);
     }
-    for (const row of Object.values(byKey)) expect(row.scorerVersion).toBe(1);
 
     const evaluation = await evaluationRow(evaluationId);
     expect(evaluation).toMatchObject({ status: 'completed', error: null, supersededAt: null });
@@ -341,7 +342,7 @@ describe('claim and publish', () => {
     expect(second!.token).not.toBe(first!.token);
 
     const evidence = await loadEvidence(t.db, first!);
-    const scored = await scoreEvidence(evidence!, { db: t.db, store });
+    const scored = (await scoreEvidence(evidence!, { db: t.db, store }))!;
     expect(await publishEvaluation(t.db, first!, scored, reconcile)).toBe('lost');
     expect(await scoresOf(evaluationId)).toEqual({});
     expect((await evaluationRow(evaluationId)).status).toBe('running');

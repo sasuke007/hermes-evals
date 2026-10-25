@@ -86,6 +86,40 @@ describe('runSelfChecks', () => {
     expect(selfCheckStatus(results)).toBe('passed');
   });
 
+  it('checks text_match against the reference: it must hold the phrases and the pattern', async () => {
+    const results = await runSelfChecks({
+      ...base,
+      reference: {
+        rule: 'Invoices unpaid 30 days after the due date are charged a late fee of 1.5% per month.',
+      },
+      expectedWorkspaceDir: null,
+      negativeControl: false,
+      entries: [
+        {
+          key: 'answer',
+          type: 'text_match',
+          params: { path: 'rule', contains: ['1.5%', '30 DAYS'] },
+        },
+        { key: 'pattern', type: 'text_match', params: { path: 'rule', pattern: '\\d+ days' } },
+        { key: 'monthly', type: 'text_match', params: { path: 'rule', contains: ['monthly'] } },
+        { key: 'elsewhere', type: 'text_match', params: { path: 'fee', contains: ['1.5%'] } },
+        { key: 'broken', type: 'text_match', params: { path: 'rule', pattern: '(per' } },
+      ],
+    });
+    expect(shape(results)).toEqual([
+      ['answer', 'answer', null, 'passed'],
+      ['pattern', 'answer', null, 'passed'],
+      ['monthly', 'answer', null, 'failed'],
+      ['elsewhere', 'answer', null, 'error'],
+      ['broken', 'answer', null, 'error'],
+    ]);
+    expect(results[0]).toMatchObject({ score: 1, comment: 'found 2 of 2: "1.5%" ✓ "30 DAYS" ✓' });
+    expect(results[2]).toMatchObject({ score: 0, comment: 'found 0 of 1: "monthly" ✗' });
+    expect(results[3]!.comment).toBe('the reference has no value at fee');
+    expect(results[4]!.comment).toBe('The pattern is not valid: unterminated group.');
+    expect(selfCheckStatus(results)).toBe('error');
+  });
+
   it('runs file checks on the expected workspace, then a negative control on the fixtures', async () => {
     const results = await runSelfChecks({
       ...base,

@@ -7,6 +7,7 @@
 export {
   lifecycleSettingsFromEnv,
   startExecutionLifecycle,
+  trialConcurrency,
   type ExecutionLifecycle,
   type ExecutionLifecycleDeps,
 } from './lifecycle.js';

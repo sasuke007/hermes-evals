@@ -22,6 +22,7 @@ import {
   NETWORK_EVENT_KINDS,
   PLATFORM_EVENT_SUBTYPES,
   SCORER_TYPES,
+  TRAJECTORY_MODES,
 } from './vocab.js';
 
 const isoTime = z.iso.datetime({ offset: true });
@@ -449,21 +450,86 @@ export const RunEventPayloadSchema = z.discriminatedUnion('type', [
 ]);
 export type RunEventPayload = z.infer<typeof RunEventPayloadSchema>;
 
-/** Pointers from a score to the evidence behind it, plus scorer-specific detail. */
+/**
+ * The LLM judge's call behind an llm_judge score (plan 9.5): the grading
+ * cost, kept apart from the attempt's execution cost and never counted by
+ * the spend guard. This is what the plan calls `evidence.judge_tokens` and
+ * `judge_cost_usd`. The judge's calls go through egress's admin socket, so
+ * there is no base URL to record except a `custom` judge's own.
+ */
+export const JudgeEvidenceSchema = z.object({
+  /** The judge's provider (a PROVIDERS value), from the check or JUDGE_PROVIDER. */
+  provider: z.string(),
+  /** A `custom` judge's base URL; absent for the providers egress routes by name. */
+  base_url: z.string().optional(),
+  model: z.string(),
+  /** Calls made: 1, or 2 when the first failed in transport or with a 5xx and was retried. */
+  calls: z.number().int().positive(),
+  /** Summed over the calls, as egress metered them. */
+  tokens: TokensSchema.partial({ cache_read: true, cache_write: true }),
+  /** Priced from the experiment's frozen price table; null when the judge model has no price. */
+  cost_usd: z.number().nonnegative().nullable(),
+  latency_ms: count,
+  /** The provider's finish reason of the answer that was graded, e.g. `stop`. */
+  finish_reason: z.string().nullable().optional(),
+});
+export type JudgeEvidence = z.infer<typeof JudgeEvidenceSchema>;
+
+/**
+ * What trajectory_match counted (plan 9.3): calls named `tool` and, of
+ * those, the ones whose arguments hold `args` as a subset, whose tool_use
+ * sequence numbers are `matched_seqs` (also in `event_seqs`). With `mode`,
+ * the whole trajectory was compared by openevals instead, and `calls` is the
+ * number of tool calls in it.
+ */
+export const TrajectoryEvidenceSchema = z.object({
+  tool: z.string(),
+  calls: count,
+  matched_seqs: z.array(z.number().int().positive()),
+  mode: z.enum(TRAJECTORY_MODES).optional(),
+});
+export type TrajectoryEvidence = z.infer<typeof TrajectoryEvidenceSchema>;
+
+/**
+ * Each phrase and the pattern of a text_match key, and whether it was found
+ * (DESIGN_CHECKS_FIX_PROMPT.md Part F: "Found 1 of 2: `1.5%` ✓ `30 days` ✗").
+ * `truncated`: the text was longer than the 64 KB matched, so only its start
+ * was searched.
+ */
+export const TextMatchEvidenceSchema = z.object({
+  items: z.array(
+    z.object({ kind: z.enum(['phrase', 'pattern']), label: z.string(), found: z.boolean() }),
+  ),
+  truncated: z.boolean(),
+});
+export type TextMatchEvidence = z.infer<typeof TextMatchEvidenceSchema>;
+
+/**
+ * json_match's partial credit, key by key (DESIGN_CHECKS_FIX_PROMPT.md Part
+ * B: "4 of 5 keys match", or "4 of 5 items match" for a list compared
+ * without order): what was counted, how many matched exactly, and the path
+ * of each mismatch, such as `bands[2].net`.
+ */
+export const JsonMatchEvidenceSchema = z.object({
+  unit: z.enum(['keys', 'items', 'value']),
+  matched: count,
+  total: count,
+  mismatches: z.array(z.string()),
+});
+export type JsonMatchEvidence = z.infer<typeof JsonMatchEvidenceSchema>;
+
+/**
+ * Pointers from a score to the evidence behind it, plus scorer-specific
+ * detail. Each scorer fills its own field; every field is optional, so rows
+ * written before a field existed stay valid.
+ */
 export const ScoreEvidenceSchema = z.object({
   event_seqs: z.array(z.number().int()).optional(),
   artifact_ids: z.array(z.string()).optional(),
-  judge: z
-    .object({
-      provider: z.string(),
-      base_url: z.string(),
-      model: z.string(),
-      calls: z.number().int().positive(),
-      tokens: TokensSchema.partial({ cache_read: true, cache_write: true }),
-      cost_usd: z.number().nonnegative().nullable(),
-      latency_ms: count,
-    })
-    .optional(),
+  judge: JudgeEvidenceSchema.optional(),
+  trajectory: TrajectoryEvidenceSchema.optional(),
+  text: TextMatchEvidenceSchema.optional(),
+  json_match: JsonMatchEvidenceSchema.optional(),
   script: z
     .object({
       argv: z.array(z.string()),

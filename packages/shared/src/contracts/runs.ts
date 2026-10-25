@@ -5,7 +5,12 @@
  * See ./common.ts for the conventions every contract file follows.
  */
 import { z } from 'zod';
-import { EXECUTION_ERROR_CATEGORIES, RUN_STATUSES, SCORE_STATUSES } from '../status.js';
+import {
+  EVALUATION_CAUSES,
+  EXECUTION_ERROR_CATEGORIES,
+  RUN_STATUSES,
+  SCORE_STATUSES,
+} from '../status.js';
 import { PROVIDERS } from '../vocab.js';
 import { countView, isoTimeView, isUnique, rateView, secondsView, usdView } from './common.js';
 import { ExperimentConfigRefSchema } from './experiments.js';
@@ -28,6 +33,42 @@ export const RunModelNeedsSchema = z.object({
   judgeProvider: provider.nullable(),
 });
 export type RunModelNeeds = z.infer<typeof RunModelNeedsSchema>;
+
+/** A run's evaluation number: 1 for the first, +1 per re-score (plan 9.4). */
+const generation = z.number().int().positive();
+
+/**
+ * A queued or running evaluation of a run (plan 9.4): its first while the
+ * run is `executed` or `scoring`, or a re-score of a `scored` run, which
+ * keeps its status and current result until the new one publishes. The
+ * database lets a run have at most one (evaluations_in_flight_uq).
+ */
+export const PendingEvaluationViewSchema = z.object({
+  evaluationId: z.string(),
+  generation,
+  status: z.enum(['queued', 'running']),
+  cause: z.enum(EVALUATION_CAUSES),
+  requestedAt: isoTimeView,
+});
+export type PendingEvaluationView = z.infer<typeof PendingEvaluationViewSchema>;
+
+/**
+ * Which evaluation a run's scores come from (the inspector header and
+ * Outcome), and what happened to any newer one.
+ */
+export const RunEvaluationViewSchema = z.object({
+  /** Generation of the current (published, not superseded) evaluation; null until the first publishes. */
+  generation: generation.nullable(),
+  /** The run's queued or running evaluation, if any. */
+  pending: PendingEvaluationViewSchema.nullable(),
+  /**
+   * The run's newest evaluation, when it is a re-score that failed (its
+   * job died on every try): the result of `generation` stays current. Null
+   * once a later re-score is pending or published.
+   */
+  lastFailure: z.object({ generation, error: z.string(), finishedAt: isoTimeView }).nullable(),
+});
+export type RunEvaluationView = z.infer<typeof RunEvaluationViewSchema>;
 
 /** The primary key's result on a scored run. */
 export const PrimaryScoreViewSchema = z.object({
@@ -136,6 +177,10 @@ export const RunRowSchema = z.object({
   costUsd: usdView.nullable(),
   finishedAt: isoTimeView.nullable(),
   needs: RunModelNeedsSchema,
+  /** Generation of the evaluation primaryScore comes from; null until the first publishes. */
+  generation: generation.nullable(),
+  /** A re-score of this scored run is queued or running; primaryScore is still the previous result. */
+  rescorePending: z.boolean(),
 });
 export type RunRow = z.infer<typeof RunRowSchema>;
 
@@ -192,3 +237,50 @@ export const RunActionResultSchema = z.object({
   attempt: z.number().int().positive().nullable(),
 });
 export type RunActionResult = z.infer<typeof RunActionResultSchema>;
+
+/**
+ * POST /runs/:id/rescore (plan 9.4, UI_FLOWS 18): the re-score evaluation,
+ * queued with its evaluate-run job in one transaction. A RunActionResult
+ * with more, so the inspector's action handling reads it unchanged. The run
+ * stays `scored`, and its current result stays current until the new
+ * generation publishes. A request while a re-score is already queued or
+ * running answers that one with `joinedPending` true: double clicks
+ * collapse into one evaluation.
+ */
+export const RescoreRunResultSchema = RunActionResultSchema.extend({
+  status: z.literal('scored'),
+  attempt: z.null(),
+  evaluation: PendingEvaluationViewSchema.extend({ cause: z.literal('rescore') }),
+  joinedPending: z.boolean(),
+});
+export type RescoreRunResult = z.infer<typeof RescoreRunResultSchema>;
+
+/**
+ * POST /experiments/:id/runs/rescore: a BulkRunActionResult with the
+ * evaluation of each accepted run. `enqueued` lists every accepted run,
+ * including those that joined a re-score already pending; `refused` the
+ * others with their reason (not scored, not in this experiment, the judge's
+ * provider not ready).
+ */
+export const BulkRescoreResultSchema = BulkRunActionResultSchema.extend({
+  action: z.literal('rescore'),
+  evaluations: z.array(
+    z.object({
+      runId: z.string(),
+      evaluationId: z.string(),
+      generation,
+      status: z.enum(['queued', 'running']),
+      joinedPending: z.boolean(),
+    }),
+  ),
+}).superRefine((r, ctx) => {
+  const accepted = r.evaluations.map((e) => e.runId);
+  if (accepted.length !== r.enqueued.length || !accepted.every((id, i) => id === r.enqueued[i])) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['evaluations'],
+      message: 'evaluations lists the enqueued runs, in the same order',
+    });
+  }
+});
+export type BulkRescoreResult = z.infer<typeof BulkRescoreResultSchema>;

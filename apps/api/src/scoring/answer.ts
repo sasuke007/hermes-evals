@@ -1,10 +1,14 @@
 /**
  * Grading one answer-based key: numeric_tolerance, json_match or exact_match
- * against the reference answer, at the key's path (plan 9.3).
+ * against the reference answer, and text_match on the answer alone, at the
+ * key's path (plan 9.3).
  *
  * Path rules: the reference lacking the value is the check's fault (`error`);
- * the answer lacking it is the agent's (`failed`). A missing or invalid
- * answer block makes the key `ungradable`, never a zero (plan 9.1).
+ * the answer lacking it is the agent's (`failed`). text_match compares
+ * nothing with the reference, but the rule holds for it too, so its
+ * self-check (the reference scored as the answer) proves the path exists. A
+ * missing or invalid answer block makes the key `ungradable`, never a zero
+ * (plan 9.1).
  */
 import type { ExtractedAnswer, JsonValue, ScorerParams } from '@hermes-evals/shared';
 import {
@@ -19,13 +23,14 @@ import { scoreJsonMatch } from './json-match.js';
 import { scoreNumericTolerance } from './numeric-tolerance.js';
 import type { AnswerScorerType } from './registry.js';
 import { binary, guarded, scorerError, ungradable, type ScorerResult } from './result.js';
+import { scoreTextMatch } from './text-match.js';
 
 /** One answer-based key with its parsed (defaulted) params. */
 export type AnswerKey = {
   [T in AnswerScorerType]: { type: T; params: ScorerParams<T> };
 }[AnswerScorerType];
 
-/** Compares two values already taken at the key's path. */
+/** Compares two values already taken at the key's path. text_match reads `observed` only. */
 export function compareAnswerValues(
   key: AnswerKey,
   observed: JsonValue,
@@ -38,6 +43,8 @@ export function compareAnswerValues(
       return scoreJsonMatch(key.params, observed, expected);
     case 'exact_match':
       return scoreExactMatch(key.params, observed, expected);
+    case 'text_match':
+      return scoreTextMatch(observed, key.params);
   }
 }
 

@@ -1,0 +1,15 @@
+summary: List the open ids and the currency
+limits:
+  max_turns: 10
+  run_budget_seconds: 120
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: ids, unordered: true }
+  - key: currency
+    type: exact_match
+    params: { path: currency, case_sensitive: false }

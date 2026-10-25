@@ -9,7 +9,15 @@ import { fromDrizzle, fromPglite, PgBoss } from 'pg-boss';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { deferJob } from './defer.js';
 import { ensureQueues } from './queue.service.js';
-import { EXECUTE_RUN_EXPIRE_SECONDS, executeRunKey, QUEUES, type ExecuteRunJob } from './queues.js';
+import { KEY_SETUP_SECONDS, scoringSeconds } from '../scoring/scoring-time.js';
+import {
+  EVALUATE_RUN_EXPIRE_SECONDS,
+  EXECUTE_RUN_EXPIRE_SECONDS,
+  executeRunKey,
+  MAX_SCORING_SECONDS,
+  QUEUES,
+  type ExecuteRunJob,
+} from './queues.js';
 
 let pg: PGlite;
 let db: PgliteDatabase;
@@ -58,8 +66,20 @@ describe('ensureQueues', () => {
     expect(evaluate).toMatchObject({
       policy: 'exclusive',
       retryLimit: 2,
+      expireInSeconds: EVALUATE_RUN_EXPIRE_SECONDS,
+      heartbeatSeconds: 30,
       deadLetter: QUEUES.evaluateRunDead,
     });
+    // pg-boss fails an active job at its expiry whatever its heartbeats say, so the
+    // expiry must outlast the slowest pass the loader accepts, with room around it.
+    const slowest = scoringSeconds(
+      Array.from({ length: Math.floor(MAX_SCORING_SECONDS / (300 + KEY_SETUP_SECONDS)) }, () => ({
+        type: 'verifier_script' as const,
+        params: { script: 'v.py', timeout_s: 300 },
+      })),
+    );
+    expect(slowest).toBeLessThanOrEqual(MAX_SCORING_SECONDS);
+    expect(EVALUATE_RUN_EXPIRE_SECONDS).toBeGreaterThanOrEqual(MAX_SCORING_SECONDS + 300);
     expect(await boss.getQueue(QUEUES.evaluateRunDead)).toMatchObject({ policy: 'standard' });
     expect(await boss.getQueue(QUEUES.testMcpServer)).toMatchObject({
       policy: 'exclusive',

@@ -18,6 +18,30 @@ x-trial-settings: &trial-settings
   TRIAL_IMAGE: hermes-evals/trial:v0.22.4-4d04303
   TRIAL_VOLUME: hermes-evals-trials
 
+# The LLM judge's platform default, for llm_judge checks that name no
+# `model:` (unset by default; see .env.example). The worker scores with it;
+# the api reads it to refuse a launch or re-score while the judge's provider
+# is not ready. Judge calls go through egress's admin socket, so neither
+# holds a provider key. Read from the shell, then .env; empty means unset.
+x-judge-settings: &judge-settings
+  JUDGE_PROVIDER: ${JUDGE_PROVIDER:-}
+  JUDGE_MODEL: ${JUDGE_MODEL:-}
+  JUDGE_BASE_URL: ${JUDGE_BASE_URL:-}
+
+# Provider keys belong to egress alone. The api and the worker load .env for
+# their settings and the stdio MCP values, so every key .env can hold is
+# blanked here, over env_file: neither process, nor a verifier script the
+# worker runs as its own child (same uid, able to read /proc/1/environ),
+# ever holds one. Readiness asks egress which keys are set (/env-names).
+# Keep in step with the apiKeyEnv names in PROVIDER_ROUTES
+# (apps/api/src/execution/providers-map.ts).
+x-no-provider-keys: &no-provider-keys
+  NOUS_API_KEY: ''
+  OPENROUTER_API_KEY: ''
+  OPENAI_API_KEY: ''
+  ANTHROPIC_API_KEY: ''
+  CUSTOM_API_KEY: ''
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -46,6 +70,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: [*judge-settings, *no-provider-keys]
       NODE_ENV: production
       PORT: '3000'
       # All interfaces inside the container, for nginx and the published
@@ -84,13 +109,17 @@ services:
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
-    # stdio MCP env values (and provider keys for the LLM judge) come from .env;
-    # the worker records only their names on its workers row.
+    # stdio MCP env values come from .env; the worker records only their names
+    # on its workers row. It holds no provider key (blanked below): trials and
+    # the LLM judge reach models through egress.
     env_file:
       - path: .env
         required: false
     environment:
-      <<: *trial-settings
+      <<: [*trial-settings, *judge-settings, *no-provider-keys]
+      # Total tokens the model gateway serves one attempt (sent as the
+      # registration's maxTokens); empty means 2000000.
+      MODEL_TOKEN_CAP_PER_ATTEMPT: ${MODEL_TOKEN_CAP_PER_ATTEMPT:-}
       NODE_ENV: production
       DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
       SUITES_DIR: /data/suites
@@ -179,7 +208,9 @@ services:
 
   # The only network path out of a trial: forward proxy (:3128), model
   # gateway (:8080/v1) and MCP gateway (:8080/mcp/<name>). Provider
-  # credentials and http MCP header values live here, never in a trial.
+  # credentials and http MCP header values live here, never in a trial. The
+  # worker's LLM judge calls come over the admin socket (/judges/<id>) and
+  # are forwarded by the same gateway code.
   egress:
     image: hermes-evals/egress
     build:
@@ -192,6 +223,9 @@ services:
         required: false
     environment:
       ADMIN_SOCKET: /run/egress/admin.sock
+      # The cap for a registration that names no maxTokens; past it the model
+      # gateway answers 429 (token_cap_reached). Empty means 2000000.
+      MODEL_TOKEN_CAP_PER_ATTEMPT: ${MODEL_TOKEN_CAP_PER_ATTEMPT:-}
       # One entry per upstream in PROVIDER_ROUTES (apps/api/src/execution/providers-map.ts);
       # keep the two in step. `custom` has no entry: each custom attempt
       # registers its own base URL, and CUSTOM_API_KEY (from .env) is its key.

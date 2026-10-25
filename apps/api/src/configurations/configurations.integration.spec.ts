@@ -22,6 +22,7 @@ import {
 } from '../database/schema/index.js';
 import { ConfigurationReadsService } from './configuration-reads.service.js';
 import { ConfigurationWritesService } from './configuration-writes.service.js';
+import { sanitisedNameClashes } from './references.js';
 import { configHash } from './settings.js';
 import {
   freezeVersion,
@@ -29,6 +30,7 @@ import {
   httpError,
   mcpFrozenAt,
   seedLibrary,
+  seedStdioMcpServer,
   versionRow as storedVersion,
   type Library,
 } from './support-spec.js';
@@ -210,6 +212,30 @@ describe('create', () => {
     expect(await mcpFrozenAt(t.db, lib.mcpV1)).toBeNull();
   });
 
+  // Hermes names an MCP tool mcp__<sanitised server>__<tool>: invoice-db and
+  // invoice_db would both register mcp__invoice_db__get_invoice.
+  it('answers 400 naming both MCP servers whose names sanitise alike, and stores nothing', async () => {
+    const underscored = await seedStdioMcpServer(t.db, 'invoice_db');
+    const err = await httpError(
+      writes.create(input({ mcpServerVersionIds: [lib.mcpV1, underscored, lib.httpMcpV1] })),
+    );
+    const message =
+      'MCP servers invoice-db and invoice_db cannot be used together: their names sanitise alike, so Hermes would name the tools of both mcp__invoice_db__<tool>; keep one, or rename one';
+    expect(err.status).toBe(400);
+    expect(err.body).toEqual({
+      statusCode: 400,
+      message,
+      issues: [{ path: 'mcpServerVersionIds', message }],
+    });
+    expect(await t.db.select({ n: count() }).from(configurations)).toEqual([{ n: 0 }]);
+    expect(await mcpFrozenAt(t.db, lib.mcpV1)).toBeNull();
+    expect(await mcpFrozenAt(t.db, underscored)).toBeNull();
+    // Either one alone, beside a server whose name differs, saves.
+    expect(
+      (await writes.create(input({ mcpServerVersionIds: [underscored, lib.httpMcpV1] }))).version,
+    ).toBe(1);
+  });
+
   // Nothing in the database backs these two: each run would copy whichever
   // file landed last into home/skills/<name>/ or workspace/docs/<filename>.
   it('answers 400 for two versions of one skill, and stores nothing', async () => {
@@ -368,6 +394,18 @@ describe('edit', () => {
       writes.update(saved.configurationId, input({ mcpServerVersionIds: [lib.mcpV1, lib.mcpV2] })),
     );
     expect(err.status).toBe(400);
+    const underscored = await seedStdioMcpServer(t.db, 'invoice_db');
+    const clash = await httpError(
+      writes.update(
+        saved.configurationId,
+        input({ mcpServerVersionIds: [underscored, lib.mcpV2] }),
+      ),
+    );
+    expect(clash.status).toBe(400);
+    expect(clash.body.message).toMatch(
+      /^MCP servers invoice_db and invoice-db cannot be used together/,
+    );
+    expect((await detail(saved.configurationId)).latest.mcpServers).toEqual([]);
     const missing = await httpError(
       writes.update(saved.configurationId, input({ skillIds: ['nope'] })),
     );
@@ -399,5 +437,21 @@ describe('edit', () => {
       documentIds: before.documentIds,
       configHash: before.configHash,
     });
+  });
+});
+
+describe('sanitisedNameClashes', () => {
+  it('groups distinct names that sanitise alike, in first-seen order', () => {
+    expect(sanitisedNameClashes(['a-b', 'c', 'a_b', 'c-d', 'a-b'])).toEqual([
+      { sanitised: 'a_b', names: ['a-b', 'a_b'] },
+    ]);
+    expect(sanitisedNameClashes(['x-y-z', 'x_y-z', 'x-y_z'])).toEqual([
+      { sanitised: 'x_y_z', names: ['x-y-z', 'x_y-z', 'x-y_z'] },
+    ]);
+  });
+
+  it('finds nothing among names that differ once sanitised, or one name twice', () => {
+    expect(sanitisedNameClashes(['invoice-db', 'vendor-api', 'invoice-db'])).toEqual([]);
+    expect(sanitisedNameClashes([])).toEqual([]);
   });
 });

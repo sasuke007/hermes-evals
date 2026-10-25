@@ -27,7 +27,7 @@ import { SystemController } from '../system/system.controller.js';
 import { buildApiDocument, swaggerRequestInterceptor } from './document.js';
 import { REQUEST_SCHEMAS, RESPONSE_SCHEMAS } from './schemas.js';
 
-/** Every route, as the document must list it. Re-score routes come in Phase 3. */
+/** Every route, as the document must list it. */
 const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/health'],
   ['get', '/api/suites'],
@@ -86,8 +86,10 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['post', '/api/experiments/{id}/duplicate'],
   ['get', '/api/experiments/{id}/runs'],
   ['post', '/api/experiments/{id}/runs/retry'],
+  ['post', '/api/experiments/{id}/runs/rescore'],
   ['get', '/api/runs/{id}'],
   ['get', '/api/runs/{id}/events'],
+  ['post', '/api/runs/{id}/rescore'],
   ['post', '/api/runs/{id}/retry'],
   ['post', '/api/runs/{id}/cancel'],
   ['get', '/api/runs/{id}/artifacts/{artifactId}/content'],
@@ -105,6 +107,7 @@ const BODILESS = new Set([
   'post /api/experiments/{id}/cancel',
   'post /api/experiments/{id}/retry-failed',
   'post /api/experiments/{id}/duplicate',
+  'post /api/runs/{id}/rescore',
   'post /api/runs/{id}/retry',
   'post /api/runs/{id}/cancel',
 ]);
@@ -224,7 +227,7 @@ describe('the API document', () => {
     });
   });
 
-  it('documents the Phase 2 contracts by name, the streams as text/event-stream', () => {
+  it('documents the Phase 2 and 3 contracts by name, the streams as text/event-stream', () => {
     const json = (method: string, path: string, status = '200') =>
       operation(method, path).responses[status]!.content!['application/json']!.schema;
     const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -242,6 +245,8 @@ describe('the API document', () => {
     expect(json('get', '/api/runs/{id}/events')).toEqual(ref('RunEventsPage'));
     expect(json('post', '/api/runs/{id}/retry')).toEqual(ref('RunActionResult'));
     expect(json('post', '/api/experiments/{id}/runs/retry')).toEqual(ref('BulkRunActionResult'));
+    expect(json('post', '/api/runs/{id}/rescore')).toEqual(ref('RescoreRunResult'));
+    expect(json('post', '/api/experiments/{id}/runs/rescore')).toEqual(ref('BulkRescoreResult'));
     expect(json('get', '/api/providers')).toEqual({ type: 'array', items: ref('ProviderInfo') });
     expect(json('post', '/api/providers/nous/login')).toEqual(ref('NousLogin'));
     for (const [path, name] of [
@@ -257,12 +262,14 @@ describe('the API document', () => {
     expect(body('post', '/api/experiments')).toEqual(ref('LaunchExperiment'));
     expect(body('post', '/api/experiments/{id}/resume')).toEqual(ref('ResumeExperiment'));
     expect(body('post', '/api/experiments/{id}/runs/retry')).toEqual(ref('BulkRunAction'));
+    expect(body('post', '/api/experiments/{id}/runs/rescore')).toEqual(ref('BulkRunAction'));
     const query = (path: string) =>
       (operation('get', path).parameters ?? [])
         .filter((p) => p.in === 'query')
         .map((p) => p.name)
         .sort();
     expect(query('/api/experiments/estimate')).toEqual([
+      'budget',
       'concurrency',
       'repetitions',
       'suite',

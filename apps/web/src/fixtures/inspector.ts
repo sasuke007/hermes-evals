@@ -25,6 +25,7 @@ import type {
   LaunchRecordView,
   OutcomeNotice,
   RunDetail,
+  RunEvaluationView,
   RunEventsPage,
   ScoreRowView,
   TimelineEvent,
@@ -149,9 +150,15 @@ function modelCall(
     durationMs,
     text: extra ? `${MODEL_CALL_TEXT} ${extra}` : MODEL_CALL_TEXT,
     network: {
+      kind: 'model',
+      decision: 'allowed',
       method: 'POST',
       url: 'http://egress:8080/v1/chat/completions',
+      host: null,
+      port: null,
+      server: null,
       status: 200,
+      reason: null,
       model: MODEL,
       tokensIn,
       tokensOut,
@@ -168,6 +175,21 @@ function backgroundRefusal(seq: number): TimelineEvent {
     title: 'Refused by sandbox',
     summary: 'inference-api.nousresearch.com:443',
     text: "Refused by sandbox: inference-api.nousresearch.com:443. Hermes looks up model prices in the background; this is not the agent's action and does not affect results.",
+    network: {
+      kind: 'connect',
+      decision: 'denied',
+      method: null,
+      url: null,
+      host: 'inference-api.nousresearch.com',
+      port: 443,
+      server: null,
+      status: null,
+      reason: 'not on the allowlist',
+      model: null,
+      tokensIn: null,
+      tokensOut: null,
+      forwardedTo: null,
+    },
     refusal: { host: 'inference-api.nousresearch.com', port: 443, reason: 'not on the allowlist' },
   });
 }
@@ -1115,6 +1137,28 @@ function counterpartFor(seed: ExperimentSeed, run: RunSeed): CounterpartView | n
   };
 }
 
+/**
+ * Which evaluation the scores come from. Fixture runs are graded once: a
+ * scored run shows generation 1, and an executed or scoring run its first
+ * evaluation in flight.
+ */
+function evaluationFor(run: RunSeed): RunEvaluationView {
+  const inFlight = run.status === 'executed' || run.status === 'scoring';
+  return {
+    generation: run.status === 'scored' ? 1 : null,
+    pending: inFlight
+      ? {
+          evaluationId: `eval_${run.id.replace(/^run_/, '')}_1`,
+          generation: 1,
+          status: run.status === 'scoring' ? 'running' : 'queued',
+          cause: 'initial',
+          requestedAt: run.finishedAt ?? run.startedAt ?? at(23, '15:30:00'),
+        }
+      : null,
+    lastFailure: null,
+  };
+}
+
 /** The whole inspector detail of one run. */
 export function runDetailFixture(active: Active, runId: string): RunDetail | null {
   const found = findRun(active, runId);
@@ -1175,6 +1219,7 @@ export function runDetailFixture(active: Active, runId: string): RunDetail | nul
         : null,
     executionError: executionErrorFor(seed, run, active),
     outcomeNotice: outcomeNoticeFor(run, scores),
+    evaluation: evaluationFor(run),
     scores,
     timeline: {
       events,

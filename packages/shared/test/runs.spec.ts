@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BulkRescoreResultSchema,
   BulkRunActionInputSchema,
+  BulkRunActionResultSchema,
+  RescoreRunResultSchema,
+  RunActionResultSchema,
   RunDetailSchema,
+  RunEvaluationViewSchema,
   RunEventsPageSchema,
   RunEventsQuerySchema,
   RunListQuerySchema,
@@ -43,6 +48,8 @@ const ROW: RunRow = {
   costUsd: 0.011,
   finishedAt: '2026-10-22T10:21:07',
   needs: NEEDS,
+  generation: 1,
+  rescorePending: false,
 };
 
 const MODEL_CALL: TimelineEvent = {
@@ -62,9 +69,15 @@ const MODEL_CALL: TimelineEvent = {
   truncated: false,
   text: 'POST http://egress:8080/v1/chat/completions → 200, forwarded to Nous Portal.',
   network: {
+    kind: 'model',
+    decision: 'allowed',
     method: 'POST',
     url: 'http://egress:8080/v1/chat/completions',
+    host: null,
+    port: null,
+    server: null,
     status: 200,
+    reason: null,
     model: 'openai/gpt-6.1-sol',
     tokensIn: 3200,
     tokensOut: 410,
@@ -82,7 +95,21 @@ const REFUSED: TimelineEvent = {
   title: 'Refused by sandbox',
   summary: 'inference-api.nousresearch.com:443',
   durationMs: null,
-  network: null,
+  network: {
+    kind: 'connect',
+    decision: 'denied',
+    method: null,
+    url: null,
+    host: 'inference-api.nousresearch.com',
+    port: 443,
+    server: null,
+    status: null,
+    reason: 'not on the allowlist',
+    model: null,
+    tokensIn: null,
+    tokensOut: null,
+    forwardedTo: null,
+  },
   refusal: { host: 'inference-api.nousresearch.com', port: 443, reason: 'not on the allowlist' },
 };
 
@@ -127,6 +154,7 @@ const DETAIL: RunDetail = {
   cancelled: null,
   executionError: null,
   outcomeNotice: null,
+  evaluation: { generation: 1, pending: null, lastFailure: null },
   scores: [
     {
       key: 'answer',
@@ -327,6 +355,212 @@ describe('RunEventsQuerySchema', () => {
     expect(RunEventsQuerySchema.parse({ after: '17' })).toEqual({ after: 17 });
     for (const after of ['-1', '1.5', 'last']) {
       expect(issuePaths(RunEventsQuerySchema.safeParse({ after }))).toEqual(['after']);
+    }
+  });
+});
+
+describe('timeline network rows (Phase 2 question 4)', () => {
+  const blank = { ...MODEL_CALL, kind: 'tool' as const, network: null };
+  const entry = MODEL_CALL.network!;
+
+  it('describe every kind of connection log entry, with what the log does not record as null', () => {
+    const mcp: TimelineEvent = {
+      ...MODEL_CALL,
+      title: 'MCP call',
+      network: {
+        ...entry,
+        kind: 'mcp',
+        method: 'POST',
+        url: 'http://egress:8080/mcp/vendor',
+        host: 'mcp.example.com',
+        server: 'vendor',
+        model: null,
+        tokensIn: null,
+        tokensOut: null,
+        forwardedTo: null,
+      },
+    };
+    const http: TimelineEvent = {
+      ...MODEL_CALL,
+      title: 'HTTP request',
+      network: {
+        ...REFUSED.network!,
+        kind: 'http',
+        decision: 'allowed',
+        status: 301,
+        reason: null,
+      },
+    };
+    const unanswered: TimelineEvent = {
+      ...MODEL_CALL,
+      network: { ...entry, status: null, tokensIn: null, tokensOut: null },
+    };
+    for (const event of [MODEL_CALL, REFUSED, mcp, http, unanswered, blank]) {
+      expect(TimelineEventSchema.parse(event)).toEqual(event);
+    }
+  });
+
+  it('is set exactly on network and refused rows', () => {
+    expect(issuePaths(TimelineEventSchema.safeParse({ ...MODEL_CALL, network: null }))).toEqual([
+      'network',
+    ]);
+    expect(issuePaths(TimelineEventSchema.safeParse({ ...REFUSED, network: null }))).toEqual([
+      'network',
+    ]);
+    expect(issuePaths(TimelineEventSchema.safeParse({ ...blank, network: entry }))).toEqual([
+      'network',
+    ]);
+  });
+
+  it('refuses unknown kinds and decisions, and a missing field', () => {
+    const bad: [unknown, string][] = [
+      [{ ...entry, kind: 'dns' }, 'network.kind'],
+      [{ ...entry, decision: 'maybe' }, 'network.decision'],
+      [{ ...entry, port: 0 }, 'network.port'],
+      [{ ...entry, tokensIn: -1 }, 'network.tokensIn'],
+      [{ ...entry, forwardedTo: undefined }, 'network.forwardedTo'],
+    ];
+    for (const [network, path] of bad) {
+      expect(issuePaths(TimelineEventSchema.safeParse({ ...MODEL_CALL, network })), path).toEqual([
+        path,
+      ]);
+    }
+  });
+});
+
+describe('re-score contracts (plan 9.4)', () => {
+  const pending = {
+    evaluationId: 'eval_01JBC',
+    generation: 2,
+    status: 'queued' as const,
+    cause: 'rescore' as const,
+    requestedAt: '2026-10-25T10:00:00.000Z',
+  };
+
+  it('show the current generation and a pending or failed re-score', () => {
+    for (const view of [
+      { generation: null, pending: null, lastFailure: null },
+      {
+        generation: null,
+        pending: { ...pending, generation: 1, cause: 'initial' },
+        lastFailure: null,
+      },
+      { generation: 1, pending, lastFailure: null },
+      {
+        generation: 1,
+        pending: null,
+        lastFailure: {
+          generation: 2,
+          error: 'grading failed after 3 tries',
+          finishedAt: pending.requestedAt,
+        },
+      },
+    ]) {
+      expect(RunEvaluationViewSchema.parse(view)).toEqual(view);
+    }
+    const row = { ...ROW, generation: 1, rescorePending: true };
+    const list = {
+      rows: [row],
+      matched: 1,
+      summary: { total: 1, passed: 0, failed: 1, error: 0, ungradable: 0, executionErrors: 0 },
+    };
+    expect(RunListResultSchema.parse(list)).toEqual(list);
+    const detail = { ...DETAIL, evaluation: { generation: 1, pending, lastFailure: null } };
+    expect(RunDetailSchema.parse(detail)).toEqual(detail);
+  });
+
+  it('refuse a generation below 1, an unknown status, and a missing field', () => {
+    const bad: [unknown, string][] = [
+      [{ generation: 0, pending: null, lastFailure: null }, 'generation'],
+      [
+        { generation: 1, pending: { ...pending, status: 'completed' }, lastFailure: null },
+        'pending.status',
+      ],
+      [
+        { generation: 1, pending: { ...pending, cause: 'manual' }, lastFailure: null },
+        'pending.cause',
+      ],
+      [{ generation: 1, pending: null }, 'lastFailure'],
+    ];
+    for (const [view, path] of bad) {
+      expect(issuePaths(RunEvaluationViewSchema.safeParse(view)), path).toEqual([path]);
+    }
+    expect(issuePaths(RunDetailSchema.safeParse({ ...DETAIL, evaluation: undefined }))).toEqual([
+      'evaluation',
+    ]);
+    const { rescorePending: _, ...row } = ROW;
+    expect(
+      issuePaths(
+        RunListResultSchema.safeParse({
+          rows: [row],
+          matched: 1,
+          summary: { total: 1, passed: 0, failed: 1, error: 0, ungradable: 0, executionErrors: 0 },
+        }),
+      ),
+    ).toEqual(['rows.0.rescorePending']);
+  });
+
+  it('answers a single re-score as a run action with its evaluation, joined or new', () => {
+    const fresh = {
+      runId: ROW.id,
+      status: 'scored',
+      attempt: null,
+      evaluation: pending,
+      joinedPending: false,
+    };
+    const joined = { ...fresh, evaluation: { ...pending, status: 'running' }, joinedPending: true };
+    for (const result of [fresh, joined]) {
+      expect(RescoreRunResultSchema.parse(result)).toEqual(result);
+      // The inspector's action handling reads it as any run action.
+      expect(RunActionResultSchema.safeParse(result).success).toBe(true);
+    }
+    const bad: [unknown, string][] = [
+      [{ ...fresh, status: 'scoring' }, 'status'],
+      [{ ...fresh, attempt: 2 }, 'attempt'],
+      [{ ...fresh, evaluation: { ...pending, cause: 'initial' } }, 'evaluation.cause'],
+      [{ ...fresh, evaluation: { ...pending, generation: 0 } }, 'evaluation.generation'],
+      [{ ...fresh, joinedPending: undefined }, 'joinedPending'],
+    ];
+    for (const [result, path] of bad) {
+      expect(issuePaths(RescoreRunResultSchema.safeParse(result)), path).toEqual([path]);
+    }
+  });
+
+  it('answers a bulk re-score per run, like bulk retry, with each accepted run’s evaluation', () => {
+    const result = {
+      action: 'rescore',
+      enqueued: ['run_a', 'run_b'],
+      refused: [{ runId: 'run_c', reason: 'run is execution_error, not scored' }],
+      evaluations: [
+        {
+          runId: 'run_a',
+          evaluationId: 'eval_a',
+          generation: 2,
+          status: 'queued',
+          joinedPending: false,
+        },
+        {
+          runId: 'run_b',
+          evaluationId: 'eval_b',
+          generation: 3,
+          status: 'running',
+          joinedPending: true,
+        },
+      ],
+    };
+    expect(BulkRescoreResultSchema.parse(result)).toEqual(result);
+    expect(BulkRunActionResultSchema.safeParse(result).success).toBe(true);
+    const empty = { action: 'rescore', enqueued: [], refused: result.refused, evaluations: [] };
+    expect(BulkRescoreResultSchema.parse(empty)).toEqual(empty);
+
+    const bad: [unknown, string][] = [
+      [{ ...result, action: 'retry' }, 'action'],
+      [{ ...result, evaluations: result.evaluations.slice(0, 1) }, 'evaluations'],
+      [{ ...result, evaluations: [...result.evaluations].reverse() }, 'evaluations'],
+      [{ ...result, refused: [{ runId: 'run_c' }] }, 'refused.0.reason'],
+    ];
+    for (const [body, path] of bad) {
+      expect(issuePaths(BulkRescoreResultSchema.safeParse(body)), path).toEqual([path]);
     }
   });
 });

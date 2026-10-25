@@ -21,7 +21,12 @@ import {
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import { DB } from '../database/db.provider.js';
 import { ConfigurationsModule } from './configurations.module.js';
-import { configurationInput as input, seedLibrary, type Library } from './support-spec.js';
+import {
+  configurationInput as input,
+  seedLibrary,
+  seedStdioMcpServer,
+  type Library,
+} from './support-spec.js';
 
 let t: TestDatabase;
 let lib: Library;
@@ -100,6 +105,24 @@ describe('POST /api/configurations', () => {
       statusCode: 409,
       message: 'a configuration named baseline already exists',
     });
+  });
+});
+
+describe('MCP servers whose names sanitise alike', () => {
+  it('answers 400 naming both, on POST and on PUT', async () => {
+    const underscored = await seedStdioMcpServer(t.db, 'invoice_db');
+    const message =
+      'MCP servers invoice-db and invoice_db cannot be used together: their names sanitise alike, so Hermes would name the tools of both mcp__invoice_db__<tool>; keep one, or rename one';
+    const body = { statusCode: 400, message, issues: [{ path: 'mcpServerVersionIds', message }] };
+    const both = input({ mcpServerVersionIds: [lib.mcpV1, underscored] });
+    expect((await http().post('/api/configurations').send(both).expect(400)).body).toEqual(body);
+
+    const saved = await create({ mcpServerVersionIds: [lib.mcpV1] });
+    const put = await http()
+      .put(`/api/configurations/${saved.configurationId}`)
+      .send(both)
+      .expect(400);
+    expect(put.body).toEqual(body);
   });
 });
 

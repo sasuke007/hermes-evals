@@ -22,11 +22,20 @@
  * does the same for every list inside a list, such as the pairs in
  * `[["INV-1", "INV-2"]]`. A multiset list pairs exact matches first and the
  * rest by an optimal assignment, so the score never depends on order.
+ *
+ * Evidence (`evidence.json_match`, Part B): the counts the comment gives (for
+ * a list, the reference's items matched exactly; for an object, the keys that
+ * match; for any other value, 1 or 0) and the path of each mismatch
+ * (json-match-paths.ts), so the run inspector can explain a fractional score.
  */
-import type { JsonMatchParams, JsonValue } from '@hermes-evals/shared';
+import type { JsonMatchEvidence, JsonMatchParams, JsonValue } from '@hermes-evals/shared';
+import { canonicalText, isObject, type JsonObject, type ListOrder } from './json-canonical.js';
+import { greedyAssignment, maxCreditAssignment } from './json-match-assignment.js';
+import { collectDifferences, indexPath, keyPath, MismatchPaths } from './json-match-paths.js';
 import { graded, type ScorerResult } from './result.js';
 
-type JsonObject = { [key: string]: JsonValue };
+export { maxCreditAssignment } from './json-match-assignment.js';
+export { canonicalText, type ListOrder } from './json-canonical.js';
 
 interface MatchOptions {
   /** Sort lists that have no list ancestor. */
@@ -36,9 +45,6 @@ interface MatchOptions {
   exclude: ReadonlySet<string>;
 }
 
-const isObject = (value: JsonValue): value is JsonObject =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
 const kind = (value: JsonValue): string =>
   value === null
     ? 'null'
@@ -47,31 +53,6 @@ const kind = (value: JsonValue): string =>
       : isObject(value)
         ? 'an object'
         : typeof value;
-
-/** Which lists compare as multisets: this one (`here`) and every list inside a list (`inner`). */
-export interface ListOrder {
-  here: boolean;
-  inner: boolean;
-}
-
-/**
- * Canonical text of a value: object keys sorted, and a list sorted by its
- * items' canonical text when the order says it is a multiset. Two values are
- * equal under the options exactly when their texts are equal.
- */
-export function canonicalText(value: JsonValue, order: ListOrder): string {
-  if (Array.isArray(value)) {
-    const inside: ListOrder = { here: order.inner, inner: order.inner };
-    const items = value.map((item) => canonicalText(item, inside));
-    if (order.here) items.sort();
-    return `[${items.join(',')}]`;
-  }
-  if (isObject(value)) {
-    const keys = Object.keys(value).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalText(value[k]!, order)}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
 
 interface KeyFraction {
   matched: number;
@@ -130,84 +111,16 @@ function itemIdentity(item: JsonValue, options: MatchOptions): string {
  */
 const MAX_ASSIGNMENT_CELLS = 250_000;
 
-const filled = <T>(length: number, value: T): T[] => Array.from({ length }, () => value);
-
-/**
- * Maximum-credit pairing of rows to columns (Hungarian method with
- * potentials), rows ≤ columns. Returns the column of each row.
- */
-export function maxCreditAssignment(credit: number[][]): number[] {
-  const n = credit.length;
-  const m = n === 0 ? 0 : credit[0]!.length;
-  if (n > m) throw new RangeError('more rows than columns');
-  const INF = Number.POSITIVE_INFINITY;
-  // 1-based arrays, as in the textbook form; cost = 1 − credit.
-  const u = filled(n + 1, 0);
-  const v = filled(m + 1, 0);
-  const owner = filled(m + 1, 0);
-  const way = filled(m + 1, 0);
-  for (let i = 1; i <= n; i++) {
-    owner[0] = i;
-    let j0 = 0;
-    const minv = filled(m + 1, INF);
-    const used = filled(m + 1, false);
-    do {
-      used[j0] = true;
-      const i0 = owner[j0]!;
-      let delta = INF;
-      let j1 = 0;
-      for (let j = 1; j <= m; j++) {
-        if (used[j]) continue;
-        const cur = 1 - credit[i0 - 1]![j - 1]! - u[i0]! - v[j]!;
-        if (cur < minv[j]!) {
-          minv[j] = cur;
-          way[j] = j0;
-        }
-        if (minv[j]! < delta) {
-          delta = minv[j]!;
-          j1 = j;
-        }
-      }
-      for (let j = 0; j <= m; j++) {
-        if (used[j]) {
-          u[owner[j]!]! += delta;
-          v[j]! -= delta;
-        } else {
-          minv[j]! -= delta;
-        }
-      }
-      j0 = j1;
-    } while (owner[j0] !== 0);
-    do {
-      const j1 = way[j0]!;
-      owner[j0] = owner[j1]!;
-      j0 = j1;
-    } while (j0 !== 0);
-  }
-  const result = filled(n, -1);
-  for (let j = 1; j <= m; j++) if (owner[j]! > 0) result[owner[j]! - 1] = j - 1;
-  return result;
-}
-
-/** Pairs by highest credit first, ties by position: the fallback for very long lists. */
-function greedyAssignment(credit: number[][]): number[] {
-  const cells: Array<[number, number, number]> = [];
-  credit.forEach((row, i) => row.forEach((c, j) => cells.push([c, i, j])));
-  cells.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2] - b[2]);
-  const result = filled(credit.length, -1);
-  const taken = new Set<number>();
-  for (const [, i, j] of cells) {
-    if (result[i] !== -1 || taken.has(j)) continue;
-    result[i] = j;
-    taken.add(j);
-  }
-  return result;
-}
-
 interface ListMatch {
   credit: number;
   /** Items paired with full credit. */
   exact: number;
+  /** Pairs short of full credit, as [answer index, reference index]. */
+  partial: Array<[number, number]>;
+  /** Reference items paired with nothing. */
+  missing: number[];
+  /** Answer items paired with nothing. */
+  extra: number[];
 }
 
 /** Pairs a multiset list: exact matches first, then the best assignment of the rest. */
@@ -233,7 +146,9 @@ function matchUnordered(
     }
   });
   const restExpected = [...pool.values()].flat().sort((a, b) => a - b);
-  if (restObserved.length === 0 || restExpected.length === 0) return { credit: exact, exact };
+  if (restObserved.length === 0 || restExpected.length === 0) {
+    return { credit: exact, exact, partial: [], missing: restExpected, extra: restObserved };
+  }
 
   // Rows are the shorter side, as the assignment requires.
   const observedRows = restObserved.length <= restExpected.length;
@@ -250,11 +165,28 @@ function matchUnordered(
     rows.length * cols.length <= MAX_ASSIGNMENT_CELLS
       ? maxCreditAssignment(credit)
       : greedyAssignment(credit);
-  let partial = 0;
+  let partialCredit = 0;
+  const partial: Array<[number, number]> = [];
+  const paired = new Set<number>();
+  const unpairedRows: number[] = [];
   pairing.forEach((col, row) => {
-    if (col >= 0) partial += credit[row]![col]!;
+    if (col < 0) {
+      unpairedRows.push(rows[row]!);
+      return;
+    }
+    paired.add(col);
+    const c = credit[row]![col]!;
+    partialCredit += c;
+    if (c < 1) partial.push(observedRows ? [rows[row]!, cols[col]!] : [cols[col]!, rows[row]!]);
   });
-  return { credit: exact + partial, exact };
+  const unpairedCols = cols.filter((_, col) => !paired.has(col));
+  return {
+    credit: exact + partialCredit,
+    exact,
+    partial,
+    missing: observedRows ? unpairedCols : unpairedRows,
+    extra: observedRows ? unpairedRows : unpairedCols,
+  };
 }
 
 function matchOrdered(
@@ -264,12 +196,76 @@ function matchOrdered(
 ): ListMatch {
   let credit = 0;
   let exact = 0;
-  for (let i = 0; i < Math.min(observed.length, expected.length); i++) {
+  const partial: Array<[number, number]> = [];
+  const shared = Math.min(observed.length, expected.length);
+  for (let i = 0; i < shared; i++) {
     const c = itemCredit(observed[i]!, expected[i]!, options);
     credit += c;
     if (c === 1) exact += 1;
+    else partial.push([i, i]);
   }
-  return { credit, exact };
+  const from = (start: number, end: number) =>
+    Array.from({ length: Math.max(0, end - start) }, (_, k) => start + k);
+  return {
+    credit,
+    exact,
+    partial,
+    missing: from(shared, expected.length),
+    extra: from(shared, observed.length),
+  };
+}
+
+/**
+ * Where an item, or the compared object itself, differs: under each key the
+ * key fraction counted as differing, or the item itself when it is no object.
+ */
+function itemDifferences(
+  observed: JsonValue,
+  expected: JsonValue,
+  sortLists: boolean,
+  options: MatchOptions,
+  path: string,
+  out: MismatchPaths,
+): void {
+  const order: ListOrder = { here: sortLists, inner: options.inner };
+  if (!isObject(observed) || !isObject(expected)) {
+    collectDifferences(observed, expected, order, path, out);
+    return;
+  }
+  for (const key of keyFraction(observed, expected, sortLists, options).differing) {
+    const at = keyPath(path, key);
+    if (Object.hasOwn(observed, key) && Object.hasOwn(expected, key)) {
+      collectDifferences(observed[key]!, expected[key]!, order, at, out);
+    } else {
+      out.add(at);
+    }
+  }
+}
+
+/**
+ * A list's mismatches in reference order: each imperfect pair under the
+ * reference item's index, each reference item with no partner, then the
+ * answer's extras past the reference's end.
+ */
+function listMismatches(
+  observed: JsonValue[],
+  expected: JsonValue[],
+  match: ListMatch,
+  options: MatchOptions,
+): string[] {
+  const out = new MismatchPaths();
+  const partner = new Map(match.partial.map(([i, j]) => [j, i]));
+  const missing = new Set(match.missing);
+  for (let j = 0; j < expected.length && !out.full; j++) {
+    const i = partner.get(j);
+    if (i !== undefined) {
+      itemDifferences(observed[i]!, expected[j]!, options.inner, options, indexPath('', j), out);
+    } else if (missing.has(j)) {
+      out.add(indexPath('', j));
+    }
+  }
+  match.extra.forEach((_, k) => out.add(indexPath('', expected.length + k)));
+  return out.paths;
 }
 
 const round = (score: number): number => Math.round(score * 1e6) / 1e6;
@@ -287,16 +283,30 @@ export function scoreJsonMatch(
     inner: params.inner_unordered ?? false,
     exclude: new Set(params.exclude_keys ?? []),
   };
-  const detail = { observed, expected };
   // Judged on the stored (rounded) score, so the row's score and status always agree.
-  const result = (score: number, comment: string) => {
+  // The evidence repeats the comment's counts with the path of each mismatch (Part B).
+  const result = (score: number, comment: string, evidence: JsonMatchEvidence) => {
     const stored = round(score);
-    return graded(stored >= params.pass_at, stored, comment, detail);
+    return graded(stored >= params.pass_at, stored, comment, {
+      observed,
+      expected,
+      evidence: { json_match: evidence },
+    });
   };
 
   if (Array.isArray(expected)) {
-    if (!Array.isArray(observed)) return result(0, `expected a list, got ${kind(observed)}`);
-    if (expected.length === 0 && observed.length === 0) return result(1, 'both lists are empty');
+    const items = (matched: number, mismatches: string[] = []): JsonMatchEvidence => ({
+      unit: 'items',
+      matched,
+      total: expected.length,
+      mismatches,
+    });
+    if (!Array.isArray(observed)) {
+      return result(0, `expected a list, got ${kind(observed)}`, items(0));
+    }
+    if (expected.length === 0 && observed.length === 0) {
+      return result(1, 'both lists are empty', items(0));
+    }
     const match = options.outer
       ? matchUnordered(observed, expected, options)
       : matchOrdered(observed, expected, options);
@@ -305,20 +315,44 @@ export function scoreJsonMatch(
       observed.length === expected.length
         ? `${expected.length} items`
         : `expected ${expected.length} items, got ${observed.length}`;
-    return result(score, `${match.exact} of ${expected.length} items match exactly (${sizes})`);
+    return result(
+      score,
+      `${match.exact} of ${expected.length} items match exactly (${sizes})`,
+      items(match.exact, listMismatches(observed, expected, match, options)),
+    );
   }
 
   if (isObject(expected)) {
-    if (!isObject(observed)) return result(0, `expected an object, got ${kind(observed)}`);
+    if (!isObject(observed)) {
+      const total = Object.keys(expected).filter((k) => !options.exclude.has(k)).length;
+      return result(0, `expected an object, got ${kind(observed)}`, {
+        unit: 'keys',
+        matched: 0,
+        total,
+        mismatches: [],
+      });
+    }
     const fraction = keyFraction(observed, expected, options.outer, options);
     const comment =
       fraction.differing.length === 0
         ? `all ${fraction.total} keys match`
         : `${fraction.matched} of ${fraction.total} keys match; differs: ${listKeys(fraction.differing)}`;
-    return result(fractionOf(fraction), comment);
+    const out = new MismatchPaths();
+    itemDifferences(observed, expected, options.outer, options, '', out);
+    return result(fractionOf(fraction), comment, {
+      unit: 'keys',
+      matched: fraction.matched,
+      total: fraction.total,
+      mismatches: out.paths,
+    });
   }
 
   const root: ListOrder = { here: options.outer, inner: options.inner };
   const same = canonicalText(observed, root) === canonicalText(expected, root);
-  return result(same ? 1 : 0, same ? 'equal' : 'differs');
+  return result(same ? 1 : 0, same ? 'equal' : 'differs', {
+    unit: 'value',
+    matched: same ? 1 : 0,
+    total: 1,
+    mismatches: [],
+  });
 }

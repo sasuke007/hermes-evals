@@ -5,7 +5,11 @@
  *    from `executed` to `scoring`. Nothing to claim means the evaluation
  *    already finished: the job completes.
  * 2. Score (score.ts): every declared key over stored evidence. Writes
- *    nothing, so a delivery that loses its claim meanwhile leaves no trace.
+ *    nothing but the claim's renewal after each key (claim.ts renewClaim),
+ *    so a slow task keeps its claim; a delivery that finds its claim taken,
+ *    or whose job pg-boss failed under it (job.signal), stops there and
+ *    leaves no trace. The job's own expiry sits above the slowest pass a
+ *    loaded task can declare (queues.ts EVALUATE_RUN_EXPIRE_SECONDS).
  * 3. Publish (publish.ts): one transaction that re-checks the token, writes
  *    the whole score set, supersedes the previous result, scores the run and
  *    reconciles the experiment.
@@ -22,7 +26,7 @@ import type { PgBoss } from 'pg-boss';
 import type { PinoLogger } from 'nestjs-pino';
 import type { ScoreStatus } from '@hermes-evals/shared';
 import { QUEUES, type EvaluateRunJob } from '../queue/queues.js';
-import { claimEvaluation } from './claim.js';
+import { CLAIM_SECONDS, claimEvaluation, renewClaim } from './claim.js';
 import type { ScorerContextDeps } from './context.js';
 import { handleEvaluateRunDeadJob, type DeadLetterOutcome } from './dead-letter.js';
 import { loadEvidence } from './evidence.js';
@@ -36,11 +40,14 @@ export type EvaluationLogger = Pick<PinoLogger, 'info' | 'warn' | 'error'>;
 export interface EvaluationDeps extends ScorerContextDeps {
   /** reconcileExperiment unless a test passes its own. */
   reconcile?: Reconcile;
+  /** Claim length in seconds: CLAIM_SECONDS (10 minutes) unless a test passes a shorter one. */
+  claimSeconds?: number;
 }
 
 /**
  * - `published`: this delivery's scores are the run's result;
- * - `lost`: a newer delivery took the claim, or published first; nothing written;
+ * - `lost`: a newer delivery took the claim, or published first, or pg-boss
+ *   failed this delivery's job under it; nothing written;
  * - `finished`: the evaluation was already completed or failed, or does not exist.
  */
 export type EvaluateRunOutcome = 'published' | 'lost' | 'finished';
@@ -51,14 +58,20 @@ export interface EvaluateRunResult {
   outcome: EvaluateRunOutcome;
 }
 
-/** Runs one delivery of an evaluate-run job. Throws (failing the job) on anything unexpected. */
+/**
+ * Runs one delivery of an evaluate-run job. Throws (failing the job) on
+ * anything unexpected. `signal` is the pg-boss job's (absent in tests that
+ * call the handler directly).
+ */
 export async function handleEvaluateRunJob(
   data: unknown,
   deps: EvaluationDeps,
   logger: EvaluationLogger,
+  signal?: AbortSignal,
 ): Promise<EvaluateRunResult> {
   const { evaluationId } = EvaluateRunJobSchema.parse(data);
-  const claim = await claimEvaluation(deps.db, evaluationId);
+  const claimSeconds = deps.claimSeconds ?? CLAIM_SECONDS;
+  const claim = await claimEvaluation(deps.db, evaluationId, claimSeconds);
   if (!claim) {
     logger.info({ evaluationId }, 'evaluate-run: already finished');
     return { evaluationId, outcome: 'finished' };
@@ -68,7 +81,19 @@ export async function handleEvaluateRunJob(
     // Runs, tasks and attempts are never deleted, so this is a broken row: let it dead-letter.
     throw new Error(`evaluation ${evaluationId}: its run, task or attempt could not be read`);
   }
-  const scored = await scoreEvidence(evidence, deps);
+  const scored = await scoreEvidence(evidence, deps, {
+    keepClaim: () => renewClaim(deps.db, claim, claimSeconds),
+    signal,
+  });
+  if (!scored) {
+    logger.info(
+      { evaluationId, runId: claim.runId, generation: claim.generation },
+      signal?.aborted
+        ? 'evaluate-run: pg-boss gave up on this delivery while scoring; work dropped'
+        : 'evaluate-run: claim lost while scoring; work dropped',
+    );
+    return { evaluationId, outcome: 'lost' };
+  }
   const outcome = await publishEvaluation(deps.db, claim, scored, deps.reconcile);
   const statuses: Partial<Record<ScoreStatus, number>> = {};
   for (const { result } of scored.scores)
@@ -101,7 +126,7 @@ export function registerEvaluateRunHandler(
   return boss.work<EvaluateRunJob, EvaluateRunResult | null, typeof options>(
     QUEUES.evaluateRun,
     options,
-    async ([job]) => (job ? handleEvaluateRunJob(job.data, deps, logger) : null),
+    async ([job]) => (job ? handleEvaluateRunJob(job.data, deps, logger, job.signal) : null),
   );
 }
 

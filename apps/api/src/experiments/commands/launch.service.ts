@@ -6,8 +6,10 @@
  * issue per problem); a connected worker must have proven isolation, and the
  * proven workers must run one Hermes revision; every configuration's provider
  * must be ready (409 with the reason the form shows, e.g. "Nous Portal is not
- * connected"). An estimate over the spend ceiling does not block: the spend
- * guard pauses at the ceiling (UI_FLOWS 19 #10).
+ * connected"); and when a selected task has an llm_judge key, the judge's
+ * provider must be ready too (Phase 3 S3: JUDGE_PROVIDER, the rule the
+ * scorer and Re-score use). An estimate over the spend ceiling does not
+ * block: the spend guard pauses at the ceiling (UI_FLOWS 19 #10).
  *
  * Then one transaction, rows and jobs together or nothing:
  * 1. Freeze the versions in their own statement. Its row locks order the
@@ -46,7 +48,9 @@ import {
 import type { AppDb, AppTx } from '../../database/types.js';
 import { effectiveBudgetS } from '../../execution/budget.js';
 import { loadPriceTable } from '../../execution/pricing.js';
+import { judgeReadiness } from '../../providers/judge-readiness.js';
 import { QueueService } from '../../queue/queue.service.js';
+import { judgeSettingsFrom } from '../../runs/judge-needs.js';
 import { serverError } from '../../suites/http-errors.js';
 import { EstimatesService } from '../estimates/estimates.service.js';
 import { estimateSnapshot } from '../estimates/per-run-estimate.js';
@@ -95,6 +99,12 @@ export class LaunchService {
     if (!hermes.ok) throw conflict(hermes.reason);
     const blocks = await this.gate.blocked(resolved.versions.map((v) => v.row.provider));
     if (blocks.length > 0) throw conflict(blockedMessage(blocks));
+    const judge = await judgeReadiness(
+      resolved.tasks.flatMap((t) => t.verification),
+      judgeSettingsFrom(this.config),
+      { readiness: (provider) => this.gate.readiness(provider) },
+    );
+    if (!judge.ready) throw conflict(judge.reason ?? "The LLM judge's provider is not ready.");
     const prices = await this.priceSnapshot();
     const concurrency = Math.min(input.concurrency, workersNow.capacity);
     // The snapshot the experiment keeps: with an override every run gets that budget

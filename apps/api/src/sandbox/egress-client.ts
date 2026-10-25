@@ -9,6 +9,9 @@ import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { z } from 'zod';
 import { ENV_NAME_PATTERN } from '@hermes-evals/shared';
+import { adminSocketCall, EgressCallError, refusalMessage } from './admin-socket-call.js';
+
+export { EgressCallError, type EgressFailure } from './admin-socket-call.js';
 
 /**
  * One http MCP server an attempt may reach through the MCP gateway
@@ -93,6 +96,83 @@ export interface EgressLogEntry {
   completionTokens?: number;
 }
 
+// ---------------------------------------------------------------------------
+// The LLM judge's path (Phase 3 S2): EgressClient implements it over
+// egress's admin socket (apps/egress/src/judge-path.ts).
+// ---------------------------------------------------------------------------
+
+/**
+ * A judge registration: what one llm_judge key may call, registered just
+ * before its call and removed in `finally`, like an attempt but narrower.
+ * Kind judge: the judge model only, no MCP routes, no CONNECT, no token
+ * (nothing outside the admin socket can use it). Egress forwards with the
+ * model gateway's own code, so provider keys and the Nous login never
+ * leave egress and nous-proxy.
+ */
+export interface EgressJudgeRegistration {
+  kind: 'judge';
+  /** Model gateway upstream name (ProviderRoute.upstream of the judge's provider). */
+  provider: string;
+  /** For provider `custom` only, and required for it: JUDGE_BASE_URL. */
+  upstream?: { baseUrl: string };
+  /** The one model this registration may call; a call naming another is refused. */
+  model: string;
+  /** Stop serving once this many tokens were used (a judge call needs a few thousand). */
+  maxTokens?: number;
+  /** Epoch milliseconds after which egress drops the registration by itself. */
+  expiresAt: number;
+}
+
+/**
+ * The chat completion body the judge sends, as OpenAI's API takes it.
+ * Egress adds the upstream's credentials and body defaults, never the caller.
+ */
+export interface EgressJudgeChatBody {
+  model: string;
+  messages: Array<{ role: 'system' | 'user'; content: string }>;
+  temperature: number;
+  max_tokens: number;
+  response_format?: { type: string; [key: string]: unknown };
+  stream?: false;
+}
+
+/** One judge call's answer, as egress relayed it. */
+export interface EgressJudgeReply {
+  /** The upstream's HTTP status, or egress's own when it refused or could not forward. */
+  status: number;
+  /** The answer's JSON body (a chat completion, or an error object); null when it had none. */
+  body: unknown;
+  /** This call's usage as egress metered it; null when the upstream reported none. */
+  usage: EgressUsage | null;
+}
+
+/** What a judge registration used and did, returned when it is removed. */
+export interface EgressJudgeReport {
+  usage: EgressUsage;
+  log: EgressLogEntry[];
+}
+
+/**
+ * The judge's path on the admin socket. `judgeId` is a fresh ULID per
+ * registration (database/ids.ts newId), so it never names an attempt.
+ */
+export interface EgressJudgeApi {
+  /** Registers before the call. Rejects when egress refuses the registration. */
+  registerJudge(judgeId: string, registration: EgressJudgeRegistration): Promise<void>;
+  /**
+   * Forwards one chat completion. Resolves whatever status the upstream or
+   * egress answered (the caller decides on retry); rejects only when the
+   * socket fails, the timeout passes or `signal` aborts.
+   */
+  judgeComplete(
+    judgeId: string,
+    body: EgressJudgeChatBody,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<EgressJudgeReply>;
+  /** Removes the registration; its usage and connection log, or null when egress did not have it. */
+  removeJudge(judgeId: string): Promise<EgressJudgeReport | null>;
+}
+
 const EnvNamesResponseSchema = z.object({ names: z.array(z.string().regex(ENV_NAME_PATTERN)) });
 
 const count = z.number().int().nonnegative();
@@ -122,15 +202,29 @@ const EgressLogEntrySchema = z.object({
  * Parsed, not cast, as the other answers are: usage prices the attempt
  * (pricing.ts billableTokens) and the log becomes events.
  */
+const EgressUsageSchema = z.object({
+  calls: count,
+  promptTokens: count,
+  completionTokens: count,
+  totalTokens: count,
+}) satisfies z.ZodType<EgressUsage>;
+
 const EgressReportSchema = z.object({
-  usage: z.object({
-    calls: count,
-    promptTokens: count,
-    completionTokens: count,
-    totalTokens: count,
-  }),
+  usage: EgressUsageSchema,
   log: z.array(EgressLogEntrySchema),
 });
+
+/**
+ * POST /judges/:id/chat/completions's answer when an upstream answered: its
+ * status, its JSON body (null when it sent none) and this call's usage.
+ */
+const EgressJudgeReplySchema = z
+  .object({
+    status: z.number().int().min(100).max(599),
+    body: z.unknown(),
+    usage: EgressUsageSchema.nullable(),
+  })
+  .strict();
 
 const EgressHealthSchema = z.object({
   ok: z.boolean(),
@@ -155,7 +249,7 @@ export type EgressHealth = z.infer<typeof EgressHealthSchema>;
  */
 export const newAttemptToken = (): string => randomBytes(32).toString('hex');
 
-export class EgressClient {
+export class EgressClient implements EgressJudgeApi {
   constructor(private readonly socketPath: string) {}
 
   private call(
@@ -226,6 +320,63 @@ export class EgressClient {
     const res = await this.call('GET', '/env-names', undefined, timeoutMs);
     if (res.status !== 200) throw new Error(`egress GET /env-names answered ${res.status}`);
     return EnvNamesResponseSchema.parse(res.json).names;
+  }
+
+  /** Registers one judge call (PUT /judges/:id). Rejects with `refused` when egress says no. */
+  async registerJudge(judgeId: string, registration: EgressJudgeRegistration): Promise<void> {
+    const res = await adminSocketCall(this.socketPath, 'PUT', `/judges/${judgeId}`, registration, {
+      timeoutMs: 10_000,
+    });
+    if (res.status !== 204) {
+      throw new EgressCallError(
+        'refused',
+        `egress refused the judge registration (${res.status}): ${refusalMessage(res.json)}`,
+        res.status,
+      );
+    }
+  }
+
+  /**
+   * Forwards one judge chat completion. An upstream's answer comes back as
+   * egress relayed it; egress's own refusal (an unknown or expired
+   * registration, another model, the token cap, an upstream it cannot reach)
+   * as that status and body, with no usage. Rejects only on the socket, the
+   * timeout, the signal or an answer it cannot read.
+   */
+  async judgeComplete(
+    judgeId: string,
+    body: EgressJudgeChatBody,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<EgressJudgeReply> {
+    const path = `/judges/${judgeId}/chat/completions`;
+    const res = await adminSocketCall(this.socketPath, 'POST', path, body, options);
+    if (res.status !== 200) return { status: res.status, body: res.json, usage: null };
+    const reply = EgressJudgeReplySchema.safeParse(res.json);
+    if (!reply.success) {
+      throw new EgressCallError('protocol', `egress POST ${path} answered in an unknown shape`);
+    }
+    return { status: reply.data.status, body: reply.data.body ?? null, usage: reply.data.usage };
+  }
+
+  /** Removes a judge registration (DELETE /judges/:id): its usage and log, or null when egress had none. */
+  async removeJudge(judgeId: string): Promise<EgressJudgeReport | null> {
+    const path = `/judges/${judgeId}`;
+    const res = await adminSocketCall(this.socketPath, 'DELETE', path, undefined, {
+      timeoutMs: 10_000,
+    });
+    if (res.status === 404) return null;
+    if (res.status !== 200) {
+      throw new EgressCallError(
+        'refused',
+        `egress DELETE ${path} answered ${res.status}: ${refusalMessage(res.json)}`,
+        res.status,
+      );
+    }
+    const report = EgressReportSchema.safeParse(res.json);
+    if (!report.success) {
+      throw new EgressCallError('protocol', `egress DELETE ${path} answered in an unknown shape`);
+    }
+    return report.data;
   }
 
   /**

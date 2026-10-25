@@ -4,15 +4,17 @@
  * 1 task x 2 configurations x 2 repetitions = 4 queued runs.
  */
 import { createHash } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { PriceTable, SelfCheck, VerificationEntry } from '@hermes-evals/shared';
 import {
   attempts,
   blobs,
   configurationVersions,
   configurations,
+  evaluations,
   experiments,
   runs,
+  scores,
   suiteSources,
   suites,
   taskFiles,
@@ -262,5 +264,64 @@ export async function finishAttempt(db: TestDb, runId: string, attemptId: string
       })
       .where(eq(attempts.id, attemptId));
     await tx.update(runs).set({ status: 'executed' }).where(eq(runs.id, runId));
+  });
+}
+
+/**
+ * Re-scores a scored run whose task has the single key `answer` (as every
+ * seed with one primary json_match key does), the way publish.ts publishes a
+ * re-score: the next generation claimed, its primary written with `status`,
+ * the current result superseded, then completed. The run stays scored, and
+ * the superseded generation keeps its rows. Resolves the new evaluation id.
+ */
+export async function rescoreRun(
+  db: TestDb,
+  runId: string,
+  status: 'passed' | 'failed',
+): Promise<string> {
+  return db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ attemptId: runs.currentAttemptId })
+      .from(runs)
+      .where(eq(runs.id, runId));
+    const prior = await tx
+      .select({ generation: evaluations.generation })
+      .from(evaluations)
+      .where(eq(evaluations.runId, runId));
+    const [evaluation] = await tx
+      .insert(evaluations)
+      .values({
+        runId,
+        attemptId: run!.attemptId!,
+        cause: 'rescore',
+        generation: Math.max(0, ...prior.map((p) => p.generation)) + 1,
+        ...runningClaim(),
+      })
+      .returning({ id: evaluations.id });
+    await tx.insert(scores).values({
+      evaluationId: evaluation!.id,
+      key: 'answer',
+      type: 'json_match',
+      status,
+      isPrimary: true,
+      score: status === 'passed' ? 1 : 0,
+      comment: `re-scored ${status}`,
+      scorerVersion: 1,
+    });
+    await tx
+      .update(evaluations)
+      .set({ supersededAt: new Date() })
+      .where(
+        and(
+          eq(evaluations.runId, runId),
+          eq(evaluations.status, 'completed'),
+          isNull(evaluations.supersededAt),
+        ),
+      );
+    await tx
+      .update(evaluations)
+      .set({ status: 'completed', finishedAt: new Date() })
+      .where(eq(evaluations.id, evaluation!.id));
+    return evaluation!.id;
   });
 }

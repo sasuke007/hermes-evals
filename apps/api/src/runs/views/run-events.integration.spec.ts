@@ -3,17 +3,15 @@
  * triggers, over the runs of run-states-spec.ts. Pages parse with the
  * shared RunEventsPage schema.
  */
-import type { ConfigService } from '@nestjs/config';
 import { text } from 'node:stream/consumers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RunEventsPageSchema, TablePreviewSchema, type RunEventsPage } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
-import type { Env } from '../../config/env.js';
 import { attemptById, configVersions, eventsOf, runById } from './run-views.queries.js';
 import { timelineContext } from './run-detail.js';
 import { RunViewsService } from './run-views.service.js';
 import { seedAllStates, type AllStates } from './run-states-spec.js';
-import { SUMMARY_CSV, TRIAL_IMAGE, type RunCell } from './run-fixtures-spec.js';
+import { SUMMARY_CSV, viewsConfig, type RunCell } from './run-fixtures-spec.js';
 import { buildTimeline } from './timeline.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
@@ -25,8 +23,7 @@ let views: RunViewsService;
 beforeAll(async () => {
   t = await createTestDatabase();
   seed = await seedAllStates(t.db);
-  const config = { get: () => TRIAL_IMAGE } as unknown as ConfigService<Env, true>;
-  views = new RunViewsService(t.db, seed.store, config);
+  views = new RunViewsService(t.db, seed.store, viewsConfig());
 });
 
 afterAll(async () => {

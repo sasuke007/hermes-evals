@@ -67,6 +67,22 @@ export const MAX_RUN_BUDGET_SECONDS = 3600;
  */
 export const EXECUTE_RUN_EXPIRE_SECONDS = MAX_RUN_BUDGET_SECONDS + 60 + 10 + 530;
 
+/**
+ * Longest a task's checks may declare to take, summed over its keys
+ * (scoring/scoring-time.ts); the loader refuses a task above it. pg-boss
+ * fails an active job once its expiry passes, heartbeats or not, so this
+ * bound is what lets the evaluate-run expiry outlast every legitimate pass.
+ */
+export const MAX_SCORING_SECONDS = 3600;
+
+/**
+ * How long an evaluate-run job may stay active before pg-boss fails it (and
+ * aborts its signal): the longest declared pass, plus claiming, reading the
+ * evidence, extracting the answer, publishing, and slack. Claim renewal
+ * (claim.ts) only holds recovery off; it cannot extend this.
+ */
+export const EVALUATE_RUN_EXPIRE_SECONDS = MAX_SCORING_SECONDS + 600;
+
 const DAY = 86_400;
 
 export interface QueueDefinition {
@@ -123,6 +139,8 @@ export const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
     // safe as long as the handler writes the whole score set and completes the
     // evaluation in one transaction. After the last retry the job moves to the
     // dead-letter queue, whose handler records error scores so the run finishes.
+    // Heartbeats catch a dead worker in about a minute; the expiry bounds a
+    // live one, above the slowest pass a loaded task can declare.
     name: QUEUES.evaluateRun,
     options: {
       policy: 'exclusive',
@@ -130,7 +148,7 @@ export const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
       retryDelay: 30,
       retryBackoff: true,
       retryDelayMax: 300,
-      expireInSeconds: 1800,
+      expireInSeconds: EVALUATE_RUN_EXPIRE_SECONDS,
       heartbeatSeconds: 30,
       deadLetter: QUEUES.evaluateRunDead,
       deleteAfterSeconds: 7 * DAY,

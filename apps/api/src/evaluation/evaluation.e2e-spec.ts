@@ -39,6 +39,7 @@ import {
   seedScenario,
   type ScenarioTask,
 } from './support-spec.js';
+import { FakeJudge, judgeAnswer, MOCK_JUDGE_SETTINGS, verdictText } from './support-judge-spec.js';
 
 const SERVER_URL = process.env.TEST_DATABASE_URL;
 
@@ -238,7 +239,7 @@ describe.skipIf(!SERVER_URL)('evaluation on Postgres 17', () => {
 
     // Delivery 1 claims and scores, then stalls past its claim.
     const stale = await claimEvaluation(db, evaluationId);
-    const staleScores = await scoreEvidence((await loadEvidence(db, stale!))!, { db, store });
+    const staleScores = (await scoreEvidence((await loadEvidence(db, stale!))!, { db, store }))!;
     await db
       .update(schema.evaluations)
       .set({ claimExpiresAt: sql`now() - interval '1 minute'` })
@@ -253,6 +254,63 @@ describe.skipIf(!SERVER_URL)('evaluation on Postgres 17', () => {
     // Delivery 1 wakes up: its token is gone, so nothing it scored is written.
     expect(await publishEvaluation(db, stale!, staleScores, reconcile)).toBe('lost');
     expect(await scoreCount(evaluationId)).toBe(VERIFICATION.length);
+    expect(await evaluationRow(evaluationId)).toEqual(published);
+  });
+
+  it('stops a delivery at its next key once a racing delivery took the claim (Phase 3 types)', async () => {
+    const task: ScenarioTask = {
+      verification: [
+        {
+          key: 'answer',
+          type: 'text_match',
+          primary: true,
+          params: { path: 'rule', contains: ['1.5%'] },
+        },
+        { key: 'quality', type: 'llm_judge', primary: false, params: { rubric: 'rubric.md' } },
+        { key: 'reads', type: 'trajectory_match', primary: false, params: { tool: 'read_file' } },
+      ],
+      reference: { rule: 'A late fee of 1.5% per month.' },
+      files: [{ path: 'rubric.md', kind: 'rubric', content: 'Be clear.\n' }],
+    };
+    const scenario = await seedScenario(db, store, task);
+    const { evaluationId } = await executeRun(db, store, scenario, scenario.runIds[0]!, {
+      finalText: fenced({ rule: 'Late: 1.5% monthly.' }),
+      events: [
+        { type: 'tool_use', name: 'read_file', tool_call_id: 'c0', input: { path: 'terms.json' } },
+        { type: 'tool_result', name: 'read_file', tool_call_id: 'c0', output: '{}' },
+      ],
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gated = new FakeJudge(async () => {
+      await gate;
+      return judgeAnswer(verdictText(0.9, 'Clear.'));
+    });
+    const quick = new FakeJudge(() => judgeAnswer(verdictText(0.9, 'Clear.')));
+    const reconcile = recordingReconcile().reconcile;
+    const settings = { judgeSettings: MOCK_JUDGE_SETTINGS };
+
+    // Delivery 1 waits on its judge; delivery 2 claims meanwhile and publishes.
+    const first = handleEvaluateRunJob(
+      { evaluationId },
+      { db, store, reconcile, judge: gated, ...settings },
+      logger(),
+    );
+    await waitFor(async () => (gated.requests.length === 1 ? true : undefined));
+    const second = await handleEvaluateRunJob(
+      { evaluationId },
+      { db, store, reconcile, judge: quick, ...settings },
+      logger(),
+    );
+    expect(second.outcome).toBe('published');
+    const published = await evaluationRow(evaluationId);
+    release();
+
+    // Delivery 1's renewal after the judge key finds the token gone: it stops and writes nothing.
+    expect((await first).outcome).toBe('lost');
+    expect(await scoreCount(evaluationId)).toBe(3);
     expect(await evaluationRow(evaluationId)).toEqual(published);
   });
 

@@ -6,7 +6,9 @@
  * VITE_API_MODE=live calls the planned endpoints of plan section 11.
  */
 import type {
+  BulkRescoreResult,
   BulkRunActionResult,
+  RescoreRunResult,
   RunActionResult,
   RunDetail,
   RunEventsPage,
@@ -31,7 +33,13 @@ import {
   runDetailFixture,
   runEventsFixture,
 } from '@/fixtures/inspector';
-import { bulkRescoreFixture, bulkRetryFixture, runListFixture, runNeeds } from '@/fixtures/runs';
+import {
+  bulkRescoreFixture,
+  bulkRetryFixture,
+  rescoreRunFixture,
+  runListFixture,
+  runNeeds,
+} from '@/fixtures/runs';
 
 /** GET /experiments/:id/runs with filters and sort (mirrored in the page URL). */
 export function listRuns(experimentId: string, filters: RunFilters = {}): Promise<RunListResult> {
@@ -108,14 +116,18 @@ function providerRefusal(runId: string, action: 'rescore' | 'retry'): string | n
   if (!found) return null;
   const { judgeKeys } = runNeeds(found.run);
   if (action === 'rescore' && judgeKeys.length) {
-    return `Re-score needs Nous Portal for the ${judgeKeys.join(' and ')} judge.`;
+    return `Re-score needs Nous Portal for the ${judgeKeys.join(' and ')} judge: Nous Portal is not connected.`;
   }
   if (action === 'retry') return 'Retry needs Nous Portal.';
   return null;
 }
 
-/** POST /runs/:id/rescore: re-runs the scorers on the stored output; never re-executes. */
-export function rescoreRun(runId: string): Promise<RunActionResult> {
+/**
+ * POST /runs/:id/rescore: re-runs the scorers on the stored output; never
+ * re-executes. The run stays `scored` and its current result stays current
+ * until the new generation publishes; a re-score already pending is joined.
+ */
+export function rescoreRun(runId: string): Promise<RescoreRunResult> {
   if (apiMode === 'live') return liveSend('POST', `/runs/${runId}/rescore`);
   const request = `POST /api/runs/${runId}/rescore`;
   const refusal = providerRefusal(runId, 'rescore');
@@ -124,7 +136,7 @@ export function rescoreRun(runId: string): Promise<RunActionResult> {
     () => {
       const found = findRun(hasScenario, runId);
       if (!found) throw notFound(request, `run ${runId}`);
-      return { runId, status: 'scoring' as const, attempt: null };
+      return rescoreRunFixture(runId);
     },
     { request },
   );
@@ -163,7 +175,7 @@ export function cancelRun(runId: string): Promise<RunActionResult> {
 }
 
 /** POST /experiments/:id/runs/rescore (bulk bar). `refused` names runs that could not be enqueued. */
-export function rescoreRuns(experimentId: string, runIds: string[]): Promise<BulkRunActionResult> {
+export function rescoreRuns(experimentId: string, runIds: string[]): Promise<BulkRescoreResult> {
   if (apiMode === 'live') {
     return liveSend('POST', `/experiments/${experimentId}/runs/rescore`, { runIds });
   }

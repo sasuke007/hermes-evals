@@ -1,0 +1,22 @@
+summary: Sum the amounts and say how
+limits:
+  max_turns: 10
+  run_budget_seconds: 120
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: total
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { abs: 0.01 }
+  - key: reads_amounts
+    type: trajectory_match
+    params: { tool: read_file, args: { path: amounts.csv }, min_calls: 1 }
+  - key: reads_superset
+    type: trajectory_match
+    params: { tool: read_file, args: { path: amounts.csv }, mode: superset }
+  - key: method
+    type: llm_judge
+    params: { rubric: rubric.md, model: mock/judge }

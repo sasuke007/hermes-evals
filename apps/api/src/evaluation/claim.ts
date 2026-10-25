@@ -21,8 +21,22 @@ import type { AppDb, AppTx } from '../database/types.js';
 /** How long a claim lasts before recovery may re-send the job (plan 8.6 step 5). */
 export const CLAIM_MINUTES = 10;
 
-/** `now() + 10 minutes`. Inlined from the constant, so Postgres needs no parameter type. */
-export const CLAIM_EXPIRY = sql`now() + interval '${sql.raw(String(CLAIM_MINUTES))} minutes'`;
+/** A claim's length in seconds; tests pass a shorter one. */
+export const CLAIM_SECONDS = CLAIM_MINUTES * 60;
+
+/**
+ * `now() + <seconds> seconds`. Inlined as an integer literal, so Postgres
+ * needs no parameter type.
+ */
+export function claimExpiry(seconds: number = CLAIM_SECONDS) {
+  if (!Number.isSafeInteger(seconds) || seconds < 1) {
+    throw new RangeError(`claim length ${seconds} s is not a positive whole number`);
+  }
+  return sql`now() + interval '${sql.raw(String(seconds))} seconds'`;
+}
+
+/** `now() + 10 minutes`: the claim length every caller uses outside tests. */
+export const CLAIM_EXPIRY = claimExpiry();
 
 /** The delivery that owns a scoring pass, and the rows it grades. */
 export interface EvaluationClaim {
@@ -83,6 +97,7 @@ export async function lockExperimentAndRun(
 export async function claimEvaluation(
   db: AppDb,
   evaluationId: string,
+  claimSeconds: number = CLAIM_SECONDS,
 ): Promise<EvaluationClaim | null> {
   const target = await evaluationTarget(db, evaluationId);
   if (!target) return null;
@@ -94,7 +109,7 @@ export async function claimEvaluation(
         status: 'running',
         startedAt: sql`now()`,
         claimToken: sql`gen_random_uuid()`,
-        claimExpiresAt: CLAIM_EXPIRY,
+        claimExpiresAt: claimExpiry(claimSeconds),
       })
       .where(
         and(eq(evaluations.id, evaluationId), inArray(evaluations.status, ['queued', 'running'])),
@@ -107,4 +122,35 @@ export async function claimEvaluation(
       .where(and(eq(runs.id, target.runId), eq(runs.status, 'executed')));
     return { ...target, token: claimed.token };
   });
+}
+
+/**
+ * Extends this delivery's claim to a full claim length from now, while the
+ * claim is still its own (Phase 3 S8). The scoring loop calls it after each
+ * key, so a task whose verifiers together run longer than one claim is not
+ * re-sent by recovery while it is being scored. False when the token no
+ * longer matches: a newer delivery took the claim, or the evaluation
+ * finished, and this delivery must drop its work.
+ *
+ * One statement on the evaluation row alone. It changes neither the status
+ * nor supersession, so the results-revision trigger touches no experiment
+ * and the lock order of claim and publish is not involved.
+ */
+export async function renewClaim(
+  db: AppDb,
+  claim: Pick<EvaluationClaim, 'evaluationId' | 'token'>,
+  claimSeconds: number = CLAIM_SECONDS,
+): Promise<boolean> {
+  const renewed = await db
+    .update(evaluations)
+    .set({ claimExpiresAt: claimExpiry(claimSeconds) })
+    .where(
+      and(
+        eq(evaluations.id, claim.evaluationId),
+        eq(evaluations.claimToken, claim.token),
+        eq(evaluations.status, 'running'),
+      ),
+    )
+    .returning({ id: evaluations.id });
+  return renewed.length > 0;
 }

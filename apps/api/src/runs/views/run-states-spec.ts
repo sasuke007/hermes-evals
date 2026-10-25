@@ -5,11 +5,13 @@
  *
  *   dup_invoices/baseline/1    scored: failed, error and passed keys; the recorded
  *                              Hermes run plus egress's log; four artifacts
- *   dup_invoices/baseline/2    scored, ungradable (no fenced block)
+ *   dup_invoices/baseline/2    scored, ungradable (no fenced block); re-scored as
+ *                              generation 2, then a re-score (3) that failed
  *   dup_invoices/baseline/3    scored, the primary scorer broke
  *   dup_invoices/baseline/4    execution_error · provider
  *   dup_invoices/baseline/5    execution_error · timeout, twice (two attempts)
- *   dup_invoices/with-skill/1  scored, passed (the counterpart of baseline/1)
+ *   dup_invoices/with-skill/1  scored, passed (the counterpart of baseline/1); a
+ *                              re-score (generation 2) queued
  *   dup_invoices/with-skill/2  execution_error · setup
  *   dup_invoices/with-skill/3  execution_error · worker_lost (recovery)
  *   dup_invoices/with-skill/4  execution_error · other (disk cap)
@@ -38,6 +40,9 @@ import {
   type ScoreSeed,
 } from './run-fixtures-spec.js';
 import { seedRunStates } from './runs-seed-spec.js';
+
+/** Why the seeded re-score of dup_invoices/baseline/2 failed, as the dead letter words it. */
+export const RESCORE_FAILURE = 'grading failed after 3 tries: verifier timed out';
 
 export const RECORDED_FINAL = 'Total done.\n```json\n{"total": 1042}\n```';
 const PHASE3 = (type: string) => ({
@@ -80,7 +85,11 @@ const hermes = (seq: number, ts: number, payload: Record<string, unknown>): Even
   payload: { ...payload, timestamp: ts } as never,
 });
 
-const dupScores = (answer: ScoreSeed, check: Omit<ScoreSeed, 'key' | 'type'>): ScoreSeed[] => [
+/** A full score set of a dup_invoices run: its answer, its trajectory key and its verifier. */
+export const dupScores = (
+  answer: ScoreSeed,
+  check: Omit<ScoreSeed, 'key' | 'type'>,
+): ScoreSeed[] => [
   answer,
   {
     key: 'reads_fixture',
@@ -189,15 +198,30 @@ export async function seedAllStates(db: TestDb) {
     tokens: tokens(900, 40),
   });
   const missing = 'no fenced JSON block found in final response';
-  await s.score(
-    'dup_invoices/baseline/2',
-    ungradable,
-    tableText,
-    dupScores(
-      { key: 'answer', type: 'json_match', primary: true, status: 'ungradable', comment: missing },
-      { status: 'ungradable', comment: missing },
-    ),
+  const ungradableScores = dupScores(
+    { key: 'answer', type: 'json_match', primary: true, status: 'ungradable', comment: missing },
+    { status: 'ungradable', comment: missing },
   );
+  await s.score('dup_invoices/baseline/2', ungradable, tableText, ungradableScores);
+  // Re-scored once (generation 2: the trajectory key is now scored), then a
+  // re-score whose job died (3).
+  await s.rescore('dup_invoices/baseline/2', ungradable, {
+    kind: 'published',
+    finalText: tableText,
+    list: ungradableScores.map((score) =>
+      score.key === 'reads_fixture'
+        ? {
+            ...score,
+            status: 'failed',
+            comment: 'read_file was called 0 times; at least 1 expected',
+          }
+        : score,
+    ),
+  });
+  await s.rescore('dup_invoices/baseline/2', ungradable, {
+    kind: 'failed',
+    error: RESCORE_FAILURE,
+  });
 
   // dup_invoices/baseline/3: the primary scorer broke.
   const fenced = 'Done.\n```json\n{"duplicates": []}\n```';
@@ -310,6 +334,8 @@ export async function seedAllStates(db: TestDb) {
       { status: 'passed', comment: 'verifier printed score 1' },
     ),
   );
+  // A re-score waiting for a worker: the run stays scored with generation 1 shown.
+  const pendingRescore = await s.rescore('dup_invoices/with-skill/1', passed, { kind: 'pending' });
 
   // dup_invoices/with-skill/2, /3, /4: setup, worker_lost, other.
   const setup = await s.start('dup_invoices/with-skill/2', 1, new Date(t0));
@@ -422,6 +448,7 @@ export async function seedAllStates(db: TestDb) {
 
   return {
     ...s,
+    pendingRescore,
     artifactIds: {
       fixture: fixtureArtifact,
       summary: summaryArtifact,

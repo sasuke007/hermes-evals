@@ -7,7 +7,9 @@
  * evaluation (completed, not superseded), the same rows the inspector shows.
  * Measured figures (duration, tokens, cost) appear only once that attempt has
  * ended and the run is not waiting for a new one, so a run queued for a retry
- * does not show its previous attempt's numbers as its own.
+ * does not show its previous attempt's numbers as its own. A row also names
+ * the generation its score comes from and whether a re-score is pending:
+ * until that one publishes, the row keeps the previous result.
  */
 import {
   RUN_STATUSES,
@@ -24,7 +26,14 @@ import {
   type Tokens,
   type TokenCounts,
 } from '@hermes-evals/shared';
+import type { JudgeSettings } from '../../scoring/judge/contracts.js';
 import { configOrder, experimentConfigRef, runNeeds } from './config-ref.js';
+import {
+  NO_EVALUATION,
+  rescorePending,
+  runEvaluationView,
+  type EvaluationStateRecord,
+} from './evaluation-view.js';
 import type {
   AttemptRecord,
   ConfigVersionRecord,
@@ -60,6 +69,10 @@ export interface RunListInput {
   runs: readonly RunListRecord[];
   /** By run id; runs without a current evaluation are absent. */
   primaryScores: ReadonlyMap<string, PrimaryScoreRecord>;
+  /** Every evaluation of each run, by run id; runs never evaluated are absent. */
+  evaluations: ReadonlyMap<string, readonly EvaluationStateRecord[]>;
+  /** The platform's judge, for what Re-score needs. */
+  judge: JudgeSettings;
 }
 
 /** Run statuses whose current attempt has ended for good (until a retry). */
@@ -84,18 +97,26 @@ export function primaryScoreView(score: PrimaryScoreRecord | undefined): Primary
   return score ? { key: score.key, status: score.status, score: score.score } : null;
 }
 
-/** One table row. `task` and `config` are the run's own. */
+/** What one row is built from besides the run: its own task and configuration, and its scoring. */
+export interface RunRowParts {
+  task: TaskRecord;
+  config: ConfigVersionRecord;
+  primary: PrimaryScoreRecord | undefined;
+  evaluations: readonly EvaluationStateRecord[];
+  judge: JudgeSettings;
+}
+
+/** One table row. */
 export function runRowView(
   experiment: ExperimentRecord,
   run: RunListRecord,
-  task: TaskRecord,
-  config: ConfigVersionRecord,
-  primary: PrimaryScoreRecord | undefined,
+  { task, config, primary, evaluations, judge }: RunRowParts,
 ): RunRow {
   const measured = isMeasured(run.status, run.attempt);
   const attempt = measured ? run.attempt : null;
   const category: ExecutionErrorCategory | null =
     run.status === 'execution_error' ? (run.attempt?.errorCategory ?? 'other') : null;
+  const scoring = evaluations.length > 0 ? runEvaluationView(evaluations) : NO_EVALUATION;
   return {
     id: run.id,
     experimentId: experiment.id,
@@ -111,7 +132,9 @@ export function runRowView(
     tokens: tokenCounts(attempt?.tokens ?? null),
     costUsd: attempt?.costUsd ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
-    needs: runNeeds(config, task.verification),
+    needs: runNeeds(config, task.verification, judge),
+    generation: scoring.generation,
+    rescorePending: rescorePending(scoring),
   };
 }
 
@@ -227,7 +250,13 @@ export function runList(input: RunListInput, filters: RunFilters): RunListResult
       throw new Error(`run ${run.id} names a task or configuration outside its experiment`);
     }
     return {
-      row: runRowView(input.experiment, run, task, config, input.primaryScores.get(run.id)),
+      row: runRowView(input.experiment, run, {
+        task,
+        config,
+        primary: input.primaryScores.get(run.id),
+        evaluations: input.evaluations.get(run.id) ?? [],
+        judge: input.judge,
+      }),
       task: taskOrder.get(run.taskId) ?? Number.MAX_SAFE_INTEGER,
       config: order.get(run.configurationVersionId) ?? Number.MAX_SAFE_INTEGER,
       finishedMs: run.finishedAt?.getTime() ?? null,

@@ -33,6 +33,16 @@ const AUTH_ERROR =
 /** The provider was unreachable, limited or failing (plan 8.4: 429, 5xx, connection). */
 const PROVIDER_ERROR =
   /\b429\b|\b5\d\d\b|rate[ _-]?limit|too many requests|quota|connection|connect error|econn|enotfound|eai_again|timed? ?out|overloaded|unavailable|bad gateway/i;
+/**
+ * Egress's own 429 once the attempt has used its token cap (apps/egress
+ * upstream.ts tokenCapRefusal, MODEL_TOKEN_CAP_PER_ATTEMPT). Hermes reports
+ * it as an HTTP 429, but no provider failed: the platform stopped a run that
+ * used too many tokens, and the automatic retry a `provider` error gets
+ * would stop at the same cap after spending as much again. So it is
+ * `other`, which is never retried automatically, and checked before the
+ * provider patterns, which match its 429.
+ */
+const TOKEN_CAP_ERROR = /reached its token cap|token_cap_reached/i;
 /** Hermes's report of an MCP server that would not start, when nothing else ran. */
 const MCP_START_FAILURE = /mcp server .{0,80}(failed|could not|error)/i;
 
@@ -138,6 +148,11 @@ export function classifyAttempt(obs: AttemptObservation): Classification {
       );
     }
     if (failure !== null && failure !== '') {
+      if (TOKEN_CAP_ERROR.test(failure))
+        return error(
+          'other',
+          `The model gateway stopped the run at its token cap: ${cut(failure)}`,
+        );
       if (SETUP_ERROR.test(failure))
         return error('setup', `Hermes could not start the run: ${cut(failure)}`);
       if (AUTH_ERROR.test(failure))

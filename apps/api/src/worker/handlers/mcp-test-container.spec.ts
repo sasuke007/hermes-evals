@@ -42,6 +42,7 @@ describe('mcpTestConfig', () => {
           timeout: 30,
         },
       },
+      tools: { tool_search: { enabled: 'off' } },
       updates: { check: false },
       plugins: { auto_update_check_hours: 0 },
       security: { allow_lazy_installs: false },

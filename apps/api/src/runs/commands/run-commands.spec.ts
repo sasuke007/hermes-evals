@@ -1,7 +1,8 @@
 /**
  * The run actions over HTTP (plan 7.3, UI_FLOWS 17 and 18) on PGlite with a
  * real pg-boss: Retry, Cancel and bulk Retry execution, with every refusal
- * the web names, and their effect on the experiment.
+ * the web names (the frozen Hermes revision among them), and their effect on
+ * the experiment. Re-score: rescore.spec.ts.
  */
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,7 +12,7 @@ import {
   RunActionResultSchema,
   type ExperimentFailure,
 } from '@hermes-evals/shared';
-import { experiments, runs } from '../../database/schema/index.js';
+import { experiments, runs, workers } from '../../database/schema/index.js';
 import {
   createCommandsApp,
   launched,
@@ -23,8 +24,10 @@ import {
   claimRun,
   experimentRow,
   finishRun,
+  HERMES_REVISION,
   markScored,
   runsOf,
+  seedWorker,
 } from '../../experiments/commands/commands-seed.support-spec.js';
 
 let c: CommandsApp;
@@ -128,6 +131,54 @@ describe('POST /api/runs/:id/retry', () => {
     expect(refusal(await c.post(`/runs/${nousRun.id}/retry`).expect(409))).toBe(
       'Retry needs Nous Portal: Nous Portal is not connected.',
     );
+  });
+});
+
+describe('retry and the frozen Hermes revision', () => {
+  /** Stops every worker and connects one on another trial image. */
+  async function onlyAnotherRevision(): Promise<string> {
+    await c.t.db.update(workers).set({ stoppedAt: new Date() });
+    const other = 'f'.repeat(40);
+    await seedWorker(c.t.db, { revision: other });
+    return (
+      `This experiment was launched on Hermes ${HERMES_REVISION.slice(0, 7)}; no connected ` +
+      `worker runs that revision (the connected workers run fffffff). Start a worker on that ` +
+      `trial image, or duplicate the experiment.`
+    );
+  }
+
+  it('answers 409, like Resume, while no connected worker runs it, and queues nothing', async () => {
+    const [errored] = await settle(1);
+    const reason = await onlyAnotherRevision();
+    expect(refusal(await c.post(`/runs/${errored}/retry`).expect(409))).toBe(reason);
+    const [run] = await c.t.db.select().from(runs).where(eq(runs.id, errored!));
+    expect(run!.status).toBe('execution_error');
+    expect((await liveJobKeys(c)).includes(`${errored}:2`)).toBe(false);
+  });
+
+  it('still names the status first for a run that cannot be retried anyway', async () => {
+    const [, scored] = await settle(1);
+    await onlyAnotherRevision();
+    expect(refusal(await c.post(`/runs/${scored}/retry`).expect(409))).toBe(
+      'run is scored, not execution_error',
+    );
+  });
+
+  it('refuses each retryable run of a bulk retry with the same reason', async () => {
+    const [e1, e2, scored] = await settle(2);
+    const reason = await onlyAnotherRevision();
+    const res = await c
+      .post(`/experiments/${x.id}/runs/retry`, { runIds: [e1, scored, e2] })
+      .expect(200);
+    expect(BulkRunActionResultSchema.parse(res.body)).toEqual({
+      action: 'retry',
+      enqueued: [],
+      refused: [
+        { runId: e1, reason },
+        { runId: scored, reason: 'run is scored, not execution_error' },
+        { runId: e2, reason },
+      ],
+    });
   });
 });
 

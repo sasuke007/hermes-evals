@@ -3,7 +3,11 @@
  * constraint in the database, so adding a value needs a new migration.
  */
 
-/** The seven scorer types a task's verification list may use. */
+/**
+ * The eight scorer types a task's verification list may use. `text_match`
+ * was added in Phase 3 (migration 0006 widens scores_type_ck); it is last so
+ * the order of the seven older types, and so of SCORER_VERSIONS, is kept.
+ */
 export const SCORER_TYPES = [
   'numeric_tolerance',
   'json_match',
@@ -12,8 +16,17 @@ export const SCORER_TYPES = [
   'trajectory_match',
   'verifier_script',
   'llm_judge',
+  'text_match',
 ] as const;
 export type ScorerType = (typeof SCORER_TYPES)[number];
+
+/**
+ * How trajectory_match compares a whole trajectory with openevals when its
+ * params set `mode` (plan 9.3); without one it counts calls. Here rather than
+ * in suite-files.ts because score evidence (records.ts) records it too.
+ */
+export const TRAJECTORY_MODES = ['strict', 'unordered', 'subset', 'superset'] as const;
+export type TrajectoryMode = (typeof TRAJECTORY_MODES)[number];
 
 /** Model providers a configuration may name. `custom` requires a base URL. */
 export const PROVIDERS = [

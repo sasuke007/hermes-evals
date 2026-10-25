@@ -11,10 +11,16 @@
  * make the key `error`: the check broke, which says nothing about the agent.
  *
  * Containment: the script is user code, so it gets a minimal environment
- * (nothing inherited but PATH, so no credential of the worker reaches it),
- * the scratch directory as HOME and TMPDIR, no stdin, and its own process
- * group, which is SIGKILLed at the deadline and again once the script exits,
- * so nothing it started outlives it.
+ * (nothing inherited but PATH), the scratch directory as HOME and TMPDIR, no
+ * stdin, and its own process group, which is SIGKILLed at the deadline and
+ * again once the script exits, so nothing it started outlives it.
+ *
+ * Not a sandbox: the script runs as the worker's uid, so it can still read
+ * the worker's own environment (/proc/1/environ in the container) and use
+ * its network. Compose keeps every provider key out of that environment
+ * (docker-compose.yml x-no-provider-keys); what remains is DATABASE_URL, the
+ * stdio MCP values and anything else `.env` holds, until verifiers run in
+ * their own `network: none` container (plan 14, Phase 5b).
  */
 import { spawn } from 'node:child_process';
 import { lstat, writeFile } from 'node:fs/promises';

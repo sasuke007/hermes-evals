@@ -86,8 +86,10 @@ export function launchHermes(workersNow: LiveWorkers): LaunchHermes {
 /**
  * Why runs of an experiment frozen on `revision` cannot start now, or null:
  * no connected worker with proven isolation runs that revision, so every
- * job would only be put back (claim.ts). Resume, Retry failed runs and Retry
- * answer 409 with it, worded like the launch reasons.
+ * job would only be put back (claim.ts). Resume, Retry failed runs and
+ * POST /runs/:id/retry answer 409 with it, and bulk Retry execution refuses
+ * each run with it, worded like the launch reasons. Re-score does not ask:
+ * scoring never runs Hermes, so any worker can grade.
  */
 export function frozenRevisionRefusal(workersNow: LiveWorkers, revision: string): string | null {
   if (workersNow.proven.some((w) => w.hermesRevision === revision)) return null;

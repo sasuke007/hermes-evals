@@ -1,18 +1,21 @@
 /**
- * What one evaluation grades (plan 9.2): the task's verification list and
- * hidden reference, the attempt's final text, the files it left in the
- * workspace and the task's verifier scripts. All of it is stored evidence:
- * blobs and rows that never change once the attempt has finished, so a
- * scoring pass reads the same input however often it is retried.
+ * What one evaluation grades (plan 9.2): the task's verification list,
+ * prompt and hidden reference, the attempt's final text, the files it left
+ * in the workspace, the task's verifier scripts and judge rubrics, and the
+ * experiment's frozen price table (for the judge's cost). All of it is
+ * stored evidence: blobs and rows that never change once the attempt has
+ * finished, so a scoring pass reads the same input however often it is
+ * retried.
  *
  * Reads only. Nothing here takes a lock: the claim has already made this
  * delivery the evaluation's owner, and the publish transaction re-checks it.
  */
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type {
   ArtifactOrigin,
   ArtifactSkipReason,
   JsonValue,
+  PriceTable,
   RunEventPayload,
   RunEventType,
   VerificationEntry,
@@ -20,6 +23,7 @@ import type {
 import {
   artifacts,
   attempts,
+  experiments,
   runEvents,
   taskFiles,
   tasks,
@@ -46,6 +50,13 @@ export interface VerifierFileRecord {
   sha256: string;
 }
 
+/** A judge rubric (task file of kind `rubric`), stored as a blob by the suite loader. */
+export interface RubricFileRecord {
+  /** Normalised and relative to the task folder, e.g. `rubric.md`: params.rubric, normalised. */
+  path: string;
+  sha256: string;
+}
+
 /** One stored event of the attempt, in sequence order. */
 export interface EventRecord {
   seq: number;
@@ -61,6 +72,8 @@ export interface EvaluationEvidence {
   task: {
     id: string;
     key: string;
+    /** prompt.md, verbatim; null only for a task stored without one (never a valid task). */
+    prompt: string | null;
     /** reference.json; null only for a task that was stored without one (never a valid task). */
     reference: JsonValue | null;
     /** Effective params: the loader already applied `answer.path` to the primary (plan 4.2). */
@@ -69,6 +82,10 @@ export interface EvaluationEvidence {
   attempt: { id: string; finalText: string | null };
   artifacts: ArtifactRecord[];
   verifierFiles: VerifierFileRecord[];
+  /** The llm_judge rubrics, by their normalised path in the task folder. */
+  rubricFiles: RubricFileRecord[];
+  /** The experiment's frozen price table (experiments.price_table): the judge's cost is priced from it. */
+  priceTable: PriceTable;
 }
 
 /** The rows an evaluation names, or null when the run or task is gone (it cannot be: no deletes). */
@@ -80,12 +97,15 @@ export async function loadEvidence(
     .select({
       taskId: tasks.id,
       taskKey: tasks.key,
+      prompt: tasks.prompt,
       reference: tasks.reference,
       verification: tasks.verification,
       finalText: attempts.finalText,
+      priceTable: experiments.priceTable,
     })
     .from(runs)
     .innerJoin(tasks, eq(tasks.id, runs.taskId))
+    .innerJoin(experiments, eq(experiments.id, runs.experimentId))
     .innerJoin(attempts, and(eq(attempts.id, target.attemptId), eq(attempts.runId, runs.id)))
     .where(eq(runs.id, target.runId));
   if (!row) return null;
@@ -103,11 +123,13 @@ export async function loadEvidence(
     .where(eq(artifacts.attemptId, target.attemptId))
     .orderBy(asc(artifacts.path));
 
-  const verifierFiles = await db
-    .select({ path: taskFiles.path, sha256: taskFiles.sha256 })
+  const files = await db
+    .select({ path: taskFiles.path, sha256: taskFiles.sha256, kind: taskFiles.kind })
     .from(taskFiles)
-    .where(and(eq(taskFiles.taskId, row.taskId), eq(taskFiles.kind, 'verifier')))
+    .where(and(eq(taskFiles.taskId, row.taskId), inArray(taskFiles.kind, ['verifier', 'rubric'])))
     .orderBy(asc(taskFiles.path));
+  const ofKind = (kind: 'verifier' | 'rubric') =>
+    files.filter((f) => f.kind === kind).map(({ path, sha256 }) => ({ path, sha256 }));
 
   return {
     evaluationId: target.evaluationId,
@@ -116,19 +138,22 @@ export async function loadEvidence(
     task: {
       id: row.taskId,
       key: row.taskKey,
+      prompt: row.prompt,
       reference: row.reference,
       verification: row.verification,
     },
     attempt: { id: target.attemptId, finalText: row.finalText },
     artifacts: artifactRows,
-    verifierFiles,
+    verifierFiles: ofKind('verifier'),
+    rubricFiles: ofKind('rubric'),
+    priceTable: row.priceTable,
   };
 }
 
 /**
- * The attempt's events in order. Only trajectory-based scorers read them
- * (trajectory_match, Phase 3), so the scorer context loads them on demand
- * rather than with the rest of the evidence.
+ * The attempt's events in order. Only trajectory_match reads them, so the
+ * scorer context loads them on demand rather than with the rest of the
+ * evidence.
  */
 export function loadEvents(db: AppDb, attemptId: string): Promise<EventRecord[]> {
   return db

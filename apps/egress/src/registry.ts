@@ -70,7 +70,8 @@ function isPlainHttpUrl(value: string): boolean {
   }
 }
 
-const HttpUrlSchema = z
+/** An http(s) URL egress may forward to; also the judge registration's custom upstream (judge-registry.ts). */
+export const HttpUrlSchema = z
   .string()
   .max(2048)
   .refine(isPlainHttpUrl, 'must be an http(s) URL without user:password@');

@@ -2,7 +2,7 @@
  * Reads behind the Runs tab and the run inspector. Plain selects, no locks:
  * every view is a snapshot, and a poll a second later shows what changed.
  */
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
 import type { ExtractedAnswer } from '@hermes-evals/shared';
 import {
   artifacts,
@@ -19,6 +19,7 @@ import {
   workers,
 } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
+import type { EvaluationStateRecord } from './evaluation-view.js';
 import type { PrimaryScoreRecord, RunListRecord } from './run-list.js';
 import type {
   ArtifactRecord,
@@ -128,13 +129,24 @@ export async function runListRecords(db: AppDb, experimentId: string): Promise<R
   }));
 }
 
-/** The primary score of each run's current evaluation (completed, not superseded). */
+/**
+ * The primary score of each run's current evaluation, where `current` holds
+ * the current evaluation ids as the caller's own read of the evaluation
+ * states found them (evaluation-view.ts currentEvaluationOf). Not re-derived
+ * from `superseded_at` here: a re-score publishing between the two reads
+ * would otherwise pair one generation's score with another's label. Reading
+ * after the states is consistent with them, because a completed evaluation
+ * keeps its score rows for good.
+ */
 export async function primaryScores(
   db: AppDb,
   experimentId: string,
+  current: ReadonlySet<string>,
 ): Promise<Map<string, PrimaryScoreRecord>> {
+  if (current.size === 0) return new Map();
   const rows = await db
     .select({
+      evaluationId: scores.evaluationId,
       runId: evaluations.runId,
       key: scores.key,
       status: scores.status,
@@ -147,11 +159,58 @@ export async function primaryScores(
       and(
         eq(runs.experimentId, experimentId),
         eq(evaluations.status, 'completed'),
-        isNull(evaluations.supersededAt),
         eq(scores.isPrimary, true),
       ),
     );
-  return new Map(rows.map(({ runId, ...score }) => [runId, score]));
+  return new Map(
+    rows
+      .filter((row) => current.has(row.evaluationId))
+      .map(({ runId, evaluationId: _id, ...score }) => [runId, score]),
+  );
+}
+
+const evaluationStateColumns = {
+  id: evaluations.id,
+  runId: evaluations.runId,
+  generation: evaluations.generation,
+  status: evaluations.status,
+  cause: evaluations.cause,
+  error: evaluations.error,
+  requestedAt: evaluations.requestedAt,
+  finishedAt: evaluations.finishedAt,
+  supersededAt: evaluations.supersededAt,
+};
+
+/** Every evaluation of one run, without its answer, oldest generation first. */
+export async function evaluationStatesOfRun(
+  db: AppDb,
+  runId: string,
+): Promise<EvaluationStateRecord[]> {
+  return db
+    .select(evaluationStateColumns)
+    .from(evaluations)
+    .where(eq(evaluations.runId, runId))
+    .orderBy(asc(evaluations.generation));
+}
+
+/** Every evaluation of the experiment's runs, without answers, by run id. */
+export async function evaluationStatesOfExperiment(
+  db: AppDb,
+  experimentId: string,
+): Promise<Map<string, EvaluationStateRecord[]>> {
+  const rows = await db
+    .select(evaluationStateColumns)
+    .from(evaluations)
+    .innerJoin(runs, eq(runs.id, evaluations.runId))
+    .where(eq(runs.experimentId, experimentId))
+    .orderBy(asc(evaluations.runId), asc(evaluations.generation));
+  const byRun = new Map<string, EvaluationStateRecord[]>();
+  for (const row of rows) {
+    const list = byRun.get(row.runId);
+    if (list) list.push(row);
+    else byRun.set(row.runId, [row]);
+  }
+  return byRun;
 }
 
 export async function runById(db: AppDb, id: string): Promise<RunRecord | null> {
@@ -193,24 +252,21 @@ export async function workerById(db: AppDb, id: string): Promise<WorkerRecord | 
   return row ?? null;
 }
 
-/** The run's current evaluation and its scores, or null before the first one is published. */
-export async function currentEvaluation(
+/**
+ * An evaluation and its scores, by id: the run's current one, as the
+ * caller's read of the evaluation states named it. A completed evaluation's
+ * score rows and answer never change, so reading them after the states is
+ * consistent with them even when a re-score publishes in between.
+ */
+export async function evaluationWithScores(
   db: AppDb,
-  runId: string,
+  evaluationId: string,
 ): Promise<{ record: EvaluationRecord; scores: ScoreRecord[] } | null> {
-  const [record] = await db
-    .select()
-    .from(evaluations)
-    .where(
-      and(
-        eq(evaluations.runId, runId),
-        eq(evaluations.status, 'completed'),
-        isNull(evaluations.supersededAt),
-      ),
-    );
-  if (!record) return null;
-  const rows = await db.select().from(scores).where(eq(scores.evaluationId, record.id));
-  return { record, scores: rows };
+  const [[record], rows] = await Promise.all([
+    db.select().from(evaluations).where(eq(evaluations.id, evaluationId)),
+    db.select().from(scores).where(eq(scores.evaluationId, evaluationId)),
+  ]);
+  return record ? { record, scores: rows } : null;
 }
 
 /** The newest extraction stored for an attempt, by any of its evaluations. */

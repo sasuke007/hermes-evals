@@ -32,6 +32,7 @@ import {
   FakeEngine,
   streamJson,
   type FakeContainerInfo,
+  type FakeJudgeModel,
   type FakeStep,
   type FakeTrialScript,
 } from './fake-engine.js';
@@ -224,20 +225,30 @@ export function fakeSandbox(
   } as unknown as SandboxService;
 }
 
-/** The engine and egress one fake Docker daemon gives every worker on it. */
+/**
+ * The engine and egress one fake Docker daemon gives every worker on it.
+ * `script`, when given, decides the trials instead of `scripts`; `judge`
+ * serves egress's judge path (Phase 3).
+ */
 export function fakeDaemon(options: {
   trialsDir: string;
   guard: GuardConfig;
   scripts: TrialScripts;
+  script?: (container: FakeContainerInfo) => FakeTrialScript;
+  judge?: FakeJudgeModel;
   egressEnvNames?: string[];
 }): { engine: FakeEngine; egress: FakeEgress } {
   return {
     engine: new FakeEngine({
       trialsDir: options.trialsDir,
       guard: options.guard,
-      script: options.scripts.script,
+      script: options.script ?? options.scripts.script,
       daemonId: 'E2E:DAEMON',
     }),
-    egress: new FakeEgress({ report: egressReport, envNames: options.egressEnvNames ?? [] }),
+    egress: new FakeEgress({
+      report: egressReport,
+      envNames: options.egressEnvNames ?? [],
+      ...(options.judge ? { judge: options.judge } : {}),
+    }),
   };
 }

@@ -203,6 +203,7 @@ describe('scorer params', () => {
       trajectory_match: { tool: 'read_file' },
       verifier_script: { script: 'check.py' },
       llm_judge: { rubric: 'rubric.md' },
+      text_match: { contains: ['1.5%'] },
     };
     for (const type of SCORER_TYPES) {
       expect(params(type, valid[type]).success).toBe(true);
@@ -244,6 +245,19 @@ describe('scorer params', () => {
       ['llm_judge', { rubric: '/rubric.md' }],
       ['llm_judge', { rubric: 'rubric.md', pass_at: 2 }],
       ['llm_judge', { rubric: 'rubric.md', model: '' }],
+      ['text_match', {}],
+      ['text_match', { contains: [] }],
+      ['text_match', { contains: [''] }],
+      ['text_match', { contains: '1.5%' }],
+      ['text_match', { pattern: '' }],
+      ['text_match', { pattern: 3 }],
+      ['text_match', { contains: ['a', 'a'] }],
+      ['text_match', { contains: ['Late fee', 'late fee'] }],
+      ['text_match', { contains: ['a'], case_sensitive: 'no' }],
+      ['text_match', { contains: ['a'], pass_at: 1.01 }],
+      ['text_match', { contains: ['a'], pass_at: -0.5 }],
+      ['text_match', { contains: ['a'], path: '' }],
+      ['text_match', { contains: ['a'], regex: 'a+' }],
     ];
     for (const [type, value] of bad) {
       expect(params(type, value).success, `${type} ${JSON.stringify(value)}`).toBe(false);
@@ -256,6 +270,42 @@ describe('scorer params', () => {
     ]);
     expect(issuePaths(params('trajectory_match', { tool: 't', max_calls: 0 }))).toEqual([
       'max_calls',
+    ]);
+    expect(issuePaths(params('text_match', { contains: [] }))).toEqual(['contains']);
+    expect(issuePaths(params('text_match', { contains: ['x', 'X'] }))).toEqual(['contains']);
+  });
+});
+
+describe('text_match params (DESIGN_CHECKS_FIX_PROMPT.md Part F)', () => {
+  it('takes phrases, a pattern or both, case-insensitive and all-must-be-found by default', () => {
+    expect(params('text_match', { contains: ['1.5%', '30 days'] }).data).toEqual({
+      contains: ['1.5%', '30 days'],
+      case_sensitive: false,
+      pass_at: 1,
+    });
+    expect(params('text_match', { pattern: 'INV-\\d{4}', path: 'rule' }).data).toEqual({
+      pattern: 'INV-\\d{4}',
+      path: 'rule',
+      case_sensitive: false,
+      pass_at: 1,
+    });
+    // A pattern alone may come with an empty phrase list.
+    expect(params('text_match', { contains: [], pattern: 'fee' }).success).toBe(true);
+    // Phrases that differ only in case are distinct when case matters.
+    expect(
+      params('text_match', {
+        contains: ['Late fee', 'late fee'],
+        case_sensitive: true,
+        pass_at: 0.5,
+      }).data,
+    ).toEqual({ contains: ['Late fee', 'late fee'], case_sensitive: true, pass_at: 0.5 });
+  });
+
+  it('says what to add when nothing is looked for', () => {
+    const result = params('text_match', { case_sensitive: true });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message)).toEqual([
+      'Add at least one phrase or a pattern.',
     ]);
   });
 });

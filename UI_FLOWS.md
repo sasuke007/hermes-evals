@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** (Phases 0 to 2): postgres, the api with every Phase 1 and Phase 2 endpoint, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` and its dead letter, recovery), docker-guard, egress (proxy, model gateway, MCP gateway), the trial image, nous-proxy and nous-login. The web app is built against fixtures. **Planned**: re-score and the last scorers (Phase 3), statistics and the comparison endpoint (Phase 4), the pages against the real API (Phase 5), suite authoring (Phase 5b).
+Status: **Built** (Phases 0 to 3): postgres, the api with every Phase 1 to Phase 3 endpoint, re-score included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login. The web app is built against fixtures. **Planned**: statistics and the comparison endpoint (Phase 4), the pages against the real API (Phase 5), suite authoring (Phase 5b).
 
 ```mermaid
 flowchart LR
@@ -96,7 +96,7 @@ flowchart LR
   WK -- "filtered Docker API<br/>unix socket" --> G
   G -- "Docker socket" --> D
   D -- "creates" --> T
-  WK -- "register / remove attempt token<br/>unix socket" --> E
+  WK -- "attempt tokens, LLM judge calls<br/>unix socket" --> E
   T -- "model calls with attempt token" --> E
   T -- "HTTPS via CONNECT" --> E
   T -- "http MCP calls, no headers" --> E
@@ -114,6 +114,7 @@ What the picture enforces:
 
 - The trial can reach **only egress**. Postgres, the API, the host, other trials and the internet are not on its network. Its filesystem is two mounts: its own home (`/opt/data`) and workspace (`/workspace`).
 - **No provider credential enters a trial.** The trial gets a per-attempt token. Egress swaps it for the real API key, or forwards Nous calls to nous-proxy, which holds the OAuth login. The token dies when the attempt ends. The same holds for http MCP header values, which egress adds. The one exception is a stdio MCP server's env values: that server runs inside the trial, so the agent can read them, and the UI says so (section 9.4).
+- **The worker and the API hold no provider key either.** Compose blanks every key in their environments, and the LLM judge's model calls go through egress's admin socket, one short-lived registration per judge call (section 13).
 - **Only docker-guard can touch Docker**, and it refuses anything that is not a trial container of the pinned image with the hardened settings.
 - The API never talks to Docker. The worker never serves HTTP.
 
@@ -164,7 +165,7 @@ The rules that matter for every flow below, all enforced by the database whateve
 
 ## 3. State machines
 
-Status: **Built** as vocabularies and database checks, and the API and worker code that performs the transitions (Phase 2; `docs/phases/phase-2.md` section 3.5). **Planned**: the re-score transitions of an evaluation (Phase 3).
+Status: **Built** as vocabularies and database checks, and the API and worker code that performs the transitions (Phase 2; `docs/phases/phase-2.md` section 3.5), with the re-score transitions of an evaluation (Phase 3; `docs/phases/phase-3.md` section 3.2).
 
 ### Run
 
@@ -218,13 +219,14 @@ stateDiagram-v2
 stateDiagram-v2
   [*] --> queued: run executed (generation 1) or re-score (generation n+1)
   queued --> running: claimed with a claim token (10 min)
-  running --> running: redelivered job takes a new token
+  running --> running: claim renewed after each key, or a redelivered job takes a new token
   running --> completed: publish transaction
   running --> failed: dead letter on a re-score only
+  queued --> failed: dead letter on a re-score only
   completed --> superseded: a newer generation publishes
 ```
 
-A first evaluation never ends `failed`: when its job dies, the dead-letter handler publishes one `error` score per key, so the run still reaches `scored`.
+A first evaluation never ends `failed`: when its job dies, the dead-letter handler publishes one `error` score per key, so the run still reaches `scored`. A failed re-score leaves the previous generation current.
 
 ### Nous Portal login
 
@@ -477,7 +479,7 @@ Details that matter:
 
 ## 7. Nudges: where the UI blocks model work and why
 
-Status: **Built** in the web app against fixtures (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker), and in the API: the launch 409s and the worker's provider guard (Phase 2). **Planned**: the components against the real API (Phase 5).
+Status: **Built** in the web app against fixtures (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker), and in the API: the launch 409s and the worker's provider guard (Phase 2), and the 409s of launch and re-score when the LLM judge's provider is not ready (Phase 3). **Planned**: the components against the real API (Phase 5).
 
 The rule: a user should never find out at launch, or halfway through an experiment, that no model is reachable. Every place that leads to a model call checks the providers of the configurations involved.
 
@@ -489,7 +491,7 @@ flowchart TD
   where -- "Configuration form, provider nous" --> PN["ProviderNotice under the field:<br/>'Not connected. You can save now and connect before you launch.'<br/>Save stays enabled"]
   where -- "New experiment, a selected config's provider is down" --> NE["Row tag + summary blocker,<br/>Launch disabled with the reason,<br/>Connect Nous Portal in the panel"]
   where -- "Launch request reaches the API anyway" --> L409["POST /experiments returns 409<br/>'Nous Portal is not connected',<br/>checked before the launch transaction"]
-  where -- "Retry, Resume, Re-score with an llm_judge on Nous" --> BR["Control disabled through BlockedReason,<br/>with a Connect link"]
+  where -- "Retry, Resume, Re-score with an llm_judge whose judge is on Nous" --> BR["Control disabled through BlockedReason,<br/>with a Connect link"]
   where -- "Experiment already running" --> PG["Worker's provider guard pauses it:<br/>pause_reason provider_disconnected,<br/>no attempt spent"]
   where -- "Suites, reload, self-checks" --> NO["No nudge: they never call a model"]
 
@@ -1076,7 +1078,7 @@ A missing heartbeat alone never proves the trial stopped. A replacement starts o
 
 ## 13. What happens to one run: scoring
 
-Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1), and the `evaluate-run` handler with claim, publish and the dead letter (Phase 2). **Planned**: `trajectory_match`, `llm_judge`, `text_match` and re-score (Phase 3).
+Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`). **Planned**: verdict entries (Phase 4).
 
 Scoring is separate from execution, so a scorer bug is fixed by re-scoring. Hermes is never run again for it.
 
@@ -1087,29 +1089,35 @@ sequenceDiagram
   participant WK as Worker
   participant DB as DB
   participant B as Blob store
-  participant J as Judge model (via provider)
+  participant E as Egress admin socket
+  participant J as Judge model (via its provider)
 
   Q->>WK: evaluate-run {evaluationId}
   WK->>DB: claim: UPDATE evaluations SET running, new claim_token, expires in 10 min<br/>WHERE status queued or running
   alt zero rows
     WK->>Q: already finished: complete the job
   end
-  WK->>DB: read attempt final_text, run_events, artifacts, task verification list
+  WK->>DB: read attempt final_text, the task's prompt, reference and verification list,<br/>artifacts, rubric files, the experiment's frozen prices
   WK->>WK: extract the answer: last fenced json block, parse, keep start/end offsets
   loop each verification key of the task
     alt numeric_tolerance, json_match, exact_match
       WK->>WK: compare the answer (at its path) with the reference
+    else text_match
+      WK->>WK: look for the phrases and the pattern in the answer (at its path), 1 s per match
     else trajectory_match
-      WK->>WK: build the tool-call list from tool_use/tool_result events, count or match
+      WK->>DB: tool_use/tool_result events: count the matching calls, or match the trajectory
     else file_check
       WK->>B: read the artifact by hash, check format, columns, rows, schema
     else verifier_script
       WK->>B: materialise verifier files + artifacts into a temp dir
       WK->>WK: python3 verify/check.py --answer tmp.json --workspace dir (30 s, outside any trial)
     else llm_judge
-      WK->>J: rubric + reference as facts, agent text wrapped as untrusted data
-      J-->>WK: score + rationale (judge tokens recorded)
+      WK->>E: register one judge call (the judge model only, minutes), then the chat completion
+      E->>J: rubric, task and reference as facts, agent text as untrusted data,<br/>temperature 0, at most 1,024 tokens, egress's credential added
+      J-->>E: score 0 to 1 and a comment
+      E-->>WK: the answer and the tokens egress metered, then the registration is removed
     end
+    WK->>DB: renew the claim (10 min again) while the token still matches, otherwise stop and drop the work
   end
   WK->>DB: BEGIN, lock experiment then run
   WK->>DB: re-read the evaluation FOR UPDATE with the claim token (zero rows: someone newer owns it, roll back)
@@ -1118,6 +1126,8 @@ sequenceDiagram
   WK->>DB: reconcile the experiment
   WK->>DB: COMMIT
 ```
+
+The judge is the platform's, not the run's: a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset). With no judge model the key is `error`, never a zero. Its tokens and cost are stored in the score's evidence as grading cost, outside the spend guard.
 
 What each outcome means, kept apart everywhere in the UI:
 
@@ -1129,7 +1139,7 @@ What each outcome means, kept apart everywhere in the UI:
 | `error`           | the check itself broke                             | verifier printed no result line            |
 | `execution_error` | (a run status, not a score) no answer was produced | timeout, provider down                     |
 
-**Re-score** (`POST /runs/:id/rescore`, or the bulk bar): inserts an evaluation with the next generation and sends `evaluate-run`, in one transaction. Only one evaluation per run can be queued or running, so double clicks collapse. If the experiment was completed, publishing appends a verdict with cause `rescore`.
+**Re-score** (`POST /runs/:id/rescore`, or the bulk bar): inserts an evaluation with the next generation and sends `evaluate-run`, in one transaction. Only a `scored` run can be re-scored (409 "run is …, not scored"), and a task with an `llm_judge` key needs the judge's provider ready (409 "Re-score needs Nous Portal for the method judge: …"). The run stays `scored`, and its previous result stays current, until the new generation publishes; the inspector and the Runs tab show the pending re-score. Only one evaluation per run can be queued or running, so double clicks collapse: a second request answers the pending one (`joinedPending`). A re-score grades the experiment's frozen task with the scorers as they are now in code, and the judge settings of the moment. If the experiment was completed, publishing raises the results revision; from Phase 4, reconcile also appends a verdict with cause `rescore`.
 
 **When a scoring job dies for good**: for a first evaluation, one `error` score per key is published, so the run still reaches `scored`. A failed re-score leaves the previous result current.
 
@@ -1146,7 +1156,7 @@ flowchart TD
   U -- yes --> C["status completed, finished_at,<br/>append to verdict_history (cause initial, retry or rescore),<br/>verdict_revision = results_revision"]
 ```
 
-Two workers finishing the last two runs at the same moment append the verdict once: the conditional update lets only one through.
+Two workers finishing the last two runs at the same moment append the verdict once: the conditional update lets only one through. As built, reconcile completes the experiment and sets `verdict_revision`, but computes and appends no verdict entry until Phase 4.
 
 ---
 
@@ -1313,7 +1323,7 @@ Because `results_revision` moves on every run status change and every published 
 
 ## 17. Runs tab
 
-Status: **Built** in the web app against fixtures, and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2). **Planned**: bulk re-score (Phase 3) and the tab against the real API (Phase 5).
+Status: **Built** in the web app against fixtures, and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2), and bulk re-score with each row's `generation` and `rescorePending` (Phase 3). **Planned**: the tab against the real API (Phase 5).
 
 ```mermaid
 sequenceDiagram
@@ -1334,9 +1344,9 @@ sequenceDiagram
     W->>W: bulk action disabled through BlockedReason + Connect
   else
     W->>A: POST /experiments/:id/runs/rescore (or /retry) {runIds}
-    A->>DB: per run: new evaluation generation, or next attempt (only execution_error, under 5 attempts)
+    A->>DB: per run: new evaluation generation (only scored, or join the pending one),<br/>or next attempt (only execution_error, under 5 attempts)
     A->>Q: evaluate-run or execute-run per accepted run (same transaction)
-    A-->>W: enqueued N, refused [{runId, reason}]
+    A-->>W: enqueued N, refused [{runId, reason}], and for a re-score each run's evaluation
     W->>W: refused ones listed in a banner, accepted rows go queued, then running, live
   end
   U->>W: clicks a row
@@ -1347,7 +1357,7 @@ sequenceDiagram
 
 ## 18. Run inspector
 
-Status: **Built** in the web app against fixtures, and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2). **Planned**: re-score (Phase 3) and the drawer against the real API (Phase 5).
+Status: **Built** in the web app against fixtures, and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3). **Planned**: the drawer against the real API (Phase 5).
 
 A right-hand drawer over the experiment, 75% of the window, with its own route (`/experiments/:id/runs/:runId`, or `?run=` from the comparison). Esc closes it back to where it was opened.
 
@@ -1396,13 +1406,13 @@ The five sections and what each proves:
 
 Actions in the drawer:
 
-| Action      | Call                        | Allowed when                                                            |
-| ----------- | --------------------------- | ----------------------------------------------------------------------- |
-| Re-score    | `POST /runs/:id/rescore`    | run scored; judge provider connected if a key uses `llm_judge`          |
-| Retry       | `POST /runs/:id/retry`      | run execution_error, under 5 attempts, provider connected               |
-| Cancel      | `POST /runs/:id/cancel`     | run queued or running                                                   |
-| Prev / Next | none (J / K)                | moves through the list the drawer was opened from                       |
-| A/B         | `GET /runs/:id/counterpart` | a run of the same task and repetition exists in the other configuration |
+| Action      | Call                        | Allowed when                                                                                                      |
+| ----------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Re-score    | `POST /runs/:id/rescore`    | run scored; the judge's provider ready if an `llm_judge` key resolves a judge model; a pending re-score is joined |
+| Retry       | `POST /runs/:id/retry`      | run execution_error, under 5 attempts, provider connected                                                         |
+| Cancel      | `POST /runs/:id/cancel`     | run queued or running                                                                                             |
+| Prev / Next | none (J / K)                | moves through the list the drawer was opened from                                                                 |
+| A/B         | `GET /runs/:id/counterpart` | a run of the same task and repetition exists in the other configuration                                           |
 
 ---
 

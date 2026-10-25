@@ -1,0 +1,93 @@
+{
+  "$comment": [
+    "The LLM judge's wire contract on egress's admin socket (Phase 3 S2), as example messages.",
+    "Two halves speak it: the worker's EgressClient and judge client (apps/api/src/sandbox/egress-client.ts,",
+    "apps/api/src/scoring/judge/egress-judge.ts) and egress's judge path (apps/egress/src/judge-path.ts,",
+    "judge-registry.ts). Egress does not depend on this package, so neither side imports the other:",
+    "each side's tests hold its real messages to the shape of these, and parse these with its own schemas",
+    "(apps/egress/test/judge-wire.spec.ts, apps/api/src/sandbox/egress-judge-wire.spec.ts). A change on",
+    "one side fails that side's test; changing this file to match then fails the other side's until it agrees."
+  ],
+  "register": {
+    "named": {
+      "kind": "judge",
+      "provider": "openrouter",
+      "model": "openai/gpt-6.1-sol",
+      "maxTokens": 200000,
+      "expiresAt": 1792800150000
+    },
+    "custom": {
+      "kind": "judge",
+      "provider": "custom",
+      "upstream": { "baseUrl": "http://mock-model:8090/v1" },
+      "model": "mock/judge",
+      "maxTokens": 200000,
+      "expiresAt": 1792800150000
+    }
+  },
+  "complete": {
+    "request": {
+      "model": "mock/judge",
+      "messages": [
+        { "role": "system", "content": "You grade one response against a rubric." },
+        {
+          "role": "user",
+          "content": "Rubric, task and reference, then the response between delimiters."
+        }
+      ],
+      "temperature": 0,
+      "max_tokens": 1024,
+      "response_format": { "type": "json_object" },
+      "stream": false
+    },
+    "answered": {
+      "status": 200,
+      "body": {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "model": "mock/judge",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"score\": 0.9, \"comment\": \"Meets the rubric.\"}"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": { "prompt_tokens": 900, "completion_tokens": 30, "total_tokens": 930 }
+      },
+      "usage": { "calls": 1, "promptTokens": 900, "completionTokens": 30, "totalTokens": 930 }
+    },
+    "unmetered": {
+      "status": 503,
+      "body": { "error": { "message": "upstream overloaded" } },
+      "usage": null
+    },
+    "refused": {
+      "status": 403,
+      "body": {
+        "error": {
+          "message": "model other/model is not this judge registration's model",
+          "type": "invalid_request_error"
+        }
+      }
+    }
+  },
+  "remove": {
+    "usage": { "calls": 1, "promptTokens": 900, "completionTokens": 30, "totalTokens": 930 },
+    "log": [
+      {
+        "at": "2026-10-25T10:00:00.000Z",
+        "kind": "model",
+        "model": "mock/judge",
+        "decision": "allowed",
+        "status": 200,
+        "ms": 12,
+        "promptTokens": 900,
+        "completionTokens": 30
+      }
+    ]
+  }
+}

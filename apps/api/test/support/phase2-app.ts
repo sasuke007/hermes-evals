@@ -7,6 +7,9 @@
  * Workers share one fake Docker daemon (engine and egress), as workers on one
  * machine share the real one, so a worker started after another one stopped
  * can confirm and recover what the first left behind.
+ *
+ * WorldOptions let a later phase's e2e reuse the harness with its own suite,
+ * prices, trial scripts, settings and judge model (test/phase3.e2e-spec.ts).
  */
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,7 +38,13 @@ import type { Env } from '../../src/config/env.js';
 import * as schema from '../../src/database/schema/index.js';
 import { SandboxService } from '../../src/sandbox/sandbox.service.js';
 import { FakeNousLogin } from '../../src/providers/fake-nous-login.support-spec.js';
-import type { FakeEgress, FakeEngine } from './fake-engine.js';
+import type {
+  FakeContainerInfo,
+  FakeEgress,
+  FakeEngine,
+  FakeJudgeModel,
+  FakeTrialScript,
+} from './fake-engine.js';
 import { fakeDaemon, fakeSandbox, TrialScripts } from './fake-trials.js';
 
 export const IMAGE = 'hermes-evals/trial:v0.22.4-4d04303';
@@ -62,6 +71,20 @@ const PRICES = `models:
 `;
 
 export type Db = NodePgDatabase<typeof schema>;
+
+/** What a world built for another phase changes; everything absent is Phase 2's. */
+export interface WorldOptions {
+  /** A suite directory (its suite.yaml and task folders), loaded as `name`, launched on `tasks`. */
+  suite?: { name: string; dir: string; tasks: readonly string[] };
+  /** prices.yaml's text. */
+  prices?: string;
+  /** Decides what each trial container does, instead of the world's TrialScripts. */
+  script?: (container: FakeContainerInfo) => FakeTrialScript;
+  /** The model behind egress's judge path. */
+  judge?: FakeJudgeModel;
+  /** More settings for the API and the workers, set before the modules are imported. */
+  env?: Partial<Record<keyof Env, string>>;
+}
 
 export interface ConfigRef {
   name: string;
@@ -112,12 +135,19 @@ export class Phase2World {
   /** Every worker started, open or closed, in order. */
   readonly workers: TestingModule[] = [];
 
+  /** The suite the launch helpers name, and the tasks they select. */
+  readonly suiteName: string;
+  readonly taskKeys: readonly string[];
+
   /** `name` keeps the database of each spec file apart. */
   constructor(
     private readonly serverUrl: string,
     name: string,
+    private readonly options: WorldOptions = {},
   ) {
     this.database = `hermes_evals_${name}_${process.pid}`;
+    this.suiteName = options.suite?.name ?? SUITE_NAME;
+    this.taskKeys = options.suite?.tasks ?? TASKS;
   }
 
   async start(): Promise<void> {
@@ -129,14 +159,18 @@ export class Phase2World {
     this.dataDir = await mkdtemp(join(tmpdir(), 'hermes-evals-phase2-data-'));
     this.suitesDir = await mkdtemp(join(tmpdir(), 'hermes-evals-phase2-suites-'));
     this.trialsDir = await mkdtemp(join(tmpdir(), 'hermes-evals-phase2-trials-'));
-    const suite = join(this.suitesDir, SUITE_NAME);
-    for (const task of TASKS)
-      await cp(join(COMPLETE, task), join(suite, task), { recursive: true });
-    await writeFile(
-      join(suite, 'suite.yaml'),
-      `name: ${SUITE_NAME}\nversion_label: '2.0'\ndescription: Phase 2 e2e.\ntasks: [${TASKS.join(', ')}]\n`,
-    );
-    await writeFile(join(this.dataDir, 'prices.yaml'), PRICES);
+    const suite = join(this.suitesDir, this.suiteName);
+    if (this.options.suite) {
+      await cp(this.options.suite.dir, suite, { recursive: true });
+    } else {
+      for (const task of TASKS)
+        await cp(join(COMPLETE, task), join(suite, task), { recursive: true });
+      await writeFile(
+        join(suite, 'suite.yaml'),
+        `name: ${SUITE_NAME}\nversion_label: '2.0'\ndescription: Phase 2 e2e.\ntasks: [${TASKS.join(', ')}]\n`,
+      );
+    }
+    await writeFile(join(this.dataDir, 'prices.yaml'), this.options.prices ?? PRICES);
     await this.nous.listen();
 
     // ConfigModule.forRoot reads the environment when the modules are
@@ -162,12 +196,18 @@ export class Phase2World {
       LEASE_SECONDS: '30',
       SUITE_RELOAD_TIMEOUT_S: '60',
     } satisfies Partial<Record<keyof Env, string>>);
+    // Only the values given: Node stores an assigned undefined as the text "undefined".
+    for (const [key, value] of Object.entries(this.options.env ?? {})) {
+      if (value !== undefined) process.env[key] = value;
+    }
     process.env['INVOICE_DB_URL'] = DB_SECRET;
 
     const daemon = fakeDaemon({
       trialsDir: this.trialsDir,
       guard: { trialImage: IMAGE, trialVolume: VOLUME, trialNetworks: SLOTS },
       scripts: this.scripts,
+      ...(this.options.script ? { script: this.options.script } : {}),
+      ...(this.options.judge ? { judge: this.options.judge } : {}),
     });
     this.engine = daemon.engine;
     this.egress = daemon.egress;
@@ -299,7 +339,7 @@ export class Phase2World {
     extra: Partial<LaunchExperimentInput> = {},
   ): Promise<LaunchExperimentInput> {
     const options = await this.read('/experiments/new-options', NewExperimentOptionsSchema);
-    const suite = options.suites.find((s) => s.name === SUITE_NAME)!;
+    const suite = options.suites.find((s) => s.name === this.suiteName)!;
     const hashes = Object.fromEntries(
       [baseline, ...candidates].map((c) => {
         const option = options.configurations.find((o) => o.versionId === c.versionId);
@@ -310,7 +350,7 @@ export class Phase2World {
       name,
       description: '',
       suiteId: suite.suiteId,
-      taskKeys: [...TASKS],
+      taskKeys: [...this.taskKeys],
       baselineVersionId: baseline.versionId,
       candidateVersionIds: candidates.map((c) => c.versionId),
       repetitions: 1,

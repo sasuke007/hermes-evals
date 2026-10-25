@@ -78,6 +78,18 @@ describe('verificationSentence', () => {
     );
   });
 
+  it('states what text_match looks for', () => {
+    expect(
+      verificationSentence(entry('text_match', { path: 'rule', contains: ['1.5%', '30 days'] })),
+    ).toBe('text_match on rule, contains "1.5%", "30 days"');
+    expect(
+      verificationSentence(
+        entry('text_match', { pattern: '^net \\d+$', case_sensitive: true, pass_at: 0.5 }, true),
+        'terms',
+      ),
+    ).toBe('text_match on terms, matches /^net \\d+$/, case-sensitive, pass at 0.5');
+  });
+
   it('uses answer.path for the primary entry only', () => {
     expect(verificationSentence(entry('numeric_tolerance', { abs: 0.5 }, true), 'total')).toBe(
       'numeric_tolerance on total, within ±0.5 of the reference',

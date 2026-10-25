@@ -9,7 +9,9 @@
  * experiment scenario through the matrices.
  */
 import type {
+  BulkRescoreResult,
   BulkRunActionResult,
+  RescoreRunResult,
   RunFilters,
   RunListResult,
   RunModelNeeds,
@@ -19,7 +21,7 @@ import type {
 } from '@/api/types/runs';
 import { CONFIG_VERSIONS } from './configurations';
 import { configRef, type ExperimentSeed, primaryKey, type RunSeed, runsOf } from './experiments';
-import { TASK_KEYS, taskVerification } from './suites';
+import { at, TASK_KEYS, taskVerification } from './suites';
 
 /** What a run needs from model access: its configuration's provider and the task's judges. */
 export function runNeeds(run: RunSeed): RunModelNeeds {
@@ -56,6 +58,9 @@ export function runRow(seed: ExperimentSeed, run: RunSeed): RunRow {
     costUsd: run.costUsd,
     finishedAt: run.finishedAt,
     needs: runNeeds(run),
+    // Fixture runs are graded once; none has a re-score in flight.
+    generation: run.status === 'scored' ? 1 : null,
+    rescorePending: false,
   };
 }
 
@@ -156,12 +161,40 @@ export function runListFixture(seed: ExperimentSeed, filters: RunFilters = {}): 
   return { rows, matched: rows.length, summary: runSummary(runs) };
 }
 
+/** The evaluation a re-score queues: fixture runs are graded once, so it is generation 2. */
+function rescoreEvaluation(runId: string) {
+  return {
+    evaluationId: `eval_${runId.replace(/^run_/, '')}_2`,
+    generation: 2,
+    status: 'queued' as const,
+  };
+}
+
+/**
+ * Re-score of one scored run (POST /runs/:id/rescore): the run stays scored
+ * and its result current until generation 2 publishes. `joinedPending` when
+ * a re-score was already queued: a double click answers the same evaluation.
+ */
+export function rescoreRunFixture(runId: string, joinedPending = false): RescoreRunResult {
+  return {
+    runId,
+    status: 'scored',
+    attempt: null,
+    evaluation: {
+      ...rescoreEvaluation(runId),
+      cause: 'rescore',
+      requestedAt: at(23, '15:40:00'),
+    },
+    joinedPending,
+  };
+}
+
 /** Bulk Re-score: only scored runs can be re-scored; it never re-executes. */
 export function bulkRescoreFixture(
   seed: ExperimentSeed,
   runIds: string[],
   refuseAll: boolean,
-): BulkRunActionResult {
+): BulkRescoreResult {
   const runs = runsOf(seed);
   const enqueued: string[] = [];
   const refused: BulkRunActionResult['refused'] = [];
@@ -177,7 +210,12 @@ export function bulkRescoreFixture(
       refused.push({ runId: id, reason: `run is ${run.status}, not scored` });
     else enqueued.push(id);
   }
-  return { action: 'rescore', enqueued, refused };
+  const evaluations = enqueued.map((runId) => ({
+    runId,
+    ...rescoreEvaluation(runId),
+    joinedPending: false,
+  }));
+  return { action: 'rescore', enqueued, refused, evaluations };
 }
 
 /** Bulk Retry execution: only execution_error runs with fewer than 5 attempts. */

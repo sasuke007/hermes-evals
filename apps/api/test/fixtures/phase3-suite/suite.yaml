@@ -1,0 +1,4 @@
+name: phase3
+version_label: '3.0'
+description: Phase 3 e2e. Between them the tasks use all eight check types.
+tasks: [invoice_total, ledger, late_fee_rule, summary_file]

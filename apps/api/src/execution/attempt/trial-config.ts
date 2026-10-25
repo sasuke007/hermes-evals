@@ -16,6 +16,11 @@
  *   ${HERMES_EVALS_ATTEMPT_TOKEN}` reference (providers-map.ts), never a value.
  * - agent.max_turns and agent.run_budget_seconds (`--run-budget` is refused
  *   on the one-shot path).
+ * - tools.tool_search.enabled off: by default Hermes puts MCP tools, and some
+ *   core tools, behind its tool_search / tool_describe / tool_call bridge
+ *   (tools/tool_search.py), so the model must discover them. Off, the
+ *   configured toolsets and MCP tools are exactly what the agent sees, in
+ *   every arm.
  * - settings that keep the run from making avoidable network calls or
  *   behaving differently between arms: no update check, no plugin update
  *   check, no curator, no title generation, approvals off, no lazy installs,
@@ -30,6 +35,15 @@ import { hermesModelConfig } from '../providers-map.js';
 
 /** Where Hermes reads its configuration, inside the trial. */
 export const TRIAL_CONFIG_PATH = '/opt/data/config.yaml';
+
+/**
+ * `tools.tool_search` with the bridge turned off ("off" is pass-through in
+ * Hermes 4d04303's ToolSearchConfig). It is written as a bare `off`, which
+ * Hermes's YAML 1.1 loader reads as false and ToolSearchConfig maps to "off"
+ * as well, the same way `approvals.mode: off` is read. The MCP "Test start"
+ * config sets it too, so a probe and a run see the same tool surface.
+ */
+export const TOOL_SEARCH_OFF = { enabled: 'off' } as const;
 
 export interface HermesConfigInput {
   /** config.yaml's `model` section (hermesModelConfig, or the harness's own route). */
@@ -67,6 +81,9 @@ export function hermesConfig(input: HermesConfigInput): Record<string, unknown> 
     memory: { memory_enabled: input.memoryEnabled, user_profile_enabled: input.memoryEnabled },
     mcp_servers: Object.fromEntries(input.mcpServers.map((def) => [def.name, mcpServerEntry(def)])),
     agent: { max_turns: input.maxTurns, run_budget_seconds: input.runBudgetSeconds },
+    // Hermes merges this over its defaults (hermes_cli/config.py _deep_merge),
+    // so the bridge's other settings keep theirs and only `enabled` changes.
+    tools: { tool_search: { ...TOOL_SEARCH_OFF } },
     approvals: { mode: 'off' },
     updates: { check: false },
     plugins: { auto_update_check_hours: 0 },

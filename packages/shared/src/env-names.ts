@@ -5,7 +5,8 @@
  * A stdio server's env names are read from the WORKER's environment and set
  * in the trial container, where the agent can read them. The worker's
  * environment also holds what must never enter a trial: the provider keys
- * (from .env, for the LLM judge), DATABASE_URL and the worker's own settings.
+ * (Compose gives the worker the whole of .env, for those stdio values),
+ * DATABASE_URL and the worker's own settings.
  * An http server's header variables are read from egress's environment, which
  * holds the provider keys as well; a definition must not be able to tell
  * egress to send one to an arbitrary URL. So both kinds of reference refuse
@@ -38,8 +39,10 @@ export const PLATFORM_TRIAL_ENV_NAMES = [
 ] as const;
 
 /**
- * Provider credentials. Egress holds them for the model gateway and the
- * worker for the LLM judge; a trial gets a per-attempt egress token instead.
+ * Provider credentials. Egress holds them for the model gateway and for the
+ * LLM judge, whose calls the worker sends through egress's admin socket
+ * (Phase 3), so the worker itself never uses one; a trial gets a
+ * per-attempt egress token instead.
  * Keep in step with the apiKeyEnv names of MODEL_UPSTREAMS (docker-compose.yml)
  * and of PROVIDER_ROUTES (apps/api/src/execution/providers-map.ts).
  * CUSTOM_API_KEY is the optional key egress sends to a `custom` provider's
@@ -79,6 +82,10 @@ export const WORKER_SETTING_ENV_NAMES = [
   'RECOVERY_INTERVAL_MS',
   'LEASE_SECONDS',
   'NOUS_LOGIN_URL',
+  'JUDGE_PROVIDER',
+  'JUDGE_MODEL',
+  'JUDGE_BASE_URL',
+  'MODEL_TOKEN_CAP_PER_ATTEMPT',
 ] as const;
 
 /** Every name refused outright. */

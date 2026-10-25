@@ -160,3 +160,21 @@ export async function versionRow(db: AppDb, versionId: string) {
     .where(eq(configurationVersions.id, versionId));
   return row!;
 }
+
+/** One more stdio MCP server with a version 1, e.g. `invoice_db` beside the library's `invoice-db`. */
+export async function seedStdioMcpServer(db: AppDb, name: string): Promise<string> {
+  return db.transaction(async (tx) => {
+    const [server] = await tx.insert(mcpServers).values({ name }).returning({ id: mcpServers.id });
+    const [version] = await tx
+      .insert(mcpServerVersions)
+      .values({
+        mcpServerId: server!.id,
+        version: 1,
+        transport: 'stdio',
+        command: `${name}-mcp`,
+        definitionHash: sha(`${name} v1`),
+      })
+      .returning({ id: mcpServerVersions.id });
+    return version!.id;
+  });
+}

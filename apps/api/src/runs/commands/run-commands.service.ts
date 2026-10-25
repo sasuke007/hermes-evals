@@ -1,12 +1,14 @@
 /**
  * The run actions of the inspector and the Runs tab's bulk bar (plan 7.3,
  * UI_FLOWS 15, 17 and 18): Retry, Cancel and bulk Retry execution. Re-score
- * belongs to Phase 3 and is not here.
+ * is in rescore.service.ts.
  *
  * Each action is one transaction that locks the experiment row first, then
  * the runs (command-support.ts), so it is serialised with the experiment
- * controls and with the worker finishing the same runs. The provider check
- * runs before the transaction, as for Resume.
+ * controls and with the worker finishing the same runs. Retry's checks run
+ * before the transaction, as for Resume: a connected worker must run the
+ * Hermes revision the experiment froze (else every job would only be put
+ * back, claim.ts), and the run's provider must be ready.
  *
  * A retry queues an execution_error run for its next attempt, at most
  * MAX_ATTEMPTS_PER_RUN in all, and sends `runId:(attempt_count + 1)` with
@@ -36,6 +38,7 @@ import {
   type ExperimentRow,
 } from '../../experiments/commands/command-support.js';
 import { cancelExecuteRuns, sendExecuteRuns } from '../../experiments/commands/jobs.js';
+import { frozenRevisionRefusal, liveWorkers } from '../../experiments/commands/live-workers.js';
 import { PROVIDER_NAMES, ProviderGate } from '../../experiments/commands/provider-gate.js';
 import { reconcileExperiment } from '../../experiments/reconcile.js';
 
@@ -43,6 +46,9 @@ type RunRow = typeof runs.$inferSelect;
 
 /** A bulk refusal when the queue cannot take jobs (the web's wording). */
 export const BULK_QUEUE_UNAVAILABLE = 'execute-run job could not be enqueued: queue unavailable';
+
+/** The run moved between the unlocked checks and the lock; a second try checks it again. */
+export const RUN_CHANGED_MEANWHILE = 'the run changed while this was being checked; try again';
 
 /** Why a run cannot be retried now, or null when it can. */
 export function retryRefusal(
@@ -72,12 +78,24 @@ export class RunCommandsService {
     private readonly gate: ProviderGate,
   ) {}
 
-  /** POST /runs/:id/retry. 409 with the reason when the run cannot be retried. */
+  /**
+   * POST /runs/:id/retry. 409 with the reason when the run cannot be
+   * retried, when no connected worker runs the experiment's frozen Hermes
+   * revision, or when its provider is not ready. Those two checks run only
+   * for a run that reads execution_error before the lock; one that became
+   * retryable after that read is answered "try again", never let through
+   * unchecked.
+   */
   async retry(runId: string): Promise<RunActionResult> {
     const [target] = await this.withProviders([runId]);
     if (!target) throw notFound(`run ${runId}`);
-    const [block] = await this.gate.blocked([target.provider]);
-    if (block) throw conflict(providerRefusal(block.provider, block.reason));
+    const checked = target.status === 'execution_error';
+    if (checked) {
+      const revision = frozenRevisionRefusal(await liveWorkers(this.db), target.hermesRevision);
+      if (revision) throw conflict(revision);
+      const [block] = await this.gate.blocked([target.provider]);
+      if (block) throw conflict(providerRefusal(block.provider, block.reason));
+    }
     const boss = bossOf(this.queue);
     return this.db.transaction(async (tx) => {
       const experiment = await lockExperiment(tx, target.experimentId);
@@ -85,6 +103,7 @@ export class RunCommandsService {
       if (!run) throw notFound(`run ${runId}`);
       const refusal = retryRefusal(experiment, run);
       if (refusal) throw conflict(refusal);
+      if (!checked) throw conflict(RUN_CHANGED_MEANWHILE);
       await requeue(boss, tx, experiment, [run]);
       return { runId, status: 'queued', attempt: run.attemptCount + 1 };
     });
@@ -93,13 +112,16 @@ export class RunCommandsService {
   /**
    * POST /experiments/:id/runs/retry: every run that can be retried is, and
    * the others are listed with their reason. The answer is 200 either way.
+   * With no connected worker on the experiment's frozen Hermes revision,
+   * every retryable run is refused with that reason.
    */
   async retryMany(experimentId: string, runIds: readonly string[]): Promise<BulkRunActionResult> {
     const [exists] = await this.db
-      .select({ id: experiments.id })
+      .select({ id: experiments.id, hermesRevision: experiments.hermesRevision })
       .from(experiments)
       .where(eq(experiments.id, experimentId));
     if (!exists) throw notFound(`experiment ${experimentId}`);
+    const revision = frozenRevisionRefusal(await liveWorkers(this.db), exists.hermesRevision);
     const targets = new Map(
       (await this.withProviders(runIds))
         .filter((t) => t.experimentId === experimentId)
@@ -136,6 +158,7 @@ export class RunCommandsService {
         const reason = !run
           ? 'run not found in this experiment'
           : (retryRefusal(experiment, run) ??
+            revision ??
             (blocked !== undefined && target ? providerRefusal(target.provider, blocked) : null));
         if (reason !== null) refused.push({ runId, reason });
         else accepted.push(run!);
@@ -186,24 +209,33 @@ export class RunCommandsService {
     });
   }
 
-  /** The runs that exist among `ids`, with their experiment, status and configuration's provider. */
+  /**
+   * The runs that exist among `ids`, with their experiment and its frozen
+   * Hermes revision, their status and their configuration's provider.
+   */
   private withProviders(ids: readonly string[]) {
     if (ids.length === 0) return Promise.resolve([]);
     return this.db
       .select({
         id: runs.id,
         experimentId: runs.experimentId,
+        hermesRevision: experiments.hermesRevision,
         status: runs.status,
         provider: configurationVersions.provider,
       })
       .from(runs)
+      .innerJoin(experiments, eq(experiments.id, runs.experimentId))
       .innerJoin(configurationVersions, eq(configurationVersions.id, runs.configurationVersionId))
       .where(inArray(runs.id, [...ids]));
   }
 }
 
 /** Locks the experiment's runs among `ids`, in id order; call after lockExperiment. */
-function lockRuns(tx: AppTx, experimentId: string, ids: readonly string[]): Promise<RunRow[]> {
+export function lockRuns(
+  tx: AppTx,
+  experimentId: string,
+  ids: readonly string[],
+): Promise<RunRow[]> {
   if (ids.length === 0) return Promise.resolve([]);
   return tx
     .select()

@@ -9,6 +9,9 @@
  *   MODEL_UPSTREAMS  JSON: { "<provider>": { "baseUrl": "...", "apiKeyEnv": "NAME" } }
  *                    `custom` has no entry: each custom attempt registers its base URL.
  *   CUSTOM_API_KEY   optional key sent to a custom attempt's base URL
+ *   MODEL_TOKEN_CAP_PER_ATTEMPT  total tokens an attempt (or a judge registration)
+ *                    is served when its registration names no maxTokens
+ *                    (default 2000000); past it the gateway answers 429
  *   NOUS_HOST_PROXY  development: host:port of `hermes proxy start` on the host
  *   and the values of http MCP headers, under the names the definitions give.
  */
@@ -20,8 +23,10 @@ import { createAdminServer } from './admin.js';
 import { CUSTOM_API_KEY_ENV, createGatewayServer, type Upstream } from './gateway.js';
 import { parseHostPort, startHostForward } from './host-forward.js';
 import { HostProxyProbe } from './host-probe.js';
+import { JudgeRegistry } from './judge-registry.js';
 import { createProxyServer } from './proxy.js';
 import { CUSTOM_UPSTREAM, Registry } from './registry.js';
+import { DEFAULT_TOKEN_CAP_PER_ATTEMPT } from './upstream.js';
 
 const UpstreamsSchema = z
   .record(
@@ -37,6 +42,14 @@ const UpstreamsSchema = z
   .refine((upstreams) => !(CUSTOM_UPSTREAM in upstreams), {
     message: `${CUSTOM_UPSTREAM} has no fixed upstream: each custom attempt registers its base URL`,
   });
+
+/** MODEL_TOKEN_CAP_PER_ATTEMPT; empty or unset means the default. */
+const TokenCapSchema = z.coerce
+  .number()
+  .int()
+  .min(1000)
+  .max(1_000_000_000)
+  .default(DEFAULT_TOKEN_CAP_PER_ATTEMPT);
 
 function log(entry: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
@@ -60,6 +73,7 @@ const proxyPort = Number(process.env.PROXY_PORT ?? 3128);
 const gatewayPort = Number(process.env.GATEWAY_PORT ?? 8080);
 const adminSocket = process.env.ADMIN_SOCKET ?? '/run/egress/admin.sock';
 const { upstreams, keyNames } = loadUpstreams();
+const tokenCap = TokenCapSchema.parse(process.env.MODEL_TOKEN_CAP_PER_ATTEMPT || undefined);
 // No MCP route may name an upstream credential as a header variable, nor one egress lacks.
 const registry = new Registry(Date.now, {
   credentialEnvNames: keyNames,
@@ -97,8 +111,17 @@ const proxy = createProxyServer({
   resolve: async (host) =>
     (await lookup(host, { all: true, verbatim: true })).map((a) => a.address),
 });
-const gateway = createGatewayServer({ registry, upstreams, mcp: { log } });
-const admin = createAdminServer(registry, { hostProxy: hostProbe });
+const gateway = createGatewayServer({
+  registry,
+  upstreams,
+  mcp: { log },
+  tokenCapPerAttempt: tokenCap,
+});
+// The judge path forwards with the same upstreams, read after the host forward replaced nous's.
+const admin = createAdminServer(registry, {
+  hostProxy: hostProbe,
+  judges: { judges: new JudgeRegistry(), upstreams, tokenCap },
+});
 
 proxy.listen(proxyPort, '0.0.0.0', () => log({ msg: 'proxy listening', port: proxyPort }));
 gateway.listen(gatewayPort, '0.0.0.0', () =>
@@ -106,6 +129,7 @@ gateway.listen(gatewayPort, '0.0.0.0', () =>
     msg: 'model and MCP gateway listening',
     port: gatewayPort,
     providers: Object.keys(upstreams),
+    tokenCapPerAttempt: tokenCap,
   }),
 );
 mkdirSync(dirname(adminSocket), { recursive: true });

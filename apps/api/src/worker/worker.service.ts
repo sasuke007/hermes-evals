@@ -24,6 +24,8 @@ import {
 } from '../providers/readiness.js';
 import { QueueService } from '../queue/queue.service.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
+import { judgeSettingsOf } from '../scoring/judge/contracts.js';
+import { workerJudgeClient } from '../scoring/judge/egress-judge.js';
 import { StorageService } from '../storage/storage.service.js';
 import { registerSuiteLoadHandler } from '../suites/loader/load-suites.handler.js';
 import { SuiteLoaderService } from '../suites/loader/suite-loader.service.js';
@@ -66,7 +68,9 @@ export const SHUTDOWN_RECOVERY_WAIT_MS = 20_000;
  *      egress, live, which keys it holds (readiness.ts);
  *    - evaluate-run and evaluate-run-dead, whatever the sandbox state:
  *      scoring reads stored evidence and runs verifier scripts in this
- *      process, outside any trial (plan 14);
+ *      process, outside any trial (plan 14). The LLM judge's calls go
+ *      through egress's admin socket (/judges), which holds the provider
+ *      credentials; this process holds none (Phase 3 S2);
  *    - load-suites and test-mcp-server, which register whatever the
  *      self-test found: loading needs no sandbox, and an MCP test on a
  *      worker without proven isolation answers "failed" saying so. An http
@@ -135,7 +139,20 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
     // Scoring needs no sandbox: it registers whatever the self-test found.
     await registerEvaluationHandlers(
       boss,
-      { db: this.db, store: this.storage },
+      {
+        db: this.db,
+        store: this.storage,
+        judge: workerJudgeClient({
+          db: this.db,
+          egress: this.sandbox.egress,
+          readinessDeps: this.readinessDeps,
+        }),
+        judgeSettings: judgeSettingsOf({
+          JUDGE_PROVIDER: this.config.get('JUDGE_PROVIDER', { infer: true }),
+          JUDGE_MODEL: this.config.get('JUDGE_MODEL', { infer: true }),
+          JUDGE_BASE_URL: this.config.get('JUDGE_BASE_URL', { infer: true }),
+        }),
+      },
       this.logger,
       concurrency,
     );
@@ -211,6 +228,8 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
               volume: this.sandbox.volume,
               hostId,
               logger: this.logger,
+              // Egress applies the same default when a registration names none (S9 #2).
+              settings: { maxTokens: setting('MODEL_TOKEN_CAP_PER_ATTEMPT') },
             })
           : null,
       engine: hostId ? this.sandbox.engine : null,

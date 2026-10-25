@@ -24,8 +24,11 @@ import type { BlobStore } from '../../storage/blob-store.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { notFound, serverError } from '../../suites/http-errors.js';
 import { streamTablePreview, tablePreview, tabularFormatOf } from '../../suites/views/table.js';
+import type { JudgeSettings } from '../../scoring/judge/contracts.js';
+import { judgeSettingsFrom } from '../judge-needs.js';
 import { hasInlinePreview } from './artifacts.js';
 import { configOrder } from './config-ref.js';
+import { currentEvaluationOf } from './evaluation-view.js';
 import { counterpartVersionId, runDetailView, timelineContext } from './run-detail.js';
 import { runList } from './run-list.js';
 import {
@@ -34,7 +37,9 @@ import {
   attemptById,
   attemptsOf,
   configVersions,
-  currentEvaluation,
+  evaluationStatesOfExperiment,
+  evaluationStatesOfRun,
+  evaluationWithScores,
   eventsAfter,
   eventsOf,
   experimentById,
@@ -92,17 +97,32 @@ export class RunViewsService {
     @Inject(ConfigService) private readonly config: ConfigService<Env, true>,
   ) {}
 
+  /** JUDGE_PROVIDER and JUDGE_MODEL as this process reads them: what Re-score needs (S3). */
+  private get judge(): JudgeSettings {
+    return judgeSettingsFrom(this.config);
+  }
+
   /** GET /experiments/:id/runs */
   async list(experimentId: string, filters: RunFilters): Promise<RunListResult> {
     const experiment = await experimentById(this.db, experimentId);
     if (!experiment) throw notFound(`experiment ${experimentId}`);
-    const [tasks, configs, runs, scores] = await Promise.all([
+    const [tasks, configs, runs, evaluations] = await Promise.all([
       tasksByIds(this.db, experiment.taskIds),
       configVersions(this.db, configOrder(experiment)),
       runListRecords(this.db, experiment.id),
-      primaryScores(this.db, experiment.id),
+      evaluationStatesOfExperiment(this.db, experiment.id),
     ]);
-    return runList({ experiment, tasks, configs, runs, primaryScores: scores }, filters);
+    // After the states, and for the evaluations they call current: one read decides both.
+    const current = new Set<string>();
+    for (const rows of evaluations.values()) {
+      const id = currentEvaluationOf(rows)?.id;
+      if (id) current.add(id);
+    }
+    const scores = await primaryScores(this.db, experiment.id, current);
+    return runList(
+      { experiment, tasks, configs, runs, primaryScores: scores, evaluations, judge: this.judge },
+      filters,
+    );
   }
 
   /** GET /runs/:id */
@@ -112,14 +132,18 @@ export class RunViewsService {
     const experiment = await experimentById(this.db, run.experimentId);
     if (!experiment) throw serverError(`run ${runId} names a missing experiment`);
     const twinVersion = counterpartVersionId(experiment, run.configurationVersionId);
-    const [suite, [task], configs, attempts, evaluation, twin] = await Promise.all([
+    const [suite, [task], configs, attempts, evaluations, twin] = await Promise.all([
       suiteById(this.db, experiment.suiteId),
       tasksByIds(this.db, [run.taskId]),
       configVersions(this.db, configOrder(experiment)),
       attemptsOf(this.db, run.id),
-      currentEvaluation(this.db, run.id),
+      evaluationStatesOfRun(this.db, run.id),
       twinVersion ? twinRun(this.db, run, twinVersion) : Promise.resolve(null),
     ]);
+    // The scores of the evaluation the states call current, so a re-score that
+    // publishes meanwhile cannot pair one generation's scores with another's label.
+    const currentId = currentEvaluationOf(evaluations)?.id;
+    const evaluation = currentId ? await evaluationWithScores(this.db, currentId) : null;
     if (!suite || !task) throw serverError(`run ${runId} names a missing suite or task`);
     const shown = attempts.find((a) => a.id === run.currentAttemptId) ?? null;
     const [events, artifacts, worker, answer] = shown
@@ -139,6 +163,8 @@ export class RunViewsService {
       attempts,
       worker,
       evaluation,
+      evaluations,
+      judge: this.judge,
       answer,
       events,
       artifacts,

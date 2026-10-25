@@ -43,6 +43,13 @@
       "when": 1792877512802,
       "tag": "0005_phase2_review",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792891556001,
+      "tag": "0006_phase3_scoring",
+      "breakpoints": true
     }
   ]
 }

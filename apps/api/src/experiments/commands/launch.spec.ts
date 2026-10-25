@@ -11,6 +11,7 @@ import {
   type LaunchExperimentInput,
 } from '@hermes-evals/shared';
 import { configurationVersions, experiments, runs } from '../../database/schema/index.js';
+import { addJudgedTask } from '../../runs/commands/rescore-seed.support-spec.js';
 import { createCommandsApp, type CommandsApp } from './commands-app.support-spec.js';
 import {
   experimentRow,
@@ -243,6 +244,23 @@ describe('POST /api/experiments', () => {
         }),
       )
       .expect(201);
+  });
+
+  it("answers 409 when a selected task's llm_judge key needs a judge provider that is not ready", async () => {
+    await seedWorker(c.t.db);
+    // `judged` names `model: judge/model`; with JUDGE_PROVIDER unset its judge runs on nous (S3).
+    await addJudgedTask(c.t.db, suite.id);
+    c.nous.status = 'not_connected';
+    const res = await c.post('/experiments', body({ taskKeys: ['alpha', 'judged'] })).expect(409);
+    expect(refusal(res).message).toBe(
+      "The LLM judge's provider is not ready: Nous Portal is not connected.",
+    );
+    await expectNothingLaunched();
+
+    // Without the judged task, nothing needs the judge; the configurations are custom.
+    await c.post('/experiments', body({ taskKeys: ['alpha'] })).expect(201);
+    c.nous.status = 'connected';
+    await c.post('/experiments', body({ taskKeys: ['alpha', 'judged'] })).expect(201);
   });
 
   it('answers 409 naming a configuration whose hash changed or that has a newer version, and rolls the freeze back', async () => {

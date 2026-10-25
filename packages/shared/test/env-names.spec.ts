@@ -13,6 +13,11 @@ describe('isReservedEnvName', () => {
       'HTTPS_PROXY',
       'DATABASE_URL',
       'CORS_ORIGIN',
+      // Phase 3: the judge default and the model gateway's token cap.
+      'JUDGE_PROVIDER',
+      'JUDGE_MODEL',
+      'JUDGE_BASE_URL',
+      'MODEL_TOKEN_CAP_PER_ATTEMPT',
       ...PROVIDER_KEY_ENV_NAMES,
     ]) {
       expect(isReservedEnvName(name), name).toBe(true);

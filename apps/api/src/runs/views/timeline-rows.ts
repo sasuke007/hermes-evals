@@ -9,8 +9,14 @@
  * tool calls) or by the worker, so each field is read defensively: a missing
  * or mistyped field leaves the row's detail empty, never throws.
  */
-import type { TimelineEvent } from '@hermes-evals/shared';
+import {
+  NETWORK_EVENT_KINDS,
+  type NetworkEventKind,
+  type TimelineEvent,
+  type TimelineNetwork,
+} from '@hermes-evals/shared';
 import { MODEL_GATEWAY_BASE_URL } from '../../execution/providers-map.js';
+import { egressMcpUrl } from '../../resources/mcp/hermes-config.js';
 
 /** Characters of a row's one-line summary. */
 export const SUMMARY_MAX_CHARS = 160;
@@ -133,6 +139,8 @@ export interface Refusal {
   host: string;
   port: number;
   reason: string;
+  /** The log entry, for the row of its own a refusal outside any tool call gets. */
+  network: TimelineNetwork;
 }
 
 const BACKGROUND_TEXT =
@@ -142,6 +150,50 @@ const BACKGROUND_TEXT =
 export interface NetworkContext {
   /** Display name of the upstream, e.g. `Nous Portal`; null when unknown. */
   forwardedTo: string | null;
+}
+
+/** The log entry's kind; an unknown one reads as a connection, as its row does. */
+function networkKind(p: Payload): NetworkEventKind {
+  const kind = str(p, 'kind');
+  return NETWORK_EVENT_KINDS.find((k) => k === kind) ?? 'connect';
+}
+
+/**
+ * One stored `network` platform event as the row's structured `network`
+ * field (TimelineNetwork, Phase 2 question 4), for every kind egress logs:
+ * a model call, an MCP gateway call, a CONNECT or a plain-HTTP request,
+ * allowed or refused. What the log does not record for that kind is null:
+ * the URL is the gateway route the trial called (model, MCP), and a CONNECT
+ * or plain-HTTP request has only its host and port.
+ */
+export function networkEntry(p: Payload, ctx: NetworkContext): TimelineNetwork {
+  const kind = networkKind(p);
+  const decision = str(p, 'decision') === 'denied' ? 'denied' : 'allowed';
+  const port = int(p, 'port');
+  const status = int(p, 'status');
+  const server = kind === 'mcp' ? (str(p, 'server') ?? null) : null;
+  const model = kind === 'model';
+  return {
+    kind,
+    decision,
+    // A model call is a POST to the chat route; egress logs an MCP call's method.
+    method: kind === 'connect' ? null : (str(p, 'method') ?? (model ? 'POST' : null)),
+    url: model
+      ? `${MODEL_GATEWAY_BASE_URL}${str(p, 'path') ?? '/chat/completions'}`
+      : server !== null
+        ? egressMcpUrl(server)
+        : null,
+    host: str(p, 'host') ?? null,
+    port: port !== undefined && port >= 1 && port <= 65_535 ? port : null,
+    server,
+    status: status !== undefined && status >= 100 && status <= 599 ? status : null,
+    reason: str(p, 'reason') ?? null,
+    model: model ? (str(p, 'model') ?? null) : null,
+    tokensIn: model ? (count(p, 'tokens_in') ?? null) : null,
+    tokensOut: model ? (count(p, 'tokens_out') ?? null) : null,
+    // A refused model call never left egress.
+    forwardedTo: model && decision === 'allowed' ? ctx.forwardedTo : null,
+  };
 }
 
 /**
@@ -158,8 +210,9 @@ export function networkRow(
   p: Payload,
   ctx: NetworkContext,
 ): TimelineEvent | Refusal {
+  const network = networkEntry(p, ctx);
   const kind = str(p, 'kind');
-  const denied = str(p, 'decision') === 'denied';
+  const denied = network.decision === 'denied';
   const background = p['background'] === true;
   const ms = count(p, 'ms') ?? null;
   const status = int(p, 'status');
@@ -173,19 +226,21 @@ export function networkRow(
 
   if ((kind === 'connect' || kind === 'http') && denied) {
     if (!background && hasTarget) {
-      return { seq, atMs, ts, host, port, reason: reason ?? 'refused by the sandbox' };
+      return { seq, atMs, ts, host, port, reason: reason ?? 'refused by the sandbox', network };
     }
     return {
       ...blankRow(seq, atMs, 'refused', 'Refused by sandbox', target),
       origin,
       error: !background,
       text: `Refused by sandbox: ${target}${reason ? ` (${reason})` : ''}.${background ? ` ${BACKGROUND_TEXT}` : ''}`,
+      network,
       refusal: hasTarget ? { host, port, reason: reason ?? 'refused by the sandbox' } : null,
     };
   }
 
-  if (kind === 'model')
-    return modelCallRow(seq, start, p, ctx, { denied, origin, ms, status, reason });
+  if (kind === 'model') {
+    return { ...modelCallRow(seq, start, p, ctx, { denied, origin, ms, status, reason }), network };
+  }
 
   if (kind === 'mcp') {
     const server = str(p, 'server') ?? null;
@@ -200,6 +255,7 @@ export function networkRow(
       durationMs: ms,
       error: denied || status === undefined || status >= 400,
       text: `${name} through the MCP gateway (${host ?? 'its URL'}) → ${outcome}${reason && !denied ? ` (${reason})` : ''}.`,
+      network,
     };
   }
 
@@ -210,10 +266,15 @@ export function networkRow(
     durationMs: ms,
     error: status !== undefined && status >= 400,
     text: `${title} to ${target} allowed by the sandbox${status ? ` → ${status}` : ''}.${background ? ` ${BACKGROUND_TEXT}` : ''}`,
+    network,
   };
 }
 
-/** One call through the model gateway: drawn with its tokens when egress counted them. */
+/**
+ * One call through the model gateway: drawn with its tokens when egress
+ * counted them. Its `network` field is set by networkRow, as on every row
+ * from the connection log.
+ */
 function modelCallRow(
   seq: number,
   atMs: number,
@@ -255,9 +316,5 @@ function modelCallRow(
     durationMs: call.ms,
     error: !answered || status >= 400,
     text: `${method} ${url} → ${status ?? 'no answer'}${forwarded}.${call.reason ? ` ${call.reason}` : ''}`,
-    network:
-      answered && model !== undefined && tokensIn !== undefined && tokensOut !== undefined
-        ? { method, url, status, model, tokensIn, tokensOut, forwardedTo: ctx.forwardedTo }
-        : null,
   };
 }

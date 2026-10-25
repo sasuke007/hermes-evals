@@ -1,0 +1,21 @@
+summary: Write summary.csv with one row per vendor
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+verification:
+  - key: summary_csv
+    type: file_check
+    primary: true
+    params:
+      path: summary.csv
+      format: csv
+      columns: [vendor, total]
+      row_count: 2
+  - key: totals
+    type: verifier_script
+    params: { script: check_summary.py, timeout_s: 20 }
+self_check:
+  expected_workspace: expected

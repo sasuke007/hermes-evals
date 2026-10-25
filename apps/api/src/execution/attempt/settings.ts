@@ -45,7 +45,11 @@ export interface AttemptRunnerSettings {
   flushIntervalMs: number;
   /** How often Cancel is polled from the sink (plan: about once a second). */
   cancelPollMs: number;
-  /** Gateway token cap per attempt, passed to egress; no cap when unset. */
+  /**
+   * Total tokens the model gateway serves the attempt, passed to egress as
+   * the registration's maxTokens (MODEL_TOKEN_CAP_PER_ATTEMPT in the worker).
+   * When unset, egress applies its own MODEL_TOKEN_CAP_PER_ATTEMPT default.
+   */
   maxTokens?: number;
 }
 

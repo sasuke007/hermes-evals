@@ -1,0 +1,96 @@
+[
+  {
+    "match": "Every ledger row was reconciled",
+    "steps": [
+      {
+        "content": "{\"score\": 0.92, \"comment\": \"States the total of 1042.50 and the late fee rule.\"}"
+      }
+    ]
+  },
+  {
+    "match": "Smoke rubric NOANSWER-JUDGE",
+    "steps": [
+      {
+        "content": "I would rather not grade this one."
+      }
+    ]
+  },
+  {
+    "match": "Smoke rubric LEDGER-JUDGE",
+    "steps": [
+      {
+        "content": "{\"score\": 0.15, \"comment\": \"The total is wrong and the late fee rule is missing.\"}"
+      }
+    ]
+  },
+  {
+    "match": "Smoke score task NOANSWER",
+    "steps": [
+      {
+        "content": "Yes, ledger.csv starts with a header row."
+      }
+    ]
+  },
+  {
+    "match": "Smoke score task SLOW",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "sleep 150; tail -n +2 /workspace/ledger.csv | wc -l"
+        }
+      },
+      {
+        "content": "ledger.csv has 4 rows.\n\n```json\n{\"rows\": 4}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-score-method: read the ledger with read_file and reconcile it",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/ledger.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/terms.txt"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/summary.csv",
+          "content": "vendor,total\nAcme,1042.50\nBorealis,75.25\n"
+        }
+      },
+      {
+        "content": "Every ledger row was reconciled. The open Acme invoices total 1042.50, and a late fee of 1.5% per month applies after 30 days.\n\n```json\n{\"total\": 1042.5, \"record\": {\"vendor\": \"Acme\", \"invoices\": 3, \"currency\": \"EUR\", \"status\": \"open\", \"due\": \"2026-11-30\"}, \"code\": \"LEDGER-7Q\", \"note\": \"A late fee of 1.5% per month applies after 30 days.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke score task LEDGER",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/ledger.csv /workspace/terms.txt"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/summary.csv",
+          "content": "vendor,amount\nAcme,1000\n"
+        }
+      },
+      {
+        "content": "The Acme invoices come to about 1000.\n\n```json\n{\"total\": 1000, \"record\": {\"vendor\": \"Acme\", \"invoices\": 3, \"currency\": \"EUR\", \"status\": \"paid\", \"due\": \"2026-11-30\"}, \"code\": \"LEDGER-8Q\", \"note\": \"A late fee applies after 45 days.\"}\n```"
+      }
+    ]
+  }
+]

@@ -10,6 +10,7 @@ import { BadRequestException } from '@nestjs/common';
 import { asc, eq, inArray } from 'drizzle-orm';
 import type { DocumentRef, SkillRef } from '@hermes-evals/shared';
 import { documents, mcpServers, mcpServerVersions, skills } from '../database/schema/index.js';
+import { MCP_TOOL_PREFIX, sanitizeMcpNameComponent } from '../execution/stream-json.js';
 import type { AppDb } from '../database/types.js';
 import type { ResolvedMcpServer } from './settings.js';
 
@@ -137,6 +138,30 @@ function repeated<T>(items: readonly T[], keyOf: (item: T) => string): string[] 
   return [...twice];
 }
 
+/** `a`, `a and b`, `a, b and c`. */
+const listed = (names: readonly string[]): string =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+
+/**
+ * Distinct MCP server names that sanitise alike (`a-b` and `a_b`), each group
+ * in first-seen order. Hermes names a server's tools
+ * `mcp__<sanitised name>__<tool>` (sanitizeMcpNameComponent), so such
+ * servers would register the same tool names in one trial, and neither the
+ * agent nor the timeline could tell their calls apart.
+ */
+export function sanitisedNameClashes(
+  names: readonly string[],
+): { sanitised: string; names: string[] }[] {
+  const groups = new Map<string, string[]>();
+  for (const name of new Set(names)) {
+    const key = sanitizeMcpNameComponent(name);
+    groups.set(key, [...(groups.get(key) ?? []), name]);
+  }
+  return [...groups]
+    .filter(([, group]) => group.length > 1)
+    .map(([sanitised, group]) => ({ sanitised, names: group }));
+}
+
 /**
  * Holds the MCP definitions a save names until it commits. The save hashes
  * each definition_hash into config_hash, and its insert freezes those
@@ -176,6 +201,8 @@ async function lockMcpDefinitions(db: AppDb, versionIds: readonly string[]): Pro
  * Resolves the ids a save sends, or throws 400 naming every problem:
  * - an id that does not exist;
  * - two versions of one MCP server (the 0001 trigger refuses it too);
+ * - two MCP servers whose names sanitise alike, whose tools Hermes would
+ *   name alike (sanitisedNameClashes);
  * - two versions of one skill, which would share home/skills/<name>/;
  * - two documents with one filename, which would share workspace/docs/<filename>.
  */
@@ -204,6 +231,12 @@ export async function resolveForSave(db: AppDb, ids: ReferenceIds): Promise<Reso
     issues.push({
       path: 'mcpServerVersionIds',
       message: `MCP server ${name} is included twice (${versions.join(', ')}); a configuration uses one version of each server`,
+    });
+  }
+  for (const clash of sanitisedNameClashes(resolved.mcpServers.map((m) => m.name))) {
+    issues.push({
+      path: 'mcpServerVersionIds',
+      message: `MCP servers ${listed(clash.names)} cannot be used together: their names sanitise alike, so Hermes would name the tools of ${clash.names.length === 2 ? 'both' : 'all of them'} ${MCP_TOOL_PREFIX}${clash.sanitised}__<tool>; keep one, or rename one`,
     });
   }
   for (const name of repeated(resolved.skills, (s) => s.name)) {

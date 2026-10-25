@@ -4,7 +4,8 @@
  * all from its current attempt (runs.current_attempt_id) and that attempt's
  * current evaluation. A run waiting for a retry still points at its previous
  * attempt, so the inspector shows that attempt's evidence until the next
- * one starts.
+ * one starts; a run being re-scored shows its current result, and
+ * `evaluation` says which generation that is and which one is pending.
  */
 import type {
   AttemptView,
@@ -16,10 +17,12 @@ import type {
 } from '@hermes-evals/shared';
 import { LaunchRecordSchema } from '@hermes-evals/shared';
 import { effectiveBudgetS } from '../../execution/budget.js';
+import type { JudgeSettings } from '../../scoring/judge/contracts.js';
 import { suiteRef } from '../../suites/views/suite-views.js';
 import { answerPathOf } from '../../suites/views/yaml-slice.js';
 import { artifactsView } from './artifacts.js';
 import { experimentConfigRef, primaryKeyOf, runNeeds } from './config-ref.js';
+import { runEvaluationView, type EvaluationStateRecord } from './evaluation-view.js';
 import { finalResponseView } from './final-response.js';
 import { launchRecordView } from './launch-record.js';
 import { executionErrorView, outcomeNotice, scoreRows } from './outcome.js';
@@ -85,6 +88,10 @@ export interface RunDetailInput {
   worker: WorkerRecord | null;
   /** The current evaluation (completed, not superseded) and its scores. */
   evaluation: { record: EvaluationRecord; scores: readonly ScoreRecord[] } | null;
+  /** Every evaluation of the run (any order), for which generation is shown and what is pending. */
+  evaluations: readonly EvaluationStateRecord[];
+  /** The platform's judge, for what Re-score needs. */
+  judge: JudgeSettings;
   /** The extraction to show: the current evaluation's, else the newest one stored for the attempt. */
   answer: ExtractedAnswer | null;
   /** The shown attempt's events, by seq. */
@@ -255,6 +262,7 @@ export function runDetailView(input: RunDetailInput): RunDetail {
           })
         : null,
     outcomeNotice: outcomeNotice(scores),
+    evaluation: runEvaluationView(input.evaluations),
     scores,
     timeline: { events: rows.map((r) => r.event), live, totalEvents: rows.length },
     finalResponse:
@@ -271,6 +279,6 @@ export function runDetailView(input: RunDetailInput): RunDetail {
         })
       : null,
     counterpart: input.counterpart ? counterpartView(input.counterpart, input.configs) : null,
-    needs: runNeeds(config, verification),
+    needs: runNeeds(config, verification, input.judge),
   };
 }

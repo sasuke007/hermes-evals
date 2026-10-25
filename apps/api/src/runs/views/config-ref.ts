@@ -4,6 +4,8 @@
  * gave the version) and RunModelNeeds (BlockedReason on Retry and Re-score).
  */
 import type { ExperimentConfigRef, RunModelNeeds, VerificationEntry } from '@hermes-evals/shared';
+import type { JudgeSettings } from '../../scoring/judge/contracts.js';
+import { judgeNeedsOf } from '../judge-needs.js';
 import type { ConfigVersionRecord, ExperimentRecord } from './rows.js';
 
 /** The experiment's configuration versions in display order: the baseline, then the candidates. */
@@ -27,20 +29,21 @@ export function experimentConfigRef(
 }
 
 /**
- * What Retry and Re-score need from model access. The judge is not built
- * until Phase 3; it judges with the configuration's own provider (plan 9.3,
- * "pointed at the configured provider base URL"), so a task with llm_judge
- * keys needs that provider for Re-score too.
+ * What Retry and Re-score need from model access. Retry runs Hermes on the
+ * configuration's provider; Re-score calls the platform's judge for the
+ * task's llm_judge keys, on the judge's provider (judge-needs.ts), which is
+ * null when no key has a judge model (those keys are scored `error`).
  */
 export function runNeeds(
   config: Pick<ConfigVersionRecord, 'provider'>,
   verification: readonly VerificationEntry[],
+  judge: JudgeSettings,
 ): RunModelNeeds {
-  const judgeKeys = verification.filter((v) => v.type === 'llm_judge').map((v) => v.key);
+  const needs = judgeNeedsOf(verification, judge);
   return {
     provider: config.provider,
-    judgeKeys,
-    judgeProvider: judgeKeys.length > 0 ? config.provider : null,
+    judgeKeys: needs.keys,
+    judgeProvider: needs.provider,
   };
 }
 

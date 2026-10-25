@@ -25,6 +25,18 @@ describe('scorer registry', () => {
     expect(Object.keys(SCORER_VERSIONS)).toEqual([...SCORER_TYPES]);
     expect(Object.isFrozen(SCORER_VERSIONS)).toBe(true);
     expect(scorerVersionLabel('numeric_tolerance')).toBe('numeric_tolerance@1');
+    // text_match is last, so the seven older types keep their places in the check hash.
+    expect(Object.keys(SCORER_VERSIONS).at(-1)).toBe('text_match');
+  });
+
+  it('versions the Phase 3 runtimes apart from the Phase 2 error placeholder', () => {
+    // Phase 2 published `error` for these two at version 1; a stored row says which ran.
+    expect(SCORER_VERSIONS.trajectory_match).toBe(2);
+    expect(SCORER_VERSIONS.llm_judge).toBe(2);
+    expect(SCORER_VERSIONS.text_match).toBe(1);
+    expect(SCORERS.text_match).toMatchObject({ selfCheck: 'answer', needsAnswer: true });
+    expect(SCORERS.llm_judge).toMatchObject({ selfCheck: 'none', needsAnswer: false });
+    expect(SCORERS.trajectory_match).toMatchObject({ selfCheck: 'none', needsAnswer: false });
   });
 
   it('assigns the self-check modes of plan 4.3', () => {
@@ -32,7 +44,9 @@ describe('scorer registry', () => {
       'answer',
       'answer',
       'answer',
+      'answer',
     ]);
+    expect(selfCheckModeFor('text_match', true)).toBe('answer');
     expect(selfCheckModeFor('verifier_script', false)).toBe('script');
     expect(selfCheckModeFor('verifier_script', true)).toBe('workspace');
     expect(selfCheckModeFor('file_check', false)).toBe('workspace');
@@ -56,5 +70,11 @@ describe('scorer registry', () => {
       parseScorerParams('trajectory_match', { tool: 'read_file', min_calls: 2, max_calls: 1 })
         .success,
     ).toBe(false);
+    expect(parseScorerParams('text_match', { contains: ['1.5%', '30 days'] }).data).toEqual({
+      contains: ['1.5%', '30 days'],
+      case_sensitive: false,
+      pass_at: 1,
+    });
+    expect(parseScorerParams('text_match', { path: 'rule' }).success).toBe(false);
   });
 });

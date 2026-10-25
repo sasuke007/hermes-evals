@@ -3,17 +3,15 @@
  * the inspector draws (run-states-spec.ts). Every detail parses with the
  * shared RunDetail schema. Event pages and artifacts: run-events.integration.spec.ts.
  */
-import type { ConfigService } from '@nestjs/config';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RunDetailSchema, type RunDetail } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
-import type { Env } from '../../config/env.js';
 import { experiments } from '../../database/schema/index.js';
 import { RUN_TOKEN_PLACEHOLDER } from './launch-record.js';
 import { RunViewsService } from './run-views.service.js';
 import { RECORDED_FINAL, seedAllStates, type AllStates } from './run-states-spec.js';
-import { LEAKED_TOKEN, TRIAL_IMAGE, type RunCell } from './run-fixtures-spec.js';
+import { LEAKED_TOKEN, TRIAL_IMAGE, viewsConfig, type RunCell } from './run-fixtures-spec.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
@@ -24,8 +22,7 @@ let views: RunViewsService;
 beforeAll(async () => {
   t = await createTestDatabase();
   seed = await seedAllStates(t.db);
-  const config = { get: () => TRIAL_IMAGE } as unknown as ConfigService<Env, true>;
-  views = new RunViewsService(t.db, seed.store, config);
+  views = new RunViewsService(t.db, seed.store, viewsConfig());
 });
 
 afterAll(async () => {

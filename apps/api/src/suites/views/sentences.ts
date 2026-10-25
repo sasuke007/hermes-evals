@@ -13,6 +13,7 @@ import {
   type LlmJudgeParams,
   type NumericToleranceParams,
   type ScorerType,
+  type TextMatchParams,
   type TrajectoryMatchParams,
   type VerificationEntry,
   type VerifierScriptParams,
@@ -38,6 +39,7 @@ interface ParamsOf {
   trajectory_match: TrajectoryMatchParams;
   verifier_script: VerifierScriptParams;
   llm_judge: LlmJudgeParams;
+  text_match: TextMatchParams;
 }
 
 const SENTENCES: SentenceOf = {
@@ -81,6 +83,16 @@ const SENTENCES: SentenceOf = {
   llm_judge: (p) =>
     `llm_judge with rubric ${p.rubric}, pass at score ≥ ${formatThreshold(p.pass_at)}` +
     (p.model ? `, judged by ${p.model}` : ''),
+
+  text_match: (p, target) => {
+    const parts = [`text_match on ${target(p.path)}`];
+    if (p.contains?.length)
+      parts.push(`contains ${p.contains.map((s) => JSON.stringify(s)).join(', ')}`);
+    if (p.pattern !== undefined) parts.push(`matches /${p.pattern}/`);
+    if (p.case_sensitive) parts.push('case-sensitive');
+    if (p.pass_at < 1) parts.push(`pass at ${formatThreshold(p.pass_at)}`);
+    return parts.join(', ');
+  },
 };
 
 function tolerance(p: NumericToleranceParams): string {

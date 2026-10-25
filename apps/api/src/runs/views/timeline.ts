@@ -219,6 +219,7 @@ function refusalRow(r: Refusal): TimelineEvent {
     ...blankRow(r.seq, r.atMs, 'refused', 'Refused by sandbox', target),
     error: true,
     text: `Refused by sandbox: ${target} (${r.reason}).`,
+    network: r.network,
     refusal: { host: r.host, port: r.port, reason: r.reason },
   };
 }

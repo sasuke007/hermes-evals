@@ -9,6 +9,7 @@ import { ConfigurationDetailSchema, ConfigurationListRowSchema } from '@hermes-e
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import {
   finishAttempt,
+  rescoreRun,
   runningClaim,
   seedExperiment,
   startAttempt,
@@ -115,6 +116,22 @@ describe('usage', () => {
 
     const rows = ConfigurationListRowSchema.array().parse(await reads.list());
     expect(rows.map((r) => r.usedInExperiments)).toEqual([1, 1]);
+  });
+
+  it('counts a re-scored run once, with its current result', async () => {
+    await score(runOf(seed.baselineVersionId, 1).id, 'passed');
+    await score(runOf(seed.baselineVersionId, 2).id, 'failed');
+    // Baseline's pass becomes a fail; its fail is re-scored twice and stays one.
+    await rescoreRun(t.db, runOf(seed.baselineVersionId, 1).id, 'failed');
+    await rescoreRun(t.db, runOf(seed.baselineVersionId, 2).id, 'failed');
+    await rescoreRun(t.db, runOf(seed.baselineVersionId, 2).id, 'failed');
+
+    const baseline = ConfigurationDetailSchema.parse(
+      await reads.detail(await configurationOf(seed.baselineVersionId)),
+    );
+    expect(baseline.usedIn).toEqual([
+      expect.objectContaining({ role: 'baseline', passRate: 0, scored: 2, total: 2 }),
+    ]);
   });
 
   it('reports nothing scored yet as no pass rate and a verdict that cannot be computed', async () => {
