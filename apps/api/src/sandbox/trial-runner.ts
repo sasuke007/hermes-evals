@@ -6,9 +6,14 @@
  */
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { EngineClient } from './engine-client.js';
+import { EngineError, type EngineClient } from './engine-client.js';
 import { FrameDecoder, LineSplitter } from './streams.js';
-import { DEFAULT_DISK_LIMIT, measureTrialDisk, type DiskLimit } from './trial-files.js';
+import {
+  DEFAULT_DISK_LIMIT,
+  measureTrialDisk,
+  restoreOwnerAccess,
+  type DiskLimit,
+} from './trial-files.js';
 import { trialContainerBody, type TrialSpec } from './trial-spec.js';
 
 export interface TrialOutcome {
@@ -22,8 +27,12 @@ export interface TrialOutcome {
   stopReason: 'exited' | 'deadline' | 'cancelled' | 'disk_limit' | 'output_limit';
   /** Which cap was passed, when stopReason is disk_limit or output_limit. */
   limitDetail?: string;
+  /** stdout lines read after the line cap and not forwarded; absent when none were. */
+  droppedLines?: number;
   /** Set when the output stream failed, so events may be missing. */
   logError?: string;
+  /** Set when stopping or killing the container failed; the final remove still forces it. */
+  stopError?: string;
   durationMs: number;
 }
 
@@ -48,12 +57,20 @@ export interface RunTrialOptions {
    */
   diskLimit?: DiskLimit;
   /**
-   * Stops the trial when its stdout and stderr together pass `maxBytes`, and
-   * forwards nothing past it. The output is decoded in the worker's memory,
-   * and what runs in the container is arbitrary code that can write to its
-   * streams at pipe speed; without a cap it could exhaust the worker's heap.
+   * Stops the trial when its stdout and stderr together pass `maxBytes`, or
+   * its stdout passes `maxLines` lines, and forwards nothing past either.
+   * The output is decoded in the worker's memory and each line becomes a
+   * stored event, and what runs in the container is arbitrary code that can
+   * write to its streams at pipe speed: without both caps two-byte lines
+   * alone could exhaust the worker's heap and fill run_events.
    */
-  outputLimit?: { maxBytes: number };
+  outputLimit?: { maxBytes: number; maxLines?: number };
+  /**
+   * Aborting stops the trial as a passed output cap does (SIGKILL, stop
+   * reason `output_limit`), with the abort reason, a string, as its detail.
+   * The caller's own output bounds use it (the event backlog).
+   */
+  outputStop?: AbortSignal;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -113,11 +130,47 @@ export async function prepareTrialDirs(
   return { root, home, workspace };
 }
 
+/**
+ * Deletes a tree a trial wrote, even one whose directories the agent made
+ * unwritable or unlistable (it shares the worker's uid, so `chmod 500` on a
+ * directory it created makes rm fail with EACCES, or ENOTEMPTY on macOS).
+ * On those the worker restores its owner permissions on every directory
+ * (restoreOwnerAccess, which never follows a link) and tries again. Call it
+ * only once the trial's container is gone, so nothing changes under the walk.
+ */
+export async function forceRemoveTree(path: string): Promise<void> {
+  try {
+    await rm(path, { recursive: true, force: true });
+  } catch (err) {
+    if (!LOCKED_TREE_CODES.has((err as NodeJS.ErrnoException).code ?? '')) throw err;
+    await restoreOwnerAccess(path);
+    await rm(path, { recursive: true, force: true });
+  }
+}
+
+/** How rm reports a directory it may not empty: what restoring owner permissions fixes. */
+const LOCKED_TREE_CODES: ReadonlySet<string> = new Set(['EACCES', 'EPERM', 'ENOTEMPTY']);
+
 /** Deletes an attempt's directory tree (home and workspace); used after probes and by retention. */
 export async function removeTrialDirs(trialsDir: string, attemptId: string): Promise<void> {
   if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(attemptId))
     throw new Error(`not an attempt id: ${attemptId}`);
-  await rm(join(trialsDir, attemptId), { recursive: true, force: true });
+  await forceRemoveTree(join(trialsDir, attemptId));
+}
+
+/**
+ * Whether the kernel's OOM killer ended the container, read once it exited.
+ * A container someone else removed after it exited (recovery's sweep, say)
+ * answers 404: it keeps the exit code and stop reason it ended with, and an
+ * OOM kill would have to be read before the removal, so it counts as none.
+ */
+async function oomKilledAfterExit(engine: EngineClient, containerId: string): Promise<boolean> {
+  try {
+    return (await engine.inspect(containerId)).State.OOMKilled;
+  } catch (err) {
+    if (err instanceof EngineError && err.status === 404) return false;
+    throw err;
+  }
 }
 
 export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> {
@@ -136,20 +189,39 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
     // Every stop condition is armed before anything else is awaited: the deadline and the
     // watchdog must not depend on the container producing output.
     let stopReason: TrialOutcome['stopReason'] = 'exited';
+    let stopError: string | undefined;
+    const stopFailed = (err: unknown) => {
+      stopError ??= err instanceof Error ? err.message : String(err);
+    };
     const stop = (reason: TrialOutcome['stopReason']) => {
       if (stopReason === 'exited') stopReason = reason;
       // A runaway writer gets no grace period: every second of it is more disk or memory.
+      // Neither call may reject unhandled: that would end the worker with every trial it runs.
+      // If both fail, the wait still ends runTrial and the final remove forces the container.
       if (reason === 'disk_limit' || reason === 'output_limit')
-        void engine.kill(containerId).catch(() => {});
-      else void engine.stop(containerId, grace).catch(() => engine.kill(containerId));
+        void engine.kill(containerId).catch(stopFailed);
+      else
+        void engine
+          .stop(containerId, grace)
+          .catch(() => engine.kill(containerId))
+          .catch(stopFailed);
+    };
+    let limitDetail: string | undefined;
+    /** Stops for a passed cap; the first stop's reason and detail are the ones kept. */
+    const stopForLimit = (reason: 'disk_limit' | 'output_limit', detail: string) => {
+      if (stopReason === 'exited') limitDetail = detail;
+      stop(reason);
     };
     const timer = setTimeout(() => stop('deadline'), options.deadlineMs);
     const onAbort = () => stop('cancelled');
     if (options.signal?.aborted) onAbort();
     options.signal?.addEventListener('abort', onAbort, { once: true });
+    const onOutputStop = () =>
+      stopForLimit('output_limit', String(options.outputStop?.reason ?? 'output bound passed'));
+    if (options.outputStop?.aborted) onOutputStop();
+    options.outputStop?.addEventListener('abort', onOutputStop, { once: true });
 
     let finished = false;
-    let limitDetail: string | undefined;
     let watchTimer: NodeJS.Timeout | undefined;
     const limit = options.diskLimit;
     const watch = () => {
@@ -158,8 +230,7 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
         const usage = await measureTrialDisk(limit).catch(() => null);
         if (finished) return;
         if (usage?.exceeded) {
-          limitDetail = usage.exceeded;
-          stop('disk_limit');
+          stopForLimit('disk_limit', usage.exceeded);
         } else {
           watch();
         }
@@ -167,7 +238,18 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
     };
     watch();
 
-    const lines = new LineSplitter(options.onStdoutLine);
+    const maxLines = options.outputLimit?.maxLines;
+    let stdoutLines = 0;
+    let droppedLines = 0;
+    const lines = new LineSplitter((line) => {
+      if (maxLines !== undefined && stdoutLines >= maxLines) {
+        if (droppedLines === 0) stopForLimit('output_limit', `stdout passed ${maxLines} lines`);
+        droppedLines += 1;
+        return;
+      }
+      stdoutLines += 1;
+      options.onStdoutLine(line);
+    });
     const maxOutput = options.outputLimit?.maxBytes;
     let outputBytes = 0;
     let overOutput = false;
@@ -185,8 +267,7 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
         if (room > 0) forward(chunk.subarray(0, room));
         outputBytes = maxOutput;
         overOutput = true;
-        limitDetail = `stdout and stderr passed ${maxOutput} bytes`;
-        stop('output_limit');
+        stopForLimit('output_limit', `stdout and stderr passed ${maxOutput} bytes`);
       };
     const frames = new FrameDecoder(
       counted((chunk) => lines.push(chunk)),
@@ -208,20 +289,22 @@ export async function runTrial(options: RunTrialOptions): Promise<TrialOutcome> 
       clearTimeout(timer);
       clearTimeout(watchTimer);
       options.signal?.removeEventListener('abort', onAbort);
+      options.outputStop?.removeEventListener('abort', onOutputStop);
     }
     // Logs end shortly after exit; do not wait forever on a stuck stream.
     await Promise.race([
       drained.catch(() => {}),
       sleep(5000).then(async () => (await logs.catch(() => null))?.destroy()),
     ]);
-    const state = (await engine.inspect(containerId)).State;
     return {
       containerId,
       exitCode,
-      oomKilled: state.OOMKilled,
+      oomKilled: await oomKilledAfterExit(engine, containerId),
       stopReason,
       ...(limitDetail ? { limitDetail } : {}),
+      ...(droppedLines > 0 ? { droppedLines } : {}),
       ...(logError ? { logError } : {}),
+      ...(stopError ? { stopError } : {}),
       durationMs: Date.now() - started,
     };
   } finally {

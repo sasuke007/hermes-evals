@@ -179,6 +179,15 @@ export const runs = pgTable(
     currentAttemptId: text('current_attempt_id'),
     /** Set by Cancel while the run is running; the worker polls it and kills Hermes. */
     cancelRequestedAt: tstz('cancel_requested_at'),
+    /**
+     * The trigger the run's next attempt gets, recorded in the same update that
+     * queues the run: `initial` at launch, `auto_retry`, `recovery`,
+     * `user_retry` or `retry_failed`. A job re-sent later (Resume, Retry
+     * failed runs, recovery) reads it, so a lost job never changes the
+     * attempt's provenance. Null on rows queued before migration 0005, which
+     * fall back to queuedRunTrigger (experiments/commands/jobs.ts).
+     */
+    nextTrigger: text('next_trigger').$type<AttemptTrigger>(),
     createdAt: createdAt(),
     /** Set when the run reaches scored, execution_error or cancelled. */
     finishedAt: tstz('finished_at'),
@@ -198,6 +207,7 @@ export const runs = pgTable(
     index('runs_experiment_status_idx').on(t.experimentId, t.status),
     index('runs_configuration_version_idx').on(t.configurationVersionId),
     check('runs_status_ck', oneOf(t.status, RUN_STATUSES)),
+    check('runs_next_trigger_ck', nullOrOneOf(t.nextTrigger, ATTEMPT_TRIGGERS)),
     check('runs_repetition_ck', sql`${t.repetition} >= 1`),
     check(
       'runs_attempt_count_ck',

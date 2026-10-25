@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { validateEnv } from '../config/env.js';
 import { DatabaseModule } from '../database/database.module.js';
+import { NousLoginModule } from '../providers/nous-login.module.js';
 import { QueueModule } from '../queue/queue.module.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
 import { StorageModule } from '../storage/storage.module.js';
@@ -14,8 +15,10 @@ const isDev = process.env.NODE_ENV !== 'production';
 
 /**
  * The worker process: everything that runs user code. It loads suites
- * (verifier scripts are user code), tests MCP servers and, from Phase 2,
- * executes trials, each in its own container through docker-guard.
+ * (verifier scripts are user code), tests MCP servers, executes trials, each
+ * in its own container through docker-guard, and scores them. NousLoginModule
+ * gives the execute-run provider guard the same readiness rule the API's
+ * launch check uses (PROVIDER_READINESS_DEPS).
  */
 @Module({
   imports: [
@@ -38,6 +41,7 @@ const isDev = process.env.NODE_ENV !== 'production';
     DatabaseModule,
     QueueModule,
     StorageModule,
+    NousLoginModule,
   ],
   providers: [SandboxService, WorkerPresenceService, SuiteLoaderService, WorkerService],
 })

@@ -268,6 +268,12 @@ describe('model gateway', () => {
     });
     await chat(TOKEN, { model: 'mock/scripted', messages: [] });
     expect(registry.usage(ATTEMPT)!.totalTokens).toBe(135);
+    // Each call's own usage is in the connection log, for the inspector's model rows.
+    const calls = registry.get(ATTEMPT)!.log.filter((e) => e.kind === 'model');
+    expect(calls).toEqual([
+      expect.objectContaining({ status: 200, promptTokens: 100, completionTokens: 20 }),
+      expect.objectContaining({ status: 200, promptTokens: 10, completionTokens: 5 }),
+    ]);
   });
 
   it('adds upstream default fields the request did not set, and keeps the ones it did', async () => {
@@ -289,6 +295,58 @@ describe('model gateway', () => {
   it('stops serving as soon as the attempt is removed', async () => {
     registry.remove(ATTEMPT);
     expect((await chat(TOKEN, { model: 'mock/scripted' })).status).toBe(401);
+  });
+
+  it('holds at most 8 calls of one attempt in flight, and frees a slot when one ends', async () => {
+    const id = '01K8ZQ7M3V5X9C2B4N6P8R0T2X';
+    const token = 'c'.repeat(64);
+    registry.register(id, {
+      token,
+      mode: 'allowlist',
+      provider: 'mock',
+      expiresAt: Date.now() + 60_000,
+    });
+    // Uploads that never finish: each holds a slot while its body is read.
+    const uploads = Array.from({ length: 8 }, () =>
+      net.connect(ports.gateway!, '127.0.0.1', function (this: net.Socket) {
+        this.write(
+          'POST /v1/chat/completions HTTP/1.1\r\nHost: egress\r\n' +
+            `Authorization: Bearer ${token}\r\nContent-Type: application/json\r\n` +
+            'Content-Length: 100000\r\n\r\n{"model":',
+        );
+      }),
+    );
+    try {
+      await vi.waitFor(() => expect(registry.modelCallsInFlight(id)).toBe(8), { timeout: 5000 });
+      const refused = await chat(token, { model: 'mock/scripted', messages: [] });
+      expect(refused.status).toBe(429);
+      expect(JSON.parse(refused.text)).toMatchObject({ error: { type: 'rate_limit_exceeded' } });
+      expect(registry.get(id)!.log).toContainEqual(
+        expect.objectContaining({
+          kind: 'model',
+          decision: 'denied',
+          reason: 'too many model calls in flight',
+        }),
+      );
+      uploads[0]!.destroy();
+      await vi.waitFor(() => expect(registry.modelCallsInFlight(id)).toBe(7), { timeout: 5000 });
+      expect((await chat(token, { model: 'mock/scripted', messages: [] })).status).toBe(200);
+      expect(registry.modelCallsInFlight(id)).toBe(7);
+    } finally {
+      for (const socket of uploads) socket.destroy();
+      await vi.waitFor(() => expect(registry.modelCallsInFlight(id)).toBe(0), { timeout: 5000 });
+      registry.remove(id);
+    }
+  });
+
+  it('refuses a body declared larger than 10 MiB before reading it, holding no slot', async () => {
+    const line = await raw(
+      ports.gateway!,
+      'POST /v1/chat/completions HTTP/1.1\r\nHost: egress\r\n' +
+        `Authorization: Bearer ${TOKEN}\r\nContent-Length: ${20 * 1024 * 1024}\r\n\r\n`,
+    );
+    expect(line).toBe('HTTP/1.1 413 Payload Too Large');
+    expect(registry.modelCallsInFlight(ATTEMPT)).toBe(0);
   });
 });
 

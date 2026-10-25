@@ -1,66 +1,89 @@
 /**
- * egress entrypoint: the forward proxy, the model gateway and the admin
- * socket share one registry of live attempts.
+ * egress entrypoint: the forward proxy, the model and MCP gateways and the
+ * admin socket share one registry of live attempts.
  *
  * Environment:
  *   PROXY_PORT       forward proxy port (default 3128)
- *   GATEWAY_PORT     model gateway port (default 8080)
+ *   GATEWAY_PORT     model and MCP gateway port (default 8080)
  *   ADMIN_SOCKET     unix socket for the worker (default /run/egress/admin.sock)
  *   MODEL_UPSTREAMS  JSON: { "<provider>": { "baseUrl": "...", "apiKeyEnv": "NAME" } }
+ *                    `custom` has no entry: each custom attempt registers its base URL.
+ *   CUSTOM_API_KEY   optional key sent to a custom attempt's base URL
+ *   NOUS_HOST_PROXY  development: host:port of `hermes proxy start` on the host
+ *   and the values of http MCP headers, under the names the definitions give.
  */
 import { chmodSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { lookup } from 'node:dns/promises';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { createAdminServer } from './admin.js';
-import { createGatewayServer, type Upstream } from './gateway.js';
+import { CUSTOM_API_KEY_ENV, createGatewayServer, type Upstream } from './gateway.js';
 import { parseHostPort, startHostForward } from './host-forward.js';
+import { HostProxyProbe } from './host-probe.js';
 import { createProxyServer } from './proxy.js';
-import { Registry } from './registry.js';
+import { CUSTOM_UPSTREAM, Registry } from './registry.js';
 
-const UpstreamsSchema = z.record(
-  z.string(),
-  z
-    .object({
-      baseUrl: z.string().url(),
-      apiKeyEnv: z.string().optional(),
-      bodyDefaults: z.record(z.string(), z.unknown()).optional(),
-    })
-    .strict(),
-);
+const UpstreamsSchema = z
+  .record(
+    z.string(),
+    z
+      .object({
+        baseUrl: z.string().url(),
+        apiKeyEnv: z.string().optional(),
+        bodyDefaults: z.record(z.string(), z.unknown()).optional(),
+      })
+      .strict(),
+  )
+  .refine((upstreams) => !(CUSTOM_UPSTREAM in upstreams), {
+    message: `${CUSTOM_UPSTREAM} has no fixed upstream: each custom attempt registers its base URL`,
+  });
 
 function log(entry: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
 }
 
-function loadUpstreams(): Record<string, Upstream> {
+function loadUpstreams(): { upstreams: Record<string, Upstream>; keyNames: string[] } {
   const configured = UpstreamsSchema.parse(JSON.parse(process.env.MODEL_UPSTREAMS ?? '{}'));
   const upstreams: Record<string, Upstream> = {};
+  const keyNames: string[] = [];
   for (const [name, { baseUrl, apiKeyEnv, bodyDefaults }] of Object.entries(configured)) {
     const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
+    if (apiKeyEnv) keyNames.push(apiKeyEnv);
     if (apiKeyEnv && !apiKey)
       log({ msg: 'upstream credential missing', provider: name, env: apiKeyEnv });
     upstreams[name] = { baseUrl, apiKey, bodyDefaults };
   }
-  return upstreams;
+  return { upstreams, keyNames };
 }
 
-const registry = new Registry();
 const proxyPort = Number(process.env.PROXY_PORT ?? 3128);
 const gatewayPort = Number(process.env.GATEWAY_PORT ?? 8080);
 const adminSocket = process.env.ADMIN_SOCKET ?? '/run/egress/admin.sock';
-const upstreams = loadUpstreams();
+const { upstreams, keyNames } = loadUpstreams();
+// No MCP route may name an upstream credential as a header variable, nor one egress lacks.
+const registry = new Registry(Date.now, {
+  credentialEnvNames: keyNames,
+  env: () => process.env,
+});
+log({
+  msg: 'custom upstream key',
+  env: CUSTOM_API_KEY_ENV,
+  set: Boolean(process.env[CUSTOM_API_KEY_ENV]),
+});
 
 // Development: reach a Nous proxy on the host through egress's own loopback (host-forward.ts).
 const HOST_FORWARD_PORT = 8645;
 const hostProxy = process.env.NOUS_HOST_PROXY?.trim();
-const hostForward = hostProxy
+const hostTarget = hostProxy ? parseHostPort(hostProxy, 'NOUS_HOST_PROXY') : null;
+const hostForward = hostTarget
   ? startHostForward({
       listen: { host: '127.0.0.1', port: HOST_FORWARD_PORT },
-      target: parseHostPort(hostProxy, 'NOUS_HOST_PROXY'),
+      target: hostTarget,
       log,
     })
   : null;
+// Admin /health says whether the host proxy answers; the worker records it (UI_FLOWS 19 #7).
+const hostProbe = hostTarget ? new HostProxyProbe(hostTarget) : null;
 if (hostForward) {
   upstreams.nous = {
     ...upstreams.nous,
@@ -74,12 +97,16 @@ const proxy = createProxyServer({
   resolve: async (host) =>
     (await lookup(host, { all: true, verbatim: true })).map((a) => a.address),
 });
-const gateway = createGatewayServer({ registry, upstreams });
-const admin = createAdminServer(registry);
+const gateway = createGatewayServer({ registry, upstreams, mcp: { log } });
+const admin = createAdminServer(registry, { hostProxy: hostProbe });
 
 proxy.listen(proxyPort, '0.0.0.0', () => log({ msg: 'proxy listening', port: proxyPort }));
 gateway.listen(gatewayPort, '0.0.0.0', () =>
-  log({ msg: 'model gateway listening', port: gatewayPort, providers: Object.keys(upstreams) }),
+  log({
+    msg: 'model and MCP gateway listening',
+    port: gatewayPort,
+    providers: Object.keys(upstreams),
+  }),
 );
 mkdirSync(dirname(adminSocket), { recursive: true });
 if (existsSync(adminSocket)) unlinkSync(adminSocket);

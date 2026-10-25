@@ -36,6 +36,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   api:
     build:
@@ -53,13 +54,18 @@ services:
       DATABASE_URL: postgres://hermes:hermes@postgres:5432/hermes_evals
       DATA_DIR: /data
       CORS_ORIGIN: http://localhost:8080
+      # The price table a launch freezes into the experiment (plan 7.2).
+      PRICES_FILE: /config/prices.yaml
+      # Connect Nous Portal from the UI (plan 6.1), over provider-admin.
+      NOUS_LOGIN_URL: http://nous-login:8650
     # No suites mount: the worker loads suites (verifiers are user code) and
     # the API serves what it stored, from Postgres and the blobs in evaldata.
     volumes:
       - evaldata:/data
+      - ./config:/config:ro
     ports:
       - '127.0.0.1:3000:3000'
-    networks: [backend]
+    networks: [backend, provider-admin]
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +78,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   worker:
     build:
@@ -92,7 +99,12 @@ services:
       WORKER_CONCURRENCY: '3'
       DOCKER_SOCKET: /run/guard/docker.sock
       EGRESS_ADMIN_SOCKET: /run/egress/admin.sock
+      # One worker per Docker daemon. A second worker on the same daemon needs
+      # its own, disjoint list of slot networks (and docker-guard's
+      # TRIAL_NETWORKS must hold them all).
       TRIAL_SLOTS: hermes-evals-trial-0,hermes-evals-trial-1,hermes-evals-trial-2,hermes-evals-trial-3
+      # The provider guard asks nous-login whether Nous Portal is connected.
+      NOUS_LOGIN_URL: http://nous-login:8650
     # Suites load here, at every start and on POST /suites/reload; read-only,
     # the loader never writes to them.
     volumes:
@@ -101,8 +113,14 @@ services:
       - trials:/trials
       - guard-sock:/run/guard
       - egress-admin:/run/egress
-    networks: [backend]
-    stop_grace_period: 30s
+    networks: [backend, provider-admin]
+    # A stop hands running trials back: each container is stopped (SIGTERM,
+    # SIGKILL after 10 s), the lifecycle waits up to 60 s, then a last
+    # recovery pass ends those attempts as worker_lost and requeues their runs.
+    stop_grace_period: 90s
+    # A worker that dies (an OOM, an unhandled rejection, which it exits on)
+    # comes back, and its recovery pass at start ends what it left behind.
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,8 +177,9 @@ services:
       - guard-sock:/run/guard
     restart: unless-stopped
 
-  # The only network path out of a trial: forward proxy (:3128) and model
-  # gateway (:8080). Provider credentials live here, never in a trial.
+  # The only network path out of a trial: forward proxy (:3128), model
+  # gateway (:8080/v1) and MCP gateway (:8080/mcp/<name>). Provider
+  # credentials and http MCP header values live here, never in a trial.
   egress:
     image: hermes-evals/egress
     build:
@@ -173,9 +192,15 @@ services:
         required: false
     environment:
       ADMIN_SOCKET: /run/egress/admin.sock
+      # One entry per upstream in PROVIDER_ROUTES (apps/api/src/execution/providers-map.ts);
+      # keep the two in step. `custom` has no entry: each custom attempt
+      # registers its own base URL, and CUSTOM_API_KEY (from .env) is its key.
       MODEL_UPSTREAMS: >-
         {"nous":{"baseUrl":"http://nous-proxy:8645/v1","bodyDefaults":{"reasoning":{"enabled":true,"effort":"medium"}}},
+         "nous-api":{"baseUrl":"https://inference-api.nousresearch.com/v1","apiKeyEnv":"NOUS_API_KEY","bodyDefaults":{"reasoning":{"enabled":true,"effort":"medium"}}},
          "openrouter":{"baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"},
+         "openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY"},
+         "anthropic":{"baseUrl":"https://api.anthropic.com/v1","apiKeyEnv":"ANTHROPIC_API_KEY"},
          "mock":{"baseUrl":"http://mock-model:8090/v1"}}
     user: node
     read_only: true
@@ -190,27 +215,82 @@ services:
       trial-1: { aliases: [egress] }
       trial-2: { aliases: [egress] }
       trial-3: { aliases: [egress] }
+    # Agents call egress directly with their attempt tokens; its own caps
+    # (8 model calls per attempt, 512 sockets) bound its memory, and this keeps
+    # it from ever taking memory from Postgres on the same Docker VM.
+    mem_limit: 1g
     restart: unless-stopped
 
-  # Holds the single Nous Portal login. For development you can instead reuse
-  # this machine's Hermes login: run `hermes proxy start --provider nous` on the
-  # host and set NOUS_HOST_PROXY=host.docker.internal:8645 in .env (egress then
-  # forwards to it; see apps/egress/src/host-forward.ts). One-time setup:
-  #   docker compose --profile nous run --rm nous-proxy auth add nous --type oauth --no-browser
+  # Serves Nous model calls with the single Nous Portal login in the
+  # nous-home volume; egress forwards to it. Connect the login from the UI
+  # (System > Model access > Connect), which nous-login writes into the
+  # volume. Without a login `hermes proxy start` exits, so the loop retries
+  # every 5 s and picks up a new login without a restart.
+  # For development you can instead reuse this machine's Hermes login: run
+  # `hermes proxy start --provider nous` on the host and set
+  # NOUS_HOST_PROXY=host.docker.internal:8645 in .env (egress then forwards to
+  # it; see apps/egress/src/host-forward.ts). Fallback without the UI:
+  #   docker compose run --rm --entrypoint /opt/hermes/.venv/bin/hermes nous-proxy auth add nous --type oauth --no-browser
   nous-proxy:
     image: hermes-evals/trial:v0.22.4-4d04303
-    profiles: [nous]
     init: true
-    command: ['proxy', 'start', '--provider', 'nous', '--host', '0.0.0.0', '--port', '8645']
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        trap 'kill "$$pid" 2>/dev/null; exit 0' TERM INT
+        while :; do
+          /opt/hermes/.venv/bin/hermes proxy start --provider nous --host 0.0.0.0 --port 8645 &
+          pid=$$!
+          wait "$$pid"
+          sleep 5 & wait $$!
+        done
     environment:
       HOME: /opt/data
       HERMES_HOME: /opt/data
     volumes:
       - nous-home:/opt/data
     networks: [edge, llm]
+    depends_on:
+      trial-image:
+        condition: service_completed_successfully
     restart: unless-stopped
 
-  # Scripted OpenAI-compatible model for the isolation smoke test.
+  # Connects Nous Portal from the UI (plan 6.1): runs Hermes's own device
+  # login in the nous-home volume, which nous-proxy serves model calls from.
+  # Only the api and the worker reach it (provider-admin); edge is its way to
+  # the portal. Tokens never leave the volume.
+  nous-login:
+    image: hermes-evals/trial:v0.22.4-4d04303
+    init: true
+    entrypoint: ['/opt/hermes/.venv/bin/python', '/opt/nous-login/nous-login.py']
+    environment:
+      HOME: /opt/data
+      HERMES_HOME: /opt/data
+      NOUS_LOGIN_PORT: '8650'
+    volumes:
+      - nous-home:/opt/data
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [edge, provider-admin]
+    depends_on:
+      trial-image:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', '/opt/hermes/.venv/bin/python', '/opt/nous-login/nous-login.py', '--health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Scripted OpenAI-compatible model (apps/egress/src/mock-model.ts), for the
+  # sandbox smoke test and for test experiments: a configuration with provider
+  # `custom` and base URL http://mock-model:8090/v1 runs against it at no cost.
+  # MOCK_STEPS is the default script. MOCK_SCRIPTS, from .env, can give
+  # prompts or skills that contain a phrase their own answers:
+  #   MOCK_SCRIPTS=[{"match":"<phrase>","steps":[{"content":"..."}]}]
   mock-model:
     image: hermes-evals/egress
     profiles: [test]
@@ -219,6 +299,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     environment:
+      MOCK_SCRIPTS: ${MOCK_SCRIPTS:-}
       MOCK_STEPS: >-
         [{"tool":"terminal","arguments":{"command":"id; echo HOST=$(hostname); ls /; ls -a /opt/data; head -3 /workspace/invoices.csv; echo PG=$(curl -sS -m 3 http://postgres:5432 2>&1 | head -c 120); echo META=$(curl -sS -m 3 --noproxy '*' http://169.254.169.254/ 2>&1 | head -c 120); echo WEB=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' https://example.com 2>&1 | head -c 120); echo SECRETS=$(env | grep -c -i -E 'nous_api|openrouter_api|anthropic_api|openai_api'); echo PROBE_DONE"}},
          {"content":"The invoices total 1042.00.\n```json\n{\"total\": 1042.00}\n```"}]
@@ -235,10 +316,13 @@ volumes:
 
 networks:
   backend: {}
-  # egress and nous-proxy only: the way to the internet.
+  # egress, nous-proxy and nous-login only: the way to the internet.
   edge: {}
   # egress to nous-proxy and the mock model; no route out.
   llm:
+    internal: true
+  # api and worker to nous-login only; no route out.
+  provider-admin:
     internal: true
   trial-0:
     <<: *trial-network

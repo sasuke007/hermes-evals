@@ -143,7 +143,7 @@ describe('getRun: the inspector board run', () => {
 
   it('has the launch record of the board', async () => {
     const { launchRecord, artifacts } = await getRun(SAMPLE_RUN_ID);
-    expect(launchRecord.container).toMatchObject({
+    expect(launchRecord?.container).toMatchObject({
       image: 'nousresearch/hermes-agent:v0.22.4',
       hermes: 'hermes-agent v0.22.4 @ 4d04303',
       network: 'hermes-evals-trial-1',
@@ -152,9 +152,9 @@ describe('getRun: the inspector board run', () => {
       worker: { name: 'worker-1', startedAt: '2026-10-22T10:20:15', exitCode: 0 },
       skills: [],
     });
-    expect(launchRecord.command).toContain('--api-key ‹run token, revoked›');
-    expect(launchRecord.command).not.toContain('-s invoice-method');
-    expect(launchRecord.configPath).toBe('/opt/data/config.yaml');
+    expect(launchRecord?.command).toContain('--api-key ‹run token, revoked›');
+    expect(launchRecord?.command).not.toContain('-s invoice-method');
+    expect(launchRecord?.configPath).toBe('/opt/data/config.yaml');
     expect(artifacts.agentWroteNothing).toBe(true);
     expect(artifacts.items.map((a) => [a.path, a.origin])).toEqual([
       ['workspace/invoices.csv', 'fixture_unchanged'],
@@ -165,8 +165,8 @@ describe('getRun: the inspector board run', () => {
 
   it('adds -s invoice-method for the with-skill counterpart', async () => {
     const twin = await getRun((await getRun(SAMPLE_RUN_ID)).counterpart!.runId!);
-    expect(twin.launchRecord.command).toContain('-t file,terminal -s invoice-method');
-    expect(twin.launchRecord.container.skills.map((s) => s.name)).toEqual(['invoice-method']);
+    expect(twin.launchRecord?.command).toContain('-t file,terminal -s invoice-method');
+    expect(twin.launchRecord?.container.skills.map((s) => s.name)).toEqual(['invoice-method']);
   });
 });
 

@@ -1,0 +1,79 @@
+[
+  {
+    "match": "Smoke task LIST",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/items.csv"
+        }
+      },
+      {
+        "content": "The open ids are c, a and b.\n\n```json\n{\"ids\": [\"c\", \"a\", \"b\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke task REPORT",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/report.csv",
+          "content": "vendor,total\nAcme,12.00\nBorealis,5.50\n"
+        }
+      },
+      {
+        "content": "I wrote report.csv, one row per vendor.\n\n```json\n{\"done\": true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke task SLOW",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "sleep 40; tail -n +2 /workspace/rows.csv | wc -l"
+        }
+      },
+      {
+        "content": "rows.csv has 3 data rows.\n\n```json\n{\"rows\": 3}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-due-method: count only rows whose status is open",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "Following the due method, only the open rows count: 100.00 + 40.25 + 9.25 = 149.50.\n\n```json\n{\"total\": 149.50}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke task TOTAL",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "All the amounts add up to 400.00.\n\n```json\n{\"total\": 400.00}\n```"
+      }
+    ]
+  }
+]

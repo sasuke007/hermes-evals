@@ -1,7 +1,7 @@
 /**
  * Sandbox and worker contracts (plan sections 8.7 and 11): the isolation
  * self-test a worker reports, worker presence and the running summary.
- * Model access (providers and the Nous login) stays in the web until Phase 2.
+ * Model access (providers and the Nous login) is in ./providers.ts.
  */
 import { z } from 'zod';
 import { countView, isoTimeView } from './common.js';

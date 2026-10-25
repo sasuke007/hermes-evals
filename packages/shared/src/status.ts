@@ -65,7 +65,14 @@ export type EvaluationCause = (typeof EVALUATION_CAUSES)[number];
 export const EXPERIMENT_STATUSES = ['running', 'paused', 'completed', 'failed'] as const;
 export type ExperimentStatus = (typeof EXPERIMENT_STATUSES)[number];
 
-export const PAUSE_REASONS = ['user', 'spend_ceiling'] as const;
+/**
+ * Why an experiment is paused. `user`: Pause was clicked. `spend_ceiling`: the
+ * spend guard found priced spend at or above the ceiling before a claim.
+ * `provider_disconnected`: the provider guard found a configuration's provider
+ * not ready before a claim (plan 7.3, UI_FLOWS 19 #5); no attempt was spent,
+ * and Resume needs the provider ready again.
+ */
+export const PAUSE_REASONS = ['user', 'spend_ceiling', 'provider_disconnected'] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 
 export const VERDICTS = ['better', 'worse', 'inconclusive'] as const;

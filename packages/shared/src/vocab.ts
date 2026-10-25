@@ -40,7 +40,11 @@ export const RUN_EVENT_TYPES = [
 ] as const;
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 
-/** Subtypes of `platform` events, which the worker writes itself. Stored in the payload. */
+/**
+ * Subtypes of `platform` events, which the worker writes itself. Stored in the
+ * payload, so no CHECK depends on this list. `network` is one entry of the
+ * attempt's egress connection log (UI_FLOWS 19 #6; payload in records.ts).
+ */
 export const PLATFORM_EVENT_SUBTYPES = [
   'started',
   'killed',
@@ -49,8 +53,22 @@ export const PLATFORM_EVENT_SUBTYPES = [
   'worker_lost',
   'noise',
   'unmapped',
+  'network',
 ] as const;
 export type PlatformEventSubtype = (typeof PLATFORM_EVENT_SUBTYPES)[number];
+
+/**
+ * What a `network` platform event records, as egress logs it per attempt:
+ * `connect` a CONNECT tunnel through the forward proxy, `http` a plain-HTTP
+ * request through it, `model` a model gateway call, `mcp` a call through the
+ * MCP gateway (plan 5.3).
+ */
+export const NETWORK_EVENT_KINDS = ['connect', 'http', 'model', 'mcp'] as const;
+export type NetworkEventKind = (typeof NETWORK_EVENT_KINDS)[number];
+
+/** Egress's decision on one connection or call. */
+export const NETWORK_DECISIONS = ['allowed', 'denied'] as const;
+export type NetworkDecision = (typeof NETWORK_DECISIONS)[number];
 
 /**
  * Where a file found in the workspace after a run came from. Inputs are the
@@ -65,8 +83,12 @@ export const ARTIFACT_ORIGINS = [
 ] as const;
 export type ArtifactOrigin = (typeof ARTIFACT_ORIGINS)[number];
 
-/** Why a file was recorded without storing its content. */
-export const ARTIFACT_SKIP_REASONS = ['too_large'] as const;
+/**
+ * Why a file was recorded without storing its content: larger than one
+ * artifact may be (25 MiB), or past the attempt's collection budget (the
+ * files collected before it already used it up).
+ */
+export const ARTIFACT_SKIP_REASONS = ['too_large', 'over_budget'] as const;
 export type ArtifactSkipReason = (typeof ARTIFACT_SKIP_REASONS)[number];
 
 /**

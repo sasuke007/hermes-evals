@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** for postgres, api (health only), worker (sandbox self-test only), web (foundation), docker-guard, egress, the trial image, and nous-proxy. **Planned**: nous-login, every feature endpoint, the worker's job handlers.
+Status: **Built** (Phases 0 to 2): postgres, the api with every Phase 1 and Phase 2 endpoint, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` and its dead letter, recovery), docker-guard, egress (proxy, model gateway, MCP gateway), the trial image, nous-proxy and nous-login. The web app is built against fixtures. **Planned**: re-score and the last scorers (Phase 3), statistics and the comparison endpoint (Phase 4), the pages against the real API (Phase 5), suite authoring (Phase 5b).
 
 ```mermaid
 flowchart LR
@@ -121,7 +121,7 @@ What the picture enforces:
 
 ## 2. Data model
 
-Status: **Built** (19 tables, migrations, integrity triggers, 48 tests). The `provider_disconnected` pause reason (section 15) is planned and needs a migration.
+Status: **Built** (migrations 0000 to 0005, integrity triggers, tests on PGlite and Postgres 17). Migration 0004 added the `provider_disconnected` pause reason and `workers.host_proxy`; 0005 added `runs.next_trigger` and the `over_budget` artifact reason. **Planned**: the suite draft tables (Phase 5b).
 
 ```mermaid
 erDiagram
@@ -164,7 +164,7 @@ The rules that matter for every flow below, all enforced by the database whateve
 
 ## 3. State machines
 
-Status: **Built** as vocabularies and database checks. The transitions are performed by the planned API and worker code.
+Status: **Built** as vocabularies and database checks, and the API and worker code that performs the transitions (Phase 2; `docs/phases/phase-2.md` section 3.5). **Planned**: the re-score transitions of an evaluation (Phase 3).
 
 ### Run
 
@@ -253,7 +253,7 @@ Two more states come from outside this machine: `host` (development, `NOUS_HOST_
 
 ## 4. App shell: navigation, banners, live pills
 
-Status: **Built** in the web app against fixtures (`AppShell.vue`, providers and system stores). **Planned**: the real `/system/summary`, `/system/events` and `/providers` endpoints.
+Status: **Built** in the web app against fixtures (`AppShell.vue`, providers and system stores). The API serves `/system/summary`, `/system/events` (SSE) and `/providers` (Phase 2). **Planned**: switching the web app to the real API (Phase 5).
 
 What the user sees on every page: a 48 px top bar with Experiments, Suites, Configurations, Resources, then System after a divider with a status dot. On the right are the live pill ("2 running · 87 of 240 scored"), the approval pill while a Nous login is waiting, and the theme toggle. Under the bar, an amber banner when a provider that configurations use is not connected.
 
@@ -316,7 +316,7 @@ Notes:
 
 ## 5. System page
 
-Status: **Built** in the web app against fixtures (rows, checks, workers). The worker's isolation self-test is **built and runs at every worker start**. **Planned**: the endpoints that expose it.
+Status: **Built** in the web app against fixtures (rows, checks, workers). The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1). **Planned**: the page against the real API (Phase 5).
 
 The page has three sections, plus a planned fourth:
 
@@ -411,7 +411,7 @@ sequenceDiagram
 
 ## 6. Connecting Nous Portal
 
-Status: **Built** in the web app against fixtures (dialog, every state, polling, follow-ups). **Planned**: the `nous-login` service and the `providers` API module.
+Status: **Built** in the web app against fixtures (dialog, every state, polling, follow-ups), and in the API: the `nous-login` service and the `providers` module (Phase 2), tested against a fake portal. **To run**: a real login approved in the browser (plan spike I14).
 
 Nous Portal has no API keys, only an OAuth device login with rotating refresh tokens. The user connects once from the UI, and the login lives in the `nous-home` volume, never in the database or the browser.
 
@@ -477,7 +477,7 @@ Details that matter:
 
 ## 7. Nudges: where the UI blocks model work and why
 
-Status: **Built** in the web app against fixtures (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker). **Planned**: the API's 409 checks and the worker's provider guard.
+Status: **Built** in the web app against fixtures (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker), and in the API: the launch 409s and the worker's provider guard (Phase 2). **Planned**: the components against the real API (Phase 5).
 
 The rule: a user should never find out at launch, or halfway through an experiment, that no model is reachable. Every place that leads to a model call checks the providers of the configurations involved.
 
@@ -508,9 +508,9 @@ flowchart TD
 
 ## 8. Suites and tasks
 
-Status: **Built**: the file format and one task (`suites/invoices-v1/total_due`), the strict per-type parameter schemas, answer extraction and two scorers in the sandbox CLI (`task-run.ts`), and the database tables. **Planned**: the loader service, the suites endpoints, the version history, and the pages (the web data layer has fixtures for all of it).
+Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`). **Planned**: the remaining sample tasks (Phase 6), the pages against the real API (Phase 5), and authoring in the UI (Phase 5b).
 
-Suites are folders under `./suites`, edited on disk with any editor. The UI never edits them. It shows what was loaded, whether every task passes its own self-check, and every version.
+Suites are folders under `./suites`, edited on disk with any editor. It shows what was loaded, whether every task passes its own self-check, and every version. Phase 5b adds creating and editing suites in the UI: edits go into a draft, and saving writes the same files and loads them as a reload does (plan section 4.6). Its flows are added here when that phase is built.
 
 ### 8.1 Reload from disk
 
@@ -621,7 +621,7 @@ The reference answer is shown to the user (it is their own task) but marked "Hid
 
 ## 9. Resources: skills, documents, MCP servers, secrets
 
-Status: **Built**: the tables (skills, documents, mcp_servers, mcp_server_versions, blobs) and the queue `test-mcp-server`. **Planned**: every endpoint, the MCP test handler, and the pages.
+Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2). **Planned**: the pages against the real API (Phase 5).
 
 Resources are the building blocks configurations point at. Every resource version is immutable once a configuration uses it.
 
@@ -715,7 +715,7 @@ The form says, per transport, what the agent can read. Under a stdio server's en
 
 ### 9.4 Secrets
 
-Status: **Planned**: the endpoint, presence reporting, the egress MCP gateway, and the pages. **Built**: the `workers.env_names` column.
+Status: **Built**: the endpoint and presence reporting (Phase 1), and the egress MCP gateway that adds header values (Phase 2, spike I15 passed). **Planned**: the pages against the real API (Phase 5).
 
 `GET /resources/secrets` lists every name that MCP definitions reference: set or not set, its source, what references it, its exposure, and when it was last checked. Values are never shown, stored, typed or sent to the browser. A value is set by adding it to `.env` and restarting the service that reads it (`docker compose up -d egress worker`).
 
@@ -752,7 +752,7 @@ flowchart LR
 
 ## 10. Configurations
 
-Status: **Built**: tables, versioning triggers (a frozen version never changes), config hash column. **Planned**: endpoints and pages.
+Status: **Built**: tables, versioning triggers (a frozen version never changes), the config hash, and every endpoint (Phase 1). **Planned**: the pages against the real API (Phase 5).
 
 A configuration is a record of how Hermes is set up: model, provider, toolsets, memory, skills, documents, MCP servers and limits. It is only a definition: saving one never calls a model, so Save is never blocked by provider status.
 
@@ -809,7 +809,7 @@ Hermes always installs its own `hermes-agent` skill in every home and it cannot 
 
 ## 11. New experiment and launch
 
-Status: **Built**: tables, the launch trigger (frozen versions, valid tasks), transactional job sending (rows and jobs commit together, verified on Postgres 17). **Planned**: endpoints, estimate, the page.
+Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2). **Planned**: the page against the real API (Phase 5).
 
 ### 11.1 Filling the form
 
@@ -915,7 +915,7 @@ sequenceDiagram
 
 ## 12. What happens to one run: execution
 
-Status: **Built and proven live**: the trial spec, docker-guard, egress (proxy, gateway, token registration, usage, connection log), the trial runner (deadline, cancel, disk watchdog, orphan cleanup), the safe trial-file reader, and a real Hermes run end to end (`total_due` passed 6 of 6 on `openai/gpt-6.1-sol`). **Planned**: the `execute-run` job handler around it (claim, admission, leases, event batching into `run_events`, recovery).
+Status: **Built and proven live** (Phase 2): the `execute-run` handler around the trial runner (claim, admission, leases and heartbeat, the cancel watcher, event batching into `run_events`, artifact collection, recovery), run on the Compose stack with real Hermes and the scripted mock model (`docs/phases/phase-2.md` section 6).
 
 The user sees none of this directly. They see a run go `queued → running → executed`, its events stream into the inspector, and the counters move. This section is what happens underneath.
 
@@ -1076,7 +1076,7 @@ A missing heartbeat alone never proves the trial stopped. A replacement starts o
 
 ## 13. What happens to one run: scoring
 
-Status: **Built**: answer extraction (fenced JSON, last block, CommonMark fences), `numeric_tolerance` and `exact_match`, the evaluations and scores tables with publish rules. **Planned**: the `evaluate-run` handler, the other five scorers, the dead-letter handler, re-score.
+Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1), and the `evaluate-run` handler with claim, publish and the dead letter (Phase 2). **Planned**: `trajectory_match`, `llm_judge`, `text_match` and re-score (Phase 3).
 
 Scoring is separate from execution, so a scorer bug is fixed by re-scoring. Hermes is never run again for it.
 
@@ -1152,7 +1152,7 @@ Two workers finishing the last two runs at the same moment append the verdict on
 
 ## 14. Experiment list and overview, live
 
-Status: **Built** in the web app against fixtures (list rows, overview running and complete, every state). **Planned**: endpoints and SSE.
+Status: **Built** in the web app against fixtures, and in the API: the list, the detail and the SSE stream (Phase 2). **Planned**: verdict entries (Phase 4) and the pages against the real API (Phase 5).
 
 ### 14.1 Experiment list
 
@@ -1199,7 +1199,7 @@ What the overview shows, and where each number comes from:
 
 ## 15. Experiment controls
 
-Status: **Built**: the state machine checks and `deferJob` in the database layer. **Planned**: the endpoints, guards and buttons.
+Status: **Built**: the endpoints and their guards (pause, resume, cancel, retry failed, duplicate, the spend guard and the circuit breaker; Phase 2). **Planned**: the buttons against the real API (Phase 5).
 
 Every control is one transaction that locks the experiment row first.
 
@@ -1260,7 +1260,7 @@ A login that lapses during a trial fails that attempt as `execution_error · pro
 
 ## 16. Comparison tab
 
-Status: **Built** in the web app against fixtures. **Planned**: the statistics module, the endpoint and its cache.
+Status: **Built** in the web app against fixtures, and its contract (`ComparisonViewSchema`). **Planned**: the statistics module, the endpoint and its cache (Phase 4).
 
 The comparison answers "is the candidate better than the baseline, and how sure are we?", and links every number to the runs beneath it.
 
@@ -1313,7 +1313,7 @@ Because `results_revision` moves on every run status change and every published 
 
 ## 17. Runs tab
 
-Status: **Built** in the web app against fixtures. **Planned**: endpoints.
+Status: **Built** in the web app against fixtures, and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2). **Planned**: bulk re-score (Phase 3) and the tab against the real API (Phase 5).
 
 ```mermaid
 sequenceDiagram
@@ -1347,7 +1347,7 @@ sequenceDiagram
 
 ## 18. Run inspector
 
-Status: **Built** in the web app against fixtures (the drawer route, every failure state). **Planned**: endpoints.
+Status: **Built** in the web app against fixtures, and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2). **Planned**: re-score (Phase 3) and the drawer against the real API (Phase 5).
 
 A right-hand drawer over the experiment, 75% of the window, with its own route (`/experiments/:id/runs/:runId`, or `?run=` from the comparison). Esc closes it back to where it was opened.
 
@@ -1410,21 +1410,21 @@ Actions in the drawer:
 
 Each of these needs a decision or a fix before the matching code is written.
 
-| #   | Where               | Point                                                                                                                                                                                                                                                                                                            | Suggested resolution                                                                                                                                   |
-| --- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).    | Done. Follow-ups are points 14 to 16.                                                                                                                  |
-| 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                  | Done.                                                                                                                                                  |
-| 3   | API surface         | **Resolved in Phase 1 for its own routes.** `GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route are built, in Swagger, and listed in plan section 11. | `GET /experiments/new-options` and the artifact preview route remain, for Phases 2 and 3.                                                              |
-| 4   | Banner on Resources | The web shell hides the not-connected banner on Suites and Resources (designer note). The plan and the design brief exempt only Suites.                                                                                                                                                                          | Show it on Resources. The gaps prompt already asks the design to fix the note.                                                                         |
-| 5   | Pause reason        | `PAUSE_REASONS` in `packages/shared` is `user, spend_ceiling`. `provider_disconnected` needs adding, with a migration for the CHECK.                                                                                                                                                                             | Part of the provider guard work.                                                                                                                       |
-| 6   | Network events      | Egress's connection log is to be stored as platform events, but `PLATFORM_EVENT_SUBTYPES` has no subtype for it (`started, killed, cancelled, collected, worker_lost, noise, unmapped`).                                                                                                                         | Add `network` (allowed, refused, with a `hermes_background` flag) to the vocabulary.                                                                   |
-| 7   | Host login status   | The API must report `host` and `host_unreachable` when `NOUS_HOST_PROXY` is set, but the host forward lives in egress, whose admin socket only the worker can reach.                                                                                                                                             | Egress reports host-proxy reachability in its health answer, and the worker records it on its `workers` row, or the API gets a read-only status route. |
-| 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                             | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2).                      |
-| 9   | Live updates        | The experiment list "with live rows" has no SSE in the plan (`/system/events` carries only the summary). The inspector's live timeline transport is not specified.                                                                                                                                               | Poll `GET /experiments` every 5 s while anything runs, and poll `GET /runs/:id/events?after=` every 1 s while the run is running.                      |
-| 10  | Spend ceiling       | Whether Launch is allowed when the estimate is over the ceiling is not stated. This document assumes yes, with a warning, because the spend guard pauses at the ceiling.                                                                                                                                         | Confirm.                                                                                                                                               |
-| 11  | Launch and sandbox  | The plan returns 409 when no worker is live, but says nothing about a live worker whose sandbox failed. This document assumes Launch is disabled until the sandbox is proven.                                                                                                                                    | Confirm, and add the check to the launch transaction.                                                                                                  |
-| 12  | Login unavailable   | `nous-login` reports `unavailable` when its startup contract check fails. Neither the design nor the web store has that state.                                                                                                                                                                                   | Covered by `DESIGN_GAPS_PROMPT.md` item 15; add it to the providers store.                                                                             |
-| 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                   | Done.                                                                                                                                                  |
-| 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                | Done.                                                                                                                                                  |
-| 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                      | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                                          |
-| 16  | Egress allowlist    | Egress's `allowHosts` is documented as "configured MCP http hosts", but http MCP now goes through the gateway, and stdio servers have no network.                                                                                                                                                                | In allowlist mode CONNECT refuses every host; keep `allowHosts` empty until a need appears. Spike I15 covers the gateway.                              |
+| #   | Where               | Point                                                                                                                                                                                                                                                                                                                                                                             | Suggested resolution                                                                                                              |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).                                                                     | Done. Follow-ups are points 14 to 16.                                                                                             |
+| 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                                                                                   | Done.                                                                                                                             |
+| 3   | API surface         | **Resolved.** Phase 1 built its own routes (`GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route); Phase 2 built `GET /experiments/new-options` and the artifact preview route. All are in Swagger and plan section 11. | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 4   | Banner on Resources | The web shell hides the not-connected banner on Suites and Resources (designer note). The plan and the design brief exempt only Suites.                                                                                                                                                                                                                                           | Show it on Resources. The gaps prompt already asks the design to fix the note.                                                    |
+| 5   | Pause reason        | **Resolved in Phase 2.** `provider_disconnected` is in migration 0004 and `packages/shared`.                                                                                                                                                                                                                                                                                      | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 6   | Network events      | **Resolved in Phase 2.** Subtype `network`, with a defined payload (kind, decision, background, and host, port, reason, status, ms, model, server, method and tokens where known).                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 7   | Host login status   | **Resolved in Phase 2**, as suggested: egress's admin `/health` reports the host forward, the worker records `workers.host_proxy`, and `GET /providers` reports `host` or `host_unreachable`.                                                                                                                                                                                     | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                                                                                              | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2). |
+| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling itself is Phase 5.                                                                                                                                                                                                                  | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 10  | Spend ceiling       | **Resolved in Phase 2.** Launch is allowed over the ceiling; the spend guard pauses at it.                                                                                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 11  | Launch and sandbox  | **Resolved in Phase 2.** Launch answers 409 when no connected worker has proven sandbox isolation.                                                                                                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are Phase 5.                                                                                                                                                                                                                                                                  | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                                                                                    | Done.                                                                                                                             |
+| 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                                                                                 | Done.                                                                                                                             |
+| 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                                                                                       | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                     |
+| 16  | Egress allowlist    | **Resolved in Phase 2.** In allowlist mode egress refuses every CONNECT and plain-http request before any DNS lookup.                                                                                                                                                                                                                                                             | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |

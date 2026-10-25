@@ -2,9 +2,12 @@
  * Lifecycle checks on a live engine: a trial past its deadline is stopped
  * with everything it started; a cancel stops it the same way; an orphan
  * left by a crashed worker blocks a replacement until it is cleared; the
- * worker reads a hostile trial's files without leaving them or hanging; and
- * a trial that fills the disk or creates too many files is stopped.
+ * worker reads a hostile trial's files without leaving them or hanging; a
+ * trial that fills the disk, creates too many files, or hides what it writes
+ * in a directory the worker cannot list is stopped; and a trial cannot make
+ * its directories undeletable.
  */
+import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newId } from '../database/ids.js';
@@ -131,7 +134,51 @@ export async function runLifecycleChecks(deps: LifecycleDeps): Promise<SelfTestC
 
   checks.push(await hostileOutputCheck(deps));
   checks.push(...(await diskLimitChecks(deps)));
+  checks.push(await lockedTreeCheck(deps));
   return checks;
+}
+
+/**
+ * The trial shares the worker's uid, so it can chmod what it created, and
+ * /workspace and /opt/data themselves: plain rm then fails with EACCES and
+ * would leave up to the disk cap on the trials volume, and stop retention.
+ */
+async function lockedTreeCheck(deps: LifecycleDeps): Promise<SelfTestCheck> {
+  const locker = await spec(
+    deps,
+    [
+      'set -e',
+      'mkdir -p /workspace/x && echo f > /workspace/x/f && chmod 500 /workspace/x',
+      'mkdir -p /opt/data/y && echo f > /opt/data/y/f && chmod 500 /opt/data/y',
+      'chmod 555 /workspace',
+      'echo LOCKED',
+    ].join('\n'),
+  );
+  const lines: string[] = [];
+  await runTrial({
+    engine: deps.engine,
+    spec: locker,
+    deadlineMs: 60_000,
+    ...quiet,
+    onStdoutLine: (line) => lines.push(line),
+  });
+  const root = join(deps.trialsDir, locker.attemptId);
+  let error: string | null = null;
+  try {
+    await removeTrialDirs(deps.trialsDir, locker.attemptId);
+  } catch (err) {
+    error = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+  }
+  const left = existsSync(root);
+  return {
+    name: 'a trial cannot make its directories undeletable',
+    ok: lines.includes('LOCKED') && error === null && !left,
+    detail: !lines.includes('LOCKED')
+      ? 'the trial did not lock its directories'
+      : error === null && !left
+        ? 'chmod 500 in the workspace and the home, and chmod 555 on /workspace: all deleted'
+        : `left behind (${error ?? 'no error, but the directory is still there'})`,
+  };
 }
 
 /** A trial plants links, a loop, a FIFO and other traps; the worker then reads its workspace. */
@@ -224,6 +271,13 @@ async function diskLimitChecks(deps: LifecycleDeps): Promise<SelfTestCheck[]> {
       name: 'a trial that creates files without end is stopped',
       script: 'i=0; while true; do : > /workspace/f$i; i=$((i+1)); done',
       limit: { maxBytes: 2 * 1024 * 1024 * 1024, maxEntries: 2000 },
+    },
+    {
+      // Writable and searchable by the agent, unlistable by the worker that shares its uid.
+      name: 'a trial that writes into a directory the worker cannot list is stopped',
+      script:
+        'mkdir /workspace/h && chmod 0300 /workspace/h && while true; do head -c 8388608 /dev/zero >> /workspace/h/fill; done',
+      limit: { maxBytes: 2 * 1024 * 1024 * 1024, maxEntries: 50_000 },
     },
   ];
   const checks: SelfTestCheck[] = [];

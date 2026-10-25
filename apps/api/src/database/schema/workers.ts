@@ -7,6 +7,7 @@
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { emptyTextArray, id, jsonValue, oneOf, tstz } from './_columns.js';
+import type { WorkerHostProxy } from './worker-host-proxy.js';
 import { WORKER_SANDBOX_STATES, type WorkerSandbox } from './worker-sandbox.js';
 
 export const workers = pgTable(
@@ -48,6 +49,12 @@ export const workers = pgTable(
     egressEnvNames: text('egress_env_names').array().notNull().default(emptyTextArray),
     /** Last isolation self-test this worker ran; null until it has run one. */
     sandbox: jsonValue<WorkerSandbox>('sandbox'),
+    /**
+     * Egress's development host forward (NOUS_HOST_PROXY) and whether its
+     * target answered, as the worker last heard on a heartbeat. Null when
+     * egress has no host forward (worker-host-proxy.ts).
+     */
+    hostProxy: jsonValue<WorkerHostProxy>('host_proxy'),
   },
   (t) => [
     index('workers_last_heartbeat_idx').on(t.lastHeartbeatAt),
@@ -58,6 +65,11 @@ export const workers = pgTable(
     check(
       'workers_sandbox_ck',
       sql`${t.sandbox} is null or (jsonb_typeof(${t.sandbox}) = 'object' and ${oneOf(sql`(${t.sandbox} ->> 'state')`, WORKER_SANDBOX_STATES)})`,
+    ),
+    check(
+      'workers_host_proxy_ck',
+      // IS NOT DISTINCT FROM: a missing key must fail, not pass as NULL.
+      sql`${t.hostProxy} is null or (jsonb_typeof(${t.hostProxy}) = 'object' and jsonb_typeof(${t.hostProxy} -> 'target') is not distinct from 'string' and jsonb_typeof(${t.hostProxy} -> 'reachable') is not distinct from 'boolean' and jsonb_typeof(${t.hostProxy} -> 'checked_at') is not distinct from 'string')`,
     ),
   ],
 );

@@ -7,8 +7,9 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { stringify } from 'yaml';
 import { newId } from '../database/ids.js';
+import { configYaml, hermesConfig } from '../execution/attempt/trial-config.js';
+import { MODEL_GATEWAY_BASE_URL } from '../execution/providers-map.js';
 import {
   newAttemptToken,
   type EgressClient,
@@ -78,33 +79,31 @@ const SMOKE_INPUT: Omit<HermesTrialInput, 'deadlineMs' | 'maxTokens'> = {
   budgetSeconds: 180,
 };
 
-/** The trial's config.yaml: everything that is not a per-run flag, with nothing secret in it. */
+/**
+ * The trial's config.yaml for the harness: the attempt runner's builder
+ * (execution/attempt/trial-config.ts) with the harness's own route, memory
+ * off and no MCP servers, so the sandbox CLI runs the settings experiments use.
+ */
 export function trialConfig(options: {
   model: string;
   provider: string;
   maxTurns: number;
   budgetSeconds: number;
   toolsets: string[];
-}) {
-  return {
+}): Record<string, unknown> {
+  return hermesConfig({
     model: {
       default: options.model,
       provider: options.provider,
-      base_url: 'http://egress:8080/v1',
+      base_url: MODEL_GATEWAY_BASE_URL,
       context_length: 131072,
     },
     toolsets: options.toolsets,
-    memory: { memory_enabled: false, user_profile_enabled: false },
-    mcp_servers: {},
-    agent: { max_turns: options.maxTurns, run_budget_seconds: options.budgetSeconds },
-    approvals: { mode: 'off' },
-    updates: { check: false },
-    plugins: { auto_update_check_hours: 0 },
-    curator: { enabled: false },
-    auxiliary: { title_generation: { enabled: false } },
-    security: { allow_lazy_installs: false, protected_instruction_files: false },
-    gateway: { unmanaged_idle_exit_seconds: 5 },
-  };
+    memoryEnabled: false,
+    maxTurns: options.maxTurns,
+    runBudgetSeconds: options.budgetSeconds,
+    mcpServers: [],
+  });
 }
 
 /** One Hermes run against the scripted mock model (or any model the deps name). */
@@ -130,7 +129,7 @@ export async function runHermesTrial(
   await writeFile(join(dirs.home, 'task.txt'), input.prompt);
   await writeFile(
     join(dirs.home, 'config.yaml'),
-    stringify(
+    configYaml(
       trialConfig({
         model: deps.model,
         provider: deps.hermesProvider,

@@ -1,9 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   symlinkSync,
   truncateSync,
   writeFileSync,
@@ -11,7 +13,14 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { measureTrialDisk, readTrialFile, walkTrialTree } from './trial-files.js';
+import {
+  MEASURE_MAX_DEPTH,
+  measureTrialDisk,
+  readTrialFile,
+  restoreOwnerAccess,
+  walkTrialTree,
+} from './trial-files.js';
+import { forceRemoveTree } from './trial-runner.js';
 
 const base = mkdtempSync(join(tmpdir(), 'trial-files-'));
 const root = join(base, 'workspace');
@@ -124,5 +133,93 @@ describe('measureTrialDisk', () => {
     expect(crowded.exceeded).toMatch(/more than 5 files/);
     const small = await measureTrialDisk({ roots: [root], maxBytes: 1, maxEntries: 1000 });
     expect(small.exceeded).toMatch(/bytes on disk/);
+  });
+
+  describe('fails closed on what it cannot measure', () => {
+    const roomy = { maxBytes: 1 << 30, maxEntries: 1000 };
+    let tree: string;
+
+    beforeAll(() => {
+      tree = mkdtempSync(join(base, 'hidden-'));
+    });
+    afterAll(async () => {
+      await forceRemoveTree(tree);
+    });
+
+    it('treats a directory the worker cannot list as over the cap', async () => {
+      // `mkdir h && chmod 0300 h`: still writable and searchable by the agent, unlistable here.
+      const workspace = join(tree, 'workspace');
+      mkdirSync(join(workspace, 'h'), { recursive: true });
+      writeFileSync(join(workspace, 'h', 'big.bin'), Buffer.alloc(5 * 1024 * 1024, 1));
+      chmodSync(join(workspace, 'h'), 0o300);
+      const usage = await measureTrialDisk({ roots: [workspace], ...roomy });
+      expect(usage.exceeded).toBe('a directory the worker cannot read: workspace/h (EACCES)');
+    });
+
+    it('treats an unlistable root as over the cap, and ignores one that is gone', async () => {
+      const home = join(tree, 'home');
+      mkdirSync(home);
+      chmodSync(home, 0o300);
+      expect((await measureTrialDisk({ roots: [home], ...roomy })).exceeded).toBe(
+        'a directory the worker cannot read: home (EACCES)',
+      );
+      const gone = await measureTrialDisk({ roots: [join(tree, 'missing')], ...roomy });
+      expect(gone.exceeded).toBeNull();
+    });
+
+    it('treats a directory nested past the walk depth as over the cap', async () => {
+      const nested = join(tree, 'nested');
+      mkdirSync(join(nested, ...Array.from({ length: MEASURE_MAX_DEPTH + 1 }, () => 'd')), {
+        recursive: true,
+      });
+      expect((await measureTrialDisk({ roots: [nested], ...roomy })).exceeded).toMatch(
+        new RegExp(`^a directory nested deeper than ${MEASURE_MAX_DEPTH} levels: nested/d/`),
+      );
+    });
+  });
+});
+
+describe('restoreOwnerAccess and forceRemoveTree', () => {
+  it('delete a tree whose directories the agent locked, without following links', async () => {
+    const tree = mkdtempSync(join(base, 'locked-'));
+    const workspace = join(tree, 'workspace');
+    const keep = join(base, 'keep-locked');
+    mkdirSync(keep);
+    writeFileSync(join(keep, 'kept.txt'), 'not the trial');
+    chmodSync(keep, 0o500);
+    mkdirSync(join(workspace, 'x', 'y'), { recursive: true });
+    writeFileSync(join(workspace, 'x', 'f'), 'f');
+    writeFileSync(join(workspace, 'x', 'y', 'g'), 'g');
+    mkdirSync(join(workspace, 'h'));
+    writeFileSync(join(workspace, 'h', 'f'), 'f');
+    symlinkSync(keep, join(workspace, 'to-keep'));
+    chmodSync(join(workspace, 'x', 'y'), 0o500);
+    chmodSync(join(workspace, 'x'), 0o500);
+    chmodSync(join(workspace, 'h'), 0o300);
+    chmodSync(workspace, 0o555);
+    // What the agent can do to make rm fail, as plain rm shows (EACCES on Linux, ENOTEMPTY on macOS).
+    expect(() => rmSync(tree, { recursive: true, force: true })).toThrow(/EACCES|ENOTEMPTY/);
+
+    await forceRemoveTree(tree);
+    expect(existsSync(tree)).toBe(false);
+    // The link's target kept its mode and content: the walk never followed it.
+    expect(statSync(keep).mode & 0o777).toBe(0o500);
+    expect(existsSync(join(keep, 'kept.txt'))).toBe(true);
+    chmodSync(keep, 0o700);
+  });
+
+  it('restores only directories, and counts what it changed', async () => {
+    const tree = mkdtempSync(join(base, 'restore-'));
+    mkdirSync(join(tree, 'a', 'b'), { recursive: true });
+    writeFileSync(join(tree, 'a', 'file'), 'x');
+    chmodSync(join(tree, 'a', 'file'), 0o400);
+    chmodSync(join(tree, 'a', 'b'), 0o100);
+    chmodSync(join(tree, 'a'), 0o100);
+    expect(await restoreOwnerAccess(tree)).toBe(2);
+    expect(statSync(join(tree, 'a')).mode & 0o777).toBe(0o700);
+    expect(statSync(join(tree, 'a', 'b')).mode & 0o777).toBe(0o700);
+    expect(statSync(join(tree, 'a', 'file')).mode & 0o777).toBe(0o400);
+    expect(await restoreOwnerAccess(tree)).toBe(0);
+    rmSync(tree, { recursive: true, force: true });
   });
 });

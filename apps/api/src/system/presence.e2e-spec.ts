@@ -73,7 +73,10 @@ describe.skipIf(!SERVER_URL)('presence and the System queries on Postgres 17', (
         state: 'isolated',
         checks: [{ name: 'has no default route', ok: true, detail: 'no default route' }],
       }),
-      egress: { envNames: async () => ['VENDOR_API_TOKEN'] },
+      egress: {
+        envNames: async () => ['VENDOR_API_TOKEN'],
+        healthReport: async () => ({ ok: true, attempts: 0 }),
+      },
       image: 'hermes-evals/trial:v0.22.4-4d04303',
       slots: ['trial-0', 'trial-1', 'trial-2', 'trial-3'],
     } as unknown as SandboxService;

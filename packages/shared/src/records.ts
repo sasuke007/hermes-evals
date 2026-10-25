@@ -16,7 +16,13 @@ import {
   VERDICT_CAUSES,
   VERDICTS,
 } from './status.js';
-import { MCP_TRANSPORTS, PLATFORM_EVENT_SUBTYPES, SCORER_TYPES } from './vocab.js';
+import {
+  MCP_TRANSPORTS,
+  NETWORK_DECISIONS,
+  NETWORK_EVENT_KINDS,
+  PLATFORM_EVENT_SUBTYPES,
+  SCORER_TYPES,
+} from './vocab.js';
 
 const isoTime = z.iso.datetime({ offset: true });
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
@@ -272,6 +278,34 @@ export type Tokens = z.infer<typeof TokensSchema>;
  * Hermes is spawned. Secret values never appear: env vars are listed by name
  * and config_yaml has MCP env and header values replaced by `<from env NAME>`.
  */
+/**
+ * The trial container as the worker created it (plan 8.2): its name, image,
+ * slot network, user, limits, mounts, disk cap and every variable it got, by
+ * name. Kept beside the launch record so the inspector shows the container
+ * this attempt really ran in, not today's defaults.
+ */
+export const LaunchContainerRecordSchema = z.object({
+  name: z.string(),
+  image: z.string(),
+  network: z.string(),
+  user: z.string(),
+  read_only_root: z.literal(true),
+  limits: z.object({
+    memory_mib: z.number().int(),
+    cpus: z.number(),
+    pids: z.number().int(),
+    tmp_mib: z.number().int(),
+  }),
+  mounts: z.array(z.object({ volume: z.string(), subpath: z.string(), target: z.string() })),
+  disk_cap: z.object({ bytes: z.number().int(), files: z.number().int() }),
+  stop_grace_seconds: z.number().int(),
+  /** Unix seconds after which recovery stops the container even without its worker. */
+  deadline_unix: z.number().int(),
+  /** Every variable the container gets, by name; values never. */
+  env_names: z.array(z.string()),
+});
+export type LaunchContainerRecord = z.infer<typeof LaunchContainerRecordSchema>;
+
 export const LaunchRecordSchema = z.object({
   argv: z.array(z.string()),
   cwd: z.string(),
@@ -314,6 +348,14 @@ export const LaunchRecordSchema = z.object({
     deadline_seconds: z.number().int(),
   }),
   hermes: z.object({ version: z.string(), revision: z.string() }),
+  /**
+   * The slot network the trial ran on, and the container as created. Read
+   * leniently: a record without them, or with a block an earlier runner
+   * wrote differently, still parses, and the inspector falls back per field
+   * to the trial defaults.
+   */
+  network: z.string().optional().catch(undefined),
+  container: LaunchContainerRecordSchema.optional().catch(undefined),
 });
 export type LaunchRecord = z.infer<typeof LaunchRecordSchema>;
 
@@ -344,6 +386,55 @@ export const ExtractedAnswerSchema = z.discriminatedUnion('status', [
 export type ExtractedAnswer = z.infer<typeof ExtractedAnswerSchema>;
 
 /**
+ * One entry of an attempt's egress connection log, stored as a `platform`
+ * event with subtype `network` (plan 8.3, UI_FLOWS 19 #6): every connection
+ * the trial attempted, allowed or refused, and every model and MCP gateway
+ * call. Loose, so fields egress adds later are kept. Absent fields were not
+ * known for that kind (a model call has no port; a refused CONNECT has no
+ * status). Values are never secret: egress logs hosts and outcomes, not
+ * headers or bodies.
+ */
+export const NetworkEventPayloadSchema = z.looseObject({
+  type: z.literal('platform'),
+  subtype: z.literal('network'),
+  kind: z.enum(NETWORK_EVENT_KINDS),
+  /** Target host as the trial named it; the MCP server's host for `mcp`. */
+  host: z.string().optional(),
+  port: z.number().int().min(0).max(65_535).optional(),
+  decision: z.enum(NETWORK_DECISIONS),
+  /** Why egress refused it, or a note on an allowed call, e.g. `private address`. */
+  reason: z.string().optional(),
+  /** HTTP status egress or the upstream answered, for `http`, `model` and `mcp`. */
+  status: z.number().int().optional(),
+  /** How long the connection or call took. */
+  ms: count.optional(),
+  /** Model the call named, for `model`. */
+  model: z.string().optional(),
+  /** MCP server name (the `/mcp/<name>` route), for `mcp`. */
+  server: z.string().optional(),
+  /**
+   * True for Hermes's own baseline traffic rather than an agent action, such
+   * as the credits-seed pricing fetch every `nous` run makes (plan 8.2). The
+   * inspector labels these rows as Hermes background calls.
+   */
+  background: z.boolean(),
+});
+export type NetworkEventPayload = z.infer<typeof NetworkEventPayloadSchema>;
+
+/** Platform subtypes whose payload has no fields of its own beyond what the worker adds. */
+const PLAIN_PLATFORM_SUBTYPES = PLATFORM_EVENT_SUBTYPES.filter(
+  (subtype): subtype is Exclude<(typeof PLATFORM_EVENT_SUBTYPES)[number], 'network'> =>
+    subtype !== 'network',
+);
+
+/** A `platform` event: a network log entry, or one of the worker's other subtypes. */
+export const PlatformEventPayloadSchema = z.discriminatedUnion('subtype', [
+  NetworkEventPayloadSchema,
+  z.looseObject({ type: z.literal('platform'), subtype: z.enum(PLAIN_PLATFORM_SUBTYPES) }),
+]);
+export type PlatformEventPayload = z.infer<typeof PlatformEventPayloadSchema>;
+
+/**
  * Payload of one run event. Hermes events keep every field they arrive with;
  * platform events carry a subtype. A line that matches neither is stored as
  * a platform event with subtype `noise` (not JSON) or `unmapped` (unknown type).
@@ -354,7 +445,7 @@ export const RunEventPayloadSchema = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('tool_use'), name: z.string() }),
   z.looseObject({ type: z.literal('tool_result'), name: z.string() }),
   z.looseObject({ type: z.literal('result') }),
-  z.looseObject({ type: z.literal('platform'), subtype: z.enum(PLATFORM_EVENT_SUBTYPES) }),
+  PlatformEventPayloadSchema,
 ]);
 export type RunEventPayload = z.infer<typeof RunEventPayloadSchema>;
 

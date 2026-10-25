@@ -140,6 +140,8 @@ describe('migrations', () => {
       '0001_integrity_triggers',
       '0002_phase1_definitions',
       '0003_phase1_worker_slots',
+      '0004_phase2_execution',
+      '0005_phase2_review',
     ]);
     const tables = await t.pg.query<{ table_name: string }>(
       "select table_name from information_schema.tables where table_schema = 'public' order by 1",

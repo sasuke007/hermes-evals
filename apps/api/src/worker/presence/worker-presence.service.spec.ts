@@ -19,11 +19,16 @@ import { WorkerSandboxSchema } from '../../database/schema/worker-sandbox.js';
 import type { AppDb } from '../../database/types.js';
 import { findLiveWorker } from '../../queue/live-worker.js';
 import { SandboxService, type SandboxState } from '../../sandbox/sandbox.service.js';
+import type { EgressHealth } from '../../sandbox/egress-client.js';
 import type { SelfTestCheck } from '../../sandbox/self-test.js';
 import { listToolsets } from '../../sandbox/toolsets.js';
 import { SANDBOX_UNAVAILABLE_ERROR } from './presence-report.js';
 import { inspectTrialImage } from './trial-image.js';
-import { HEARTBEAT_INTERVAL_MS, WorkerPresenceService } from './worker-presence.service.js';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  IMAGE_REVISION_CHECK,
+  WorkerPresenceService,
+} from './worker-presence.service.js';
 
 vi.mock('../../sandbox/toolsets.js', () => ({ listToolsets: vi.fn() }));
 vi.mock('./trial-image.js', () => ({ inspectTrialImage: vi.fn() }));
@@ -44,6 +49,7 @@ vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let t: TestDatabase;
 let settings: Record<string, unknown>;
 let egressNames: () => Promise<string[]>;
+let egressHealth: () => Promise<EgressHealth | null>;
 let sandboxState: SandboxState;
 
 const config = { get: (key: string) => settings[key] } as unknown as ConfigService<Env, true>;
@@ -58,7 +64,7 @@ const logger = () => ({
 const sandbox = () =>
   ({
     status: () => ({ state: sandboxState, checks: sandboxState === 'unavailable' ? [] : CHECKS }),
-    egress: { envNames: () => egressNames() },
+    egress: { envNames: () => egressNames(), healthReport: () => egressHealth() },
     engine: {},
     trialsDir: '/trials',
     image: IMAGE,
@@ -88,6 +94,7 @@ beforeEach(async () => {
     DOCKER_SOCKET: '/run/guard/docker.sock',
   };
   egressNames = async () => ['VENDOR_API_TOKEN'];
+  egressHealth = async () => ({ ok: true, attempts: 0 });
   sandboxState = 'isolated';
   vi.mocked(listToolsets).mockReset().mockResolvedValue(['web', 'terminal', 'file']);
   vi.mocked(inspectTrialImage)
@@ -233,7 +240,44 @@ describe('the heartbeat', () => {
     expect((await rows())[0]!.egressEnvNames).toEqual(['OPENROUTER_API_KEY', 'VENDOR_API_TOKEN']);
   });
 
-  it('reports no egress names while egress is down, and logs that once', async () => {
+  it("records egress's host forward and whether it answers, and clears it when gone", async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const checkedAt = '2026-10-24T12:00:00.000Z';
+    egressHealth = async () => ({
+      ok: true,
+      attempts: 0,
+      hostProxy: { target: 'host.docker.internal:8645', reachable: true, checkedAt },
+    });
+    const service = presence();
+    await service.start();
+    expect((await rows())[0]!.hostProxy).toEqual({
+      target: 'host.docker.internal:8645',
+      reachable: true,
+      checked_at: checkedAt,
+    });
+
+    egressHealth = async () => ({
+      ok: true,
+      attempts: 0,
+      hostProxy: { target: 'host.docker.internal:8645', reachable: false, checkedAt },
+    });
+    await beatUntil(async () => expect((await rows())[0]!.hostProxy?.reachable).toBe(false));
+
+    // Egress unreachable (null) reports no forward, as does an egress without one.
+    egressHealth = async () => null;
+    await beatUntil(async () => expect((await rows())[0]!.hostProxy).toBeNull());
+    await service.stop();
+  });
+
+  it('registers even when reading the host forward throws', async () => {
+    egressHealth = () => Promise.reject(new Error('egress GET /health exploded'));
+    const service = presence();
+    await service.start();
+    expect(await rows()).toEqual([expect.objectContaining({ hostProxy: null })]);
+    await service.stop();
+  });
+
+  it('keeps the last egress names while egress is down, and logs that once', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const log = logger();
     const service = presence(t.db, log);
@@ -244,10 +288,51 @@ describe('the heartbeat', () => {
       await t.db.update(workers).set({ lastHeartbeatAt: sql`now() - interval '1 hour'` });
       await beatUntil(async () => expect(await findLiveWorker(t.db)).not.toBeNull());
     }
-    expect((await rows())[0]!.egressEnvNames).toEqual([]);
+    // A 3 s timeout must not read as "the key is missing" to the provider checks.
+    expect((await rows())[0]!.egressEnvNames).toEqual(['VENDOR_API_TOKEN']);
     const egressWarnings = log.warn.mock.calls.filter(([, msg]) => /egress env names/.test(msg));
     expect(egressWarnings).toHaveLength(1);
+    // Egress answers again, with a key removed: the row follows.
+    egressNames = async () => [];
+    await beatUntil(async () => expect((await rows())[0]!.egressEnvNames).toEqual([]));
     await service.stop();
+  });
+
+  it('reports none before egress ever answered', async () => {
+    egressNames = () => Promise.reject(new Error('egress is not up yet'));
+    const service = presence();
+    await service.start();
+    expect((await rows())[0]!.egressEnvNames).toEqual([]);
+    await service.stop();
+  });
+});
+
+describe('the trial image revision', () => {
+  it('reports the sandbox failed, and the worker as not to execute, when the image is another Hermes', async () => {
+    vi.mocked(inspectTrialImage).mockResolvedValue({ id: IMAGE_ID, revision: 'f'.repeat(40) });
+    const log = logger();
+    const service = presence(t.db, log);
+    await service.start();
+    expect(service.imageMatchesBuild).toBe(false);
+    const report = WorkerSandboxSchema.parse((await rows())[0]!.sandbox);
+    expect(report.state).toBe('failed');
+    expect(report.revision).toBe('f'.repeat(40));
+    expect(report.checks.at(-1)).toMatchObject({ name: IMAGE_REVISION_CHECK, passed: false });
+    expect(report.checks.at(-1)!.detail).toMatch(/fffffff.*4d04303/);
+    await service.stop();
+  });
+
+  it('runs on an image of its own revision, or one without the label', async () => {
+    const service = presence();
+    await service.start();
+    expect(service.imageMatchesBuild).toBe(true);
+    await service.stop();
+    vi.mocked(inspectTrialImage).mockResolvedValue({ id: IMAGE_ID, revision: null });
+    const unlabelled = presence();
+    await unlabelled.start();
+    expect(unlabelled.imageMatchesBuild).toBe(true);
+    expect(WorkerSandboxSchema.parse((await rows()).at(-1)!.sandbox).state).toBe('isolated');
+    await unlabelled.stop();
   });
 });
 

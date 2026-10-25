@@ -9,9 +9,18 @@ import { checkCreateBody } from '@hermes-evals/docker-guard/policy';
 import type { PinoLogger } from 'nestjs-pino';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
-import { INVOICE_DB } from '../../resources/mcp/mcp-testing.support-spec.js';
+import { INVOICE_DB, VENDOR_API } from '../../resources/mcp/mcp-testing.support-spec.js';
+import type { EgressRegistration } from '../../sandbox/egress-client.js';
 import { EngineClient } from '../../sandbox/engine-client.js';
-import { mcpTestConfig, runStdioMcpTest, type McpTestSandboxParts } from './mcp-test-container.js';
+import {
+  describeGatewayCall,
+  mcpTestConfig,
+  runHttpMcpTest,
+  runStdioMcpTest,
+  type McpGatewayLogEntry,
+  type McpHttpTestParts,
+  type McpTestSandboxParts,
+} from './mcp-test-container.js';
 import { handleTestMcpServerJob, type McpTestDeps } from './test-mcp-server.js';
 
 const IMAGE = 'hermes-evals/trial:v0.22.4-4d04303';
@@ -37,6 +46,19 @@ describe('mcpTestConfig', () => {
       plugins: { auto_update_check_hours: 0 },
       security: { allow_lazy_installs: false },
     });
+  });
+
+  it('points an http server at the gateway with the token as a reference, and no header value', () => {
+    const config = mcpTestConfig(VENDOR_API);
+    expect(config.mcp_servers).toEqual({
+      'vendor-api': {
+        url: 'http://egress:8080/mcp/vendor-api',
+        headers: { Authorization: 'Bearer ${HERMES_EVALS_ATTEMPT_TOKEN}' },
+        timeout: 60,
+      },
+    });
+    expect(JSON.stringify(config)).not.toContain('VENDOR_API_TOKEN');
+    expect(JSON.stringify(config)).not.toContain('vendor-api.example.com');
   });
 });
 
@@ -196,7 +218,7 @@ describe('runStdioMcpTest', () => {
     expect(await readdir(trialsDir)).toEqual([]);
   });
 
-  it('refuses an http definition', async () => {
+  it('refuses an http definition (runHttpMcpTest runs those)', async () => {
     const { engine } = fakeEngine(trialsDir, '', 0, '');
     await expect(
       runStdioMcpTest(parts(engine), {
@@ -211,6 +233,231 @@ describe('runStdioMcpTest', () => {
         timeoutMs: 1000,
       }),
     ).rejects.toThrow(/stdio/);
+  });
+});
+
+describe('runHttpMcpTest', () => {
+  let trialsDir: string;
+  const SLOT = 'hermes-evals-trial-2';
+
+  beforeEach(async () => {
+    trialsDir = await mkdtemp(join(tmpdir(), 'hermes-evals-mcp-http-'));
+  });
+
+  afterEach(async () => {
+    await rm(trialsDir, { recursive: true, force: true });
+  });
+
+  const gatewayEntries: McpGatewayLogEntry[] = [
+    {
+      at: 't',
+      kind: 'mcp',
+      server: 'vendor-api',
+      method: 'HEAD',
+      decision: 'allowed',
+      status: 405,
+    },
+    {
+      at: 't',
+      kind: 'mcp',
+      server: 'vendor-api',
+      method: 'POST',
+      decision: 'allowed',
+      status: 200,
+    },
+    {
+      at: 't',
+      kind: 'mcp',
+      server: 'vendor-api',
+      method: 'GET',
+      decision: 'denied',
+      status: 307,
+      reason: 'redirect refused',
+    },
+  ];
+
+  /** Egress and a slot source that write into the engine's call list, so order shows. */
+  function httpParts(
+    engine: EngineClient,
+    calls: string[],
+    options: { refuse?: boolean } = {},
+  ): McpHttpTestParts & { registered: EgressRegistration[]; released: number } {
+    const state = { registered: [] as EgressRegistration[], released: 0 };
+    return {
+      engine,
+      trialsDir,
+      image: IMAGE,
+      volume: VOLUME,
+      egress: {
+        register: async (attemptId, registration) => {
+          calls.push(`register ${attemptId}`);
+          if (options.refuse) throw new Error('egress refused registration: mcp.0.url');
+          state.registered.push(registration);
+        },
+        remove: async (attemptId) => {
+          calls.push(`unregister ${attemptId}`);
+          return {
+            usage: { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            log: [...gatewayEntries, { at: 't', kind: 'connect', decision: 'denied' }],
+          };
+        },
+      },
+      acquireSlot: async () => {
+        calls.push(`slot ${SLOT}`);
+        return {
+          slot: SLOT,
+          release: () => {
+            calls.push('release');
+            state.released += 1;
+          },
+        };
+      },
+      get registered() {
+        return state.registered;
+      },
+      get released() {
+        return state.released;
+      },
+    };
+  }
+
+  it('runs on a slot network through the gateway, with only the token in the container', async () => {
+    const { engine, seen } = fakeEngine(trialsDir, '', 0, '');
+    const parts = httpParts(engine, seen.calls);
+    const stdoutWithToken = (token: string) => `  ✓ Connected (412ms)\n  echoed ${token}`;
+    // The token reaches the container only through its environment; capture it there.
+    let token = '';
+    const original = engine.createContainer.bind(engine);
+    engine.createContainer = async (name: string, body: unknown) => {
+      const env = (body as { Env: string[] }).Env;
+      token = env.find((e) => e.startsWith('HERMES_EVALS_ATTEMPT_TOKEN='))!.split('=')[1]!;
+      return original(name, body);
+    };
+    engine.logs = async () =>
+      Readable.from([
+        frame(stdoutWithToken(token)),
+        frame(`stderr ${token}\n`, 2),
+      ]) as unknown as IncomingMessage;
+
+    const run = await runHttpMcpTest(parts, { definition: VENDOR_API, timeoutMs: 60_000 });
+
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    const body = JSON.parse(JSON.stringify(seen.body)) as {
+      Cmd: string[];
+      Env: string[];
+      HostConfig: { NetworkMode: string };
+      NetworkingConfig: { EndpointsConfig: Record<string, unknown> };
+    };
+    expect(body.Cmd).toEqual(['mcp', 'test', 'vendor-api']);
+    expect(body.HostConfig.NetworkMode).toBe(SLOT);
+    expect(Object.keys(body.NetworkingConfig.EndpointsConfig)).toEqual([SLOT]);
+    // No proxy, no header value, nothing but the platform's own variables.
+    expect(body.Env.map((e) => e.split('=')[0]).sort()).toEqual([
+      'HERMES_EVALS_ATTEMPT_TOKEN',
+      'HERMES_HOME',
+      'HOME',
+      'NO_COLOR',
+      'TMPDIR',
+      'XDG_RUNTIME_DIR',
+    ]);
+    expect(seen.config).toEqual(mcpTestConfig(VENDOR_API));
+    expect(JSON.stringify(seen.config)).not.toContain(token);
+    const verdict = checkCreateBody(body, {
+      trialImage: IMAGE,
+      trialVolume: VOLUME,
+      trialNetworks: ['hermes-evals-trial-0', SLOT],
+    });
+    expect(verdict.ok ? 'accepted' : verdict.reasons).toBe('accepted');
+
+    // One route, the definition's exact URL and header names; no model, no CONNECT host.
+    expect(parts.registered).toEqual([
+      {
+        token,
+        mode: 'allowlist',
+        allowHosts: [],
+        provider: null,
+        expiresAt: expect.any(Number),
+        mcp: [
+          {
+            name: 'vendor-api',
+            url: 'https://vendor-api.example.com/mcp',
+            headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }],
+          },
+        ],
+      },
+    ]);
+    // Registered before the container, removed after it, the slot freed last.
+    expect(seen.calls).toEqual([
+      `slot ${SLOT}`,
+      expect.stringMatching(/^register [0-9A-Z]{26}$/),
+      expect.stringMatching(/^create hermes-evals-probe-[0-9A-Z]{26}$/),
+      'start',
+      'remove',
+      expect.stringMatching(/^unregister [0-9A-Z]{26}$/),
+      'release',
+    ]);
+    expect(await readdir(trialsDir)).toEqual([]);
+
+    // The token is replaced like a value; the gateway's calls come back as lines.
+    expect(run.stdout).toBe(
+      '  ✓ Connected (412ms)\n  echoed <from env HERMES_EVALS_ATTEMPT_TOKEN>',
+    );
+    expect(run.stderr).toBe('stderr <from env HERMES_EVALS_ATTEMPT_TOKEN>\n');
+    expect(run.gatewayLog).toEqual([
+      'egress: HEAD vendor-api answered 405',
+      'egress: POST vendor-api answered 200',
+      'egress: GET vendor-api refused 307 · redirect refused',
+    ]);
+  });
+
+  it('removes the registration, frees the slot and the directory when the container fails', async () => {
+    const { engine, seen } = fakeEngine(trialsDir, '', 0, '');
+    engine.createContainer = async () => {
+      seen.calls.push('create');
+      throw new Error('docker-guard refused the create');
+    };
+    const parts = httpParts(engine, seen.calls);
+    await expect(
+      runHttpMcpTest(parts, { definition: VENDOR_API, timeoutMs: 60_000 }),
+    ).rejects.toThrow(/docker-guard refused/);
+    expect(seen.calls.at(-2)).toMatch(/^unregister /);
+    expect(parts.released).toBe(1);
+    expect(await readdir(trialsDir)).toEqual([]);
+  });
+
+  it('starts no container when egress refuses the registration', async () => {
+    const { engine, seen } = fakeEngine(trialsDir, '', 0, '');
+    const parts = httpParts(engine, seen.calls, { refuse: true });
+    await expect(
+      runHttpMcpTest(parts, { definition: VENDOR_API, timeoutMs: 60_000 }),
+    ).rejects.toThrow(/egress refused registration/);
+    expect(seen.calls.some((c) => c.startsWith('create'))).toBe(false);
+    expect(parts.released).toBe(1);
+    expect(await readdir(trialsDir)).toEqual([]);
+  });
+
+  it('refuses a stdio definition', async () => {
+    const { engine, seen } = fakeEngine(trialsDir, '', 0, '');
+    await expect(
+      runHttpMcpTest(httpParts(engine, seen.calls), { definition: INVOICE_DB, timeoutMs: 1000 }),
+    ).rejects.toThrow(/http/);
+  });
+
+  it('describes each gateway call by method, server, status and reason only', () => {
+    expect(describeGatewayCall(gatewayEntries[1]!)).toBe('egress: POST vendor-api answered 200');
+    expect(
+      describeGatewayCall({
+        at: 't',
+        kind: 'mcp',
+        server: 'vendor-api',
+        method: 'POST',
+        decision: 'denied',
+        status: 503,
+        reason: "VENDOR_API_TOKEN is not set in egress's environment",
+      }),
+    ).toBe(
+      "egress: POST vendor-api refused 503 · VENDOR_API_TOKEN is not set in egress's environment",
+    );
   });
 });
 
@@ -251,7 +498,11 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('invoice-db in the trial i
       db: t.db,
       env: values,
       // The guard enforces the container's shape; this test does not rerun the self-test.
-      sandbox: { isolated: () => true, runStdioTest: (input) => runStdioMcpTest(sandbox, input) },
+      sandbox: {
+        isolated: () => true,
+        runStdioTest: (input) => runStdioMcpTest(sandbox, input),
+        runHttpTest: () => Promise.reject(new Error('stdio only: the Live stage proves http')),
+      },
     };
   };
   const job = (definition: typeof INVOICE_DB) => ({

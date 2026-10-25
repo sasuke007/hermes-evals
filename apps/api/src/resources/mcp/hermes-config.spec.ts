@@ -33,7 +33,7 @@ describe('hermesMcpEntry', () => {
     });
   });
 
-  it('points an http server at the egress gateway, with no headers', () => {
+  it('points an http server at the egress gateway, with only the attempt-token reference', () => {
     const entry = hermesMcpEntry({
       ...stdio,
       name: 'vendor-api',
@@ -45,7 +45,11 @@ describe('hermesMcpEntry', () => {
       headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }],
       include: [],
     });
-    expect(entry).toEqual({ url: 'http://egress:8080/mcp/vendor-api', timeout: 30 });
+    expect(entry).toEqual({
+      url: 'http://egress:8080/mcp/vendor-api',
+      headers: { Authorization: 'Bearer ${HERMES_EVALS_ATTEMPT_TOKEN}' },
+      timeout: 30,
+    });
     expect(JSON.stringify(entry)).not.toContain('VENDOR_API_TOKEN');
   });
 });

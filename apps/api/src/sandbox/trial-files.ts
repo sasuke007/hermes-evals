@@ -15,13 +15,20 @@
  * - Names are bytes. A name that is not valid UTF-8 is listed but not read,
  *   because no string names it exactly.
  *
+ * - Fail closed on what cannot be measured. The trial and the worker share a
+ *   uid, so the agent can chmod a directory it made (or /workspace itself)
+ *   so the worker cannot list it while the agent still writes into it. The
+ *   disk watchdog treats such a directory as over the cap.
+ *
  * Content is read only after the container is removed, so nothing changes
  * under the walk. The disk watchdog walks while the trial runs; it reads
- * metadata only.
+ * metadata only. restoreOwnerAccess gives the worker back the permissions
+ * the agent took away, also only once the container is gone.
  */
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, opendir, readlink, realpath } from 'node:fs/promises';
+import { chmod, lstat, open, opendir, readlink, realpath } from 'node:fs/promises';
+import { basename } from 'node:path';
 
 export interface WalkLimits {
   /** Directories deeper than this are listed but not entered. */
@@ -34,6 +41,15 @@ export const COLLECT_LIMITS: WalkLimits = { maxDepth: 32, maxEntries: 5000 };
 
 /** Files larger than this are listed without content. */
 export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Bytes one attempt's collection may store, counted by apparent size (what
+ * the blob store writes). The disk cap counts allocated blocks, so sparse
+ * files pass it cheaply: 5,000 files truncated to 25 MiB take almost no
+ * disk in the trial and 122 GiB once stored. Past this budget files are
+ * listed without content (`over_budget`). Well under the 2 GiB disk cap.
+ */
+export const MAX_COLLECTED_BYTES = 512 * 1024 * 1024;
 
 export type SpecialType = 'fifo' | 'socket' | 'device' | 'unknown';
 
@@ -73,6 +89,9 @@ function specialType(stat: {
 
 const errorCode = (err: unknown): string => (err as NodeJS.ErrnoException).code ?? 'error';
 
+/** The reason of an entry whose name no string names exactly; lstat-ed and measured all the same. */
+const NOT_UTF8 = 'name is not valid UTF-8';
+
 /** Lists a trial directory with lstat only. Paths in the result are relative to `root`. */
 export async function walkTrialTree(
   root: string,
@@ -91,7 +110,8 @@ export async function walkTrialTree(
     try {
       handle = await opendir(dir.abs, { encoding: 'buffer' as BufferEncoding });
     } catch (err) {
-      if (dir.rel) entries.push({ path: dir.rel, kind: 'unreadable', reason: errorCode(err) });
+      // The root too: a workspace the agent made unlistable must not read as empty.
+      entries.push({ path: dir.rel || '.', kind: 'unreadable', reason: errorCode(err) });
       continue;
     }
     try {
@@ -114,7 +134,7 @@ export async function walkTrialTree(
         }
         tree.diskBytes += stat.blocks * 512;
         if (!name.exact) {
-          entries.push({ path: rel, kind: 'unreadable', reason: 'name is not valid UTF-8' });
+          entries.push({ path: rel, kind: 'unreadable', reason: NOT_UTF8 });
         } else if (stat.isSymbolicLink()) {
           let target = '';
           try {
@@ -221,6 +241,108 @@ export const DEFAULT_DISK_LIMIT: Omit<DiskLimit, 'roots'> = {
   intervalMs: 1000,
 };
 
+/** How deep the disk watchdog walks; a directory below this is not measured, so it fails closed. */
+export const MEASURE_MAX_DEPTH = 256;
+
+/**
+ * The first part of a tree the watchdog cannot measure, or null: a
+ * directory or entry the worker may not read (EACCES, EPERM, ELOOP,
+ * ENOTDIR, ...), or a directory nested too deep to enter. ENOENT is not
+ * one: a directory that vanishes mid-walk is the trial deleting it. A name
+ * that is not UTF-8 was still lstat-ed and counted.
+ */
+function unmeasured(root: string, tree: TrialTree): string | null {
+  // Named as the trial sees it from its mount, e.g. `workspace/hidden`.
+  const shown = (path: string) => (path === '.' ? basename(root) : `${basename(root)}/${path}`);
+  for (const entry of tree.entries) {
+    if (entry.kind === 'unreadable' && entry.reason !== 'ENOENT' && entry.reason !== NOT_UTF8) {
+      return `a directory the worker cannot read: ${shown(entry.path)} (${entry.reason})`;
+    }
+    if (entry.kind === 'dir' && !entry.entered) {
+      return `a directory nested deeper than ${MEASURE_MAX_DEPTH} levels: ${shown(entry.path)}`;
+    }
+  }
+  return null;
+}
+
+/** How far restoreOwnerAccess walks: twice the disk cap's files, and the watchdog's depth. */
+export const RESTORE_LIMITS: WalkLimits = { maxDepth: MEASURE_MAX_DEPTH, maxEntries: 100_000 };
+
+/**
+ * Gives the owner (the worker, which shares the trial's uid) read, write and
+ * search on every directory under `root`, `root` included, so the tree can
+ * be collected and deleted: an agent can chmod 0300 or 0555 a directory it
+ * owns, and rm then fails with EACCES. Files keep their modes; deleting a
+ * file needs only its directory.
+ *
+ * Depth first with lstat, never following a link. chmod by path does follow
+ * a final link, so this is safe only once no process of the trial can swap a
+ * directory for a link between the lstat and the chmod: call it after the
+ * container is removed (or confirmed gone), never while it runs. Bounded like
+ * the other walks. Resolves how many directories it changed; entries it
+ * cannot reach are left for rm to report.
+ */
+export async function restoreOwnerAccess(
+  root: string,
+  limits: WalkLimits = RESTORE_LIMITS,
+): Promise<number> {
+  const stack: { abs: Buffer; depth: number }[] = [{ abs: Buffer.from(root), depth: 0 }];
+  let seen = 0;
+  let changed = 0;
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    let stat;
+    try {
+      stat = await lstat(dir.abs);
+    } catch {
+      continue;
+    }
+    // A link, file or device where a directory was listed: never followed or changed.
+    if (!stat.isDirectory()) continue;
+    if ((stat.mode & 0o700) !== 0o700) {
+      try {
+        await chmod(dir.abs, (stat.mode | 0o700) & 0o7777);
+        changed += 1;
+      } catch {
+        continue;
+      }
+    }
+    if (dir.depth >= limits.maxDepth) continue;
+    let handle;
+    try {
+      handle = await opendir(dir.abs, { encoding: 'buffer' as BufferEncoding });
+    } catch {
+      continue;
+    }
+    try {
+      for await (const dirent of handle) {
+        seen += 1;
+        if (seen > limits.maxEntries) return changed;
+        // Only directories are entered; an unknown type is lstat-ed when it is popped.
+        const known =
+          dirent.isFile() ||
+          dirent.isSymbolicLink() ||
+          dirent.isFIFO() ||
+          dirent.isSocket() ||
+          dirent.isCharacterDevice() ||
+          dirent.isBlockDevice();
+        if (dirent.isDirectory() || !known) {
+          const raw = dirent.name as unknown as Buffer;
+          stack.push({
+            abs: Buffer.concat([dir.abs, Buffer.from('/'), raw]),
+            depth: dir.depth + 1,
+          });
+        }
+      }
+    } catch {
+      // Changed while read: what was listed is restored, the rest is left to rm.
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
+  return changed;
+}
+
 /** Measures the directories a trial writes to; `exceeded` explains which cap was passed. */
 export async function measureTrialDisk(
   limit: DiskLimit,
@@ -229,7 +351,7 @@ export async function measureTrialDisk(
   let entries = 0;
   for (const root of limit.roots) {
     const tree = await walkTrialTree(root, {
-      maxDepth: 256,
+      maxDepth: MEASURE_MAX_DEPTH,
       maxEntries: limit.maxEntries - entries + 1,
     });
     diskBytes += tree.diskBytes;
@@ -237,6 +359,8 @@ export async function measureTrialDisk(
     if (tree.truncated || entries > limit.maxEntries) {
       return { diskBytes, entries, exceeded: `more than ${limit.maxEntries} files` };
     }
+    const hidden = unmeasured(root, tree);
+    if (hidden) return { diskBytes, entries, exceeded: hidden };
   }
   if (diskBytes > limit.maxBytes) {
     return { diskBytes, entries, exceeded: `${diskBytes} bytes on disk, limit ${limit.maxBytes}` };

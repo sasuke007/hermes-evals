@@ -14,8 +14,11 @@
  *   under `hermes mcp test` in a throwaway trial container that has the values
  *   in its environment, exactly as a run's container would. Phase 2 trial
  *   setup applies the same refusals (refusedEnvNames).
- * - http: needs the egress MCP gateway (Phase 2). Until then the test fails
- *   saying so, and names the header variables egress reported missing.
+ * - http: header variables egress lacks (the live worker's egress_env_names)
+ *   fail the test at once, by name. Otherwise `hermes mcp test` runs in a
+ *   throwaway trial container on a free slot network and reaches the server
+ *   through the egress MCP gateway, which adds the header values; the values
+ *   never leave egress (mcp-test-container.ts).
  *
  * Values never leave this process: they go into the container's environment
  * only, and every text kept from the test has them replaced by
@@ -40,28 +43,54 @@ import { headerVariableUses } from '../../resources/mcp/mcp-reads.js';
 import type { FinishedMcpTestRecord, McpTestRecord } from '../../resources/mcp/test-record.js';
 import { toMcpTestView } from '../../resources/mcp/views.js';
 import type { SandboxService } from '../../sandbox/sandbox.service.js';
-import { runStdioMcpTest, type StdioTestInput, type StdioTestRun } from './mcp-test-container.js';
+import {
+  freeSlotSource,
+  runHttpMcpTest,
+  runStdioMcpTest,
+  type HttpTestInput,
+  type McpTestRun,
+  type SlotLease,
+  type StdioTestInput,
+} from './mcp-test-container.js';
 import { parseMcpTestOutput } from './mcp-test-output.js';
 import { redactTruncated, redactValues } from './redact.js';
 
-/** The failure an http test reports until the egress MCP gateway exists. */
-export const HTTP_TEST_UNAVAILABLE =
-  'Testing http servers needs the egress MCP gateway, which is built in Phase 2.';
-
 /** What a test needs from the worker's sandbox. */
 export interface McpTestSandbox {
-  /** A test runs the user's server command, so like a run it needs proven isolation. */
+  /**
+   * A test runs the user's server command, or reaches the user's server from
+   * a trial container, so like a run it needs proven isolation.
+   */
   isolated(): boolean;
-  runStdioTest(input: StdioTestInput): Promise<StdioTestRun>;
+  runStdioTest(input: StdioTestInput): Promise<McpTestRun>;
+  runHttpTest(input: HttpTestInput): Promise<McpTestRun>;
 }
 
-/** The worker's SandboxService as an McpTestSandbox. */
-export function mcpTestSandbox(sandbox: SandboxService): McpTestSandbox {
+/**
+ * The worker's SandboxService as an McpTestSandbox. An http test holds a
+ * slot network while its container runs: pass the worker's slot allocator
+ * so tests and runs never share one (E9); without it, the first slot with no
+ * live trial container is used.
+ */
+export function mcpTestSandbox(
+  sandbox: SandboxService,
+  acquireSlot: () => Promise<SlotLease> = freeSlotSource(sandbox.engine, sandbox.slots),
+): McpTestSandbox {
   return {
     isolated: () => sandbox.status().state === 'isolated',
     runStdioTest: (input) => runStdioMcpTest(sandbox, input),
+    runHttpTest: (input) => runHttpMcpTest({ ...partsOf(sandbox), acquireSlot }, input),
   };
 }
+
+/** The fields of SandboxService a test container uses. */
+const partsOf = (sandbox: SandboxService) => ({
+  engine: sandbox.engine,
+  egress: sandbox.egress,
+  trialsDir: sandbox.trialsDir,
+  image: sandbox.image,
+  volume: sandbox.volume,
+});
 
 export interface McpTestDeps {
   db: AppDb;
@@ -218,20 +247,16 @@ export async function testDefinition(
   const refusal = await refusedEnvNames(deps.db, definition);
   if (refusal) return failed(refusal);
 
-  if (definition.transport === 'http') {
-    const worker = await findLiveWorker(deps.db);
-    const egress = new Set(worker?.egressEnvNames ?? []);
-    const missing = unique(definition.headers.map((h) => h.env)).filter(
-      (name) => !egress.has(name),
-    );
-    return failed(HTTP_TEST_UNAVAILABLE, { missing_secret_names: missing });
-  }
-
+  // Names first, by where their values live: egress for http headers, the worker for stdio env.
   const env = deps.env ?? process.env;
-  const missing = definition.envNames.filter((name) => !env[name]);
+  const missing =
+    definition.transport === 'http'
+      ? await missingInEgress(deps.db, definition)
+      : definition.envNames.filter((name) => !env[name]);
   if (missing.length > 0) {
+    const where = definition.transport === 'http' ? 'egress' : 'worker';
     return failed(
-      `${listOf(missing)} ${missing.length === 1 ? 'is' : 'are'} not set in the worker environment.`,
+      `${listOf(missing)} ${missing.length === 1 ? 'is' : 'are'} not set in the ${where} environment.`,
       { missing_secret_names: missing },
     );
   }
@@ -241,14 +266,21 @@ export async function testDefinition(
     );
   }
 
-  const values = Object.fromEntries(definition.envNames.map((name) => [name, env[name]!]));
+  // http servers get no values here: egress adds them, so there is nothing to redact either.
+  const values =
+    definition.transport === 'stdio'
+      ? Object.fromEntries(definition.envNames.map((name) => [name, env[name]!]))
+      : {};
   try {
-    const run = await deps.sandbox.runStdioTest({
+    const container = {
       definition,
-      values,
       timeoutMs: deps.containerTimeoutMs ?? DEFAULT_MCP_TEST_CONTAINER_TIMEOUT_MS,
       signal: job.signal,
-    });
+    };
+    const run =
+      definition.transport === 'http'
+        ? await deps.sandbox.runHttpTest(container)
+        : await deps.sandbox.runStdioTest({ ...container, values });
     const record = interpretRun(run, values, failed, () => ({
       status: 'passed' as const,
       ...base,
@@ -269,6 +301,16 @@ export async function testDefinition(
     logger.error({ mcpServer: definition.name, error: message }, 'MCP server test could not run');
     return failed(`The test could not run: ${message}`);
   }
+}
+
+/**
+ * The header variables of an http definition that egress does not hold, by
+ * the names the live worker last recorded from egress (none recorded: all).
+ */
+async function missingInEgress(db: AppDb, definition: McpServerInput): Promise<string[]> {
+  const worker = await findLiveWorker(db);
+  const egress = new Set(worker?.egressEnvNames ?? []);
+  return unique(definition.headers.map((h) => h.env)).filter((name) => !egress.has(name));
 }
 
 /**
@@ -305,7 +347,7 @@ type Failed = (
 
 /** Reads the container's outcome and Hermes's output into a result. */
 export function interpretRun(
-  run: StdioTestRun,
+  run: McpTestRun,
   values: Readonly<Record<string, string>>,
   failed: Failed,
   passed: () => { status: 'passed'; job_id: string; requested_at: string; finished_at: string },
@@ -313,7 +355,11 @@ export function interpretRun(
   const parsed = parseMcpTestOutput(run.stdout);
   // Redacted before the tail is cut: a value the cut splits would otherwise
   // leave a piece that no longer matches.
-  const stderrTail = tailOf(redactValues(run.serverLog, values), redactValues(run.stderr, values));
+  const stderrTail = tailOf(
+    redactValues(run.serverLog, values),
+    redactValues(run.stderr, values),
+    run.gatewayLog,
+  );
   const startedMs = parsed.connectedMs ?? undefined;
   const after = (seconds: number) => `${seconds.toFixed(1)} s`;
   const ranFor = after(run.durationMs / 1000);
@@ -368,11 +414,21 @@ export function interpretRun(
 /** Hermes stamps each server stderr line with its own time; the tail shows the server's words. */
 const HERMES_STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} /;
 
-/** The last lines of the server's stderr, then Hermes's own, without blank lines. */
-export function tailOf(serverLog: string, hermesStderr: string): string {
+/**
+ * The last lines of the server's stderr, then Hermes's own, then (http) the
+ * MCP gateway's account of each call, without blank lines. The gateway lines
+ * come last because they say most plainly why an http server failed: a 401
+ * from the server, a refused redirect, a variable egress lacks.
+ */
+export function tailOf(
+  serverLog: string,
+  hermesStderr: string,
+  gatewayLog: readonly string[] = [],
+): string {
   const lines = [
     ...serverLog.split(/\r?\n/).map((line) => line.replace(HERMES_STAMP, '')),
     ...hermesStderr.split(/\r?\n/),
+    ...gatewayLog,
   ].filter((line) => line.trim() !== '');
   return lines.slice(-TAIL_LINES).join('\n').slice(-TAIL_CHARS);
 }

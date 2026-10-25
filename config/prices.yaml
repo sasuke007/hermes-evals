@@ -1,0 +1,21 @@
+# Model price table (plan 7.2, PRICES_FILE). An experiment freezes a snapshot
+# of this file when it launches, and each attempt's cost is its tokens times
+# that snapshot (apps/api/src/execution/pricing.ts). A model listed here has a
+# price; any other model is unpriced: its cost shows as "—" and the spend guard
+# counts it as unpriced, never as zero.
+#
+# USD per 1,000,000 tokens. `input_per_1m` prices the uncached prompt tokens;
+# `cache_read_per_1m` and `cache_write_per_1m` are optional, and without them
+# cached tokens are priced at the input rate. `checked_at` is the date the
+# price was last checked against the provider's public price page.
+#
+# Only prices verified from a public page belong here. None of the real
+# models is listed yet: add one with its source and checked_at when it has
+# been checked, for the provider route the experiment uses.
+models:
+  # The scripted mock model (apps/egress/src/mock-model.ts) that every test
+  # and check runs against: it costs nothing.
+  mock/scripted:
+    input_per_1m: 0
+    output_per_1m: 0
+    checked_at: '2026-10-24'

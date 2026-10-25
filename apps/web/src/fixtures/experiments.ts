@@ -30,7 +30,7 @@ import type {
   ExperimentDetail,
   ExperimentFailureView,
   ExperimentListRow,
-  ExperimentPauseReason,
+  PauseReason,
   FeedEntry,
   RunCounts,
   VerdictHistoryEntry,
@@ -183,7 +183,7 @@ export interface ExperimentSeed {
   name: string;
   description: string;
   status: ExperimentStatus;
-  pauseReason: ExperimentPauseReason | null;
+  pauseReason: PauseReason | null;
   pausedAt: string | null;
   statusReason: string | null;
   createdAt: string;

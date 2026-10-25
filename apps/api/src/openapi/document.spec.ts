@@ -1,5 +1,5 @@
 /**
- * /api/docs covers every Phase 1 route with the shared zod contracts, and its
+ * /api/docs covers every route with the shared zod contracts, and its
  * "Try it out" passes RequestedWithGuard. The controllers are scanned with
  * stand-in services: the document needs their metadata, not a database.
  */
@@ -10,18 +10,24 @@ import type { OpenAPIObject } from '@nestjs/swagger';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { refusalOf } from '../common/requested-with.guard.js';
 import { ConfigurationsController } from '../configurations/configurations.controller.js';
+import { ExperimentsCommandsController } from '../experiments/commands/experiments-commands.controller.js';
+import { ExperimentsReadController } from '../experiments/experiments-read.controller.js';
 import { HealthController } from '../health/health.controller.js';
+import { ProvidersController } from '../providers/providers.controller.js';
 import { CountsController } from '../resources/counts/counts.controller.js';
 import { DocumentsController } from '../resources/documents/documents.controller.js';
 import { McpController } from '../resources/mcp/mcp.controller.js';
 import { SecretsController } from '../resources/secrets/secrets.controller.js';
 import { SkillsController } from '../resources/skills/skills.controller.js';
+import { RunsCommandsController } from '../runs/commands/runs-commands.controller.js';
+import { RunsReadController } from '../runs/views/runs-read.controller.js';
 import { SuitesController } from '../suites/suites.controller.js';
+import { SystemEventsController } from '../system/events/system-events.controller.js';
 import { SystemController } from '../system/system.controller.js';
 import { buildApiDocument, swaggerRequestInterceptor } from './document.js';
 import { REQUEST_SCHEMAS, RESPONSE_SCHEMAS } from './schemas.js';
 
-/** Every Phase 1 route, as the document must list it. */
+/** Every route, as the document must list it. Re-score routes come in Phase 3. */
 const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/health'],
   ['get', '/api/suites'],
@@ -61,17 +67,52 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/system/summary'],
   ['get', '/api/system/workers'],
   ['get', '/api/system/sandbox'],
+  ['get', '/api/system/events'],
+  ['get', '/api/providers'],
+  ['post', '/api/providers/nous/login'],
+  ['get', '/api/providers/nous/login'],
+  ['delete', '/api/providers/nous/login'],
+  ['post', '/api/providers/nous/logout'],
+  ['get', '/api/experiments/new-options'],
+  ['get', '/api/experiments/estimate'],
+  ['post', '/api/experiments'],
+  ['get', '/api/experiments'],
+  ['get', '/api/experiments/{id}'],
+  ['get', '/api/experiments/{id}/events'],
+  ['post', '/api/experiments/{id}/pause'],
+  ['post', '/api/experiments/{id}/resume'],
+  ['post', '/api/experiments/{id}/cancel'],
+  ['post', '/api/experiments/{id}/retry-failed'],
+  ['post', '/api/experiments/{id}/duplicate'],
+  ['get', '/api/experiments/{id}/runs'],
+  ['post', '/api/experiments/{id}/runs/retry'],
+  ['get', '/api/runs/{id}'],
+  ['get', '/api/runs/{id}/events'],
+  ['post', '/api/runs/{id}/retry'],
+  ['post', '/api/runs/{id}/cancel'],
+  ['get', '/api/runs/{id}/artifacts/{artifactId}/content'],
+  ['get', '/api/runs/{id}/artifacts/{artifactId}/preview'],
 ];
 
-/** State-changing routes that take no body. */
+/** State-changing routes that take no body (RequestedWithGuard still wants a JSON one, `{}`). */
 const BODILESS = new Set([
   'post /api/resources/mcp-servers/{id}/test',
   'post /api/configurations/{id}/duplicate',
+  'post /api/providers/nous/login',
+  'delete /api/providers/nous/login',
+  'post /api/providers/nous/logout',
+  'post /api/experiments/{id}/pause',
+  'post /api/experiments/{id}/cancel',
+  'post /api/experiments/{id}/retry-failed',
+  'post /api/experiments/{id}/duplicate',
+  'post /api/runs/{id}/retry',
+  'post /api/runs/{id}/cancel',
 ]);
 
 interface Operation {
   requestBody?: { content: Record<string, { schema: unknown }> };
   responses: Record<string, { content?: Record<string, { schema: unknown }> }>;
+  parameters?: { name: string; in: string }[];
 }
 
 let app: INestApplication;
@@ -89,6 +130,12 @@ beforeAll(async () => {
       CountsController,
       ConfigurationsController,
       SystemController,
+      SystemEventsController,
+      ProvidersController,
+      ExperimentsCommandsController,
+      RunsCommandsController,
+      ExperimentsReadController,
+      RunsReadController,
     ],
   })
     .useMocker(() => ({}))
@@ -122,7 +169,7 @@ function refsIn(value: unknown, into: Set<string> = new Set()): Set<string> {
 }
 
 describe('the API document', () => {
-  it('lists every Phase 1 route and nothing undocumented', () => {
+  it('lists every route and nothing undocumented', () => {
     const listed = Object.entries(document.paths).flatMap(([path, item]) =>
       Object.keys(item as object).map((method) => `${method} ${path}`),
     );
@@ -146,7 +193,10 @@ describe('the API document', () => {
       if (method === 'get') continue;
       const op = operation(method, path);
       expect(op.responses['403'], `${method} ${path}`).toBeTruthy();
-      if (BODILESS.has(`${method} ${path}`)) continue;
+      if (BODILESS.has(`${method} ${path}`)) {
+        expect(op.requestBody, `${method} ${path}`).toBeUndefined();
+        continue;
+      }
       const content = op.requestBody?.content ?? {};
       expect(Object.keys(content), `${method} ${path}`).toEqual([
         expect.stringMatching(/^(application\/json|multipart\/form-data)$/),
@@ -174,6 +224,54 @@ describe('the API document', () => {
     });
   });
 
+  it('documents the Phase 2 contracts by name, the streams as text/event-stream', () => {
+    const json = (method: string, path: string, status = '200') =>
+      operation(method, path).responses[status]!.content!['application/json']!.schema;
+    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+    expect(json('get', '/api/experiments')).toEqual({
+      type: 'array',
+      items: ref('ExperimentListRow'),
+    });
+    expect(json('get', '/api/experiments/{id}')).toEqual(ref('ExperimentDetail'));
+    expect(json('get', '/api/experiments/new-options')).toEqual(ref('NewExperimentOptions'));
+    expect(json('get', '/api/experiments/estimate')).toEqual(ref('ExperimentEstimateView'));
+    expect(json('post', '/api/experiments', '201')).toEqual(ref('LaunchExperimentResult'));
+    expect(json('post', '/api/experiments/{id}/duplicate')).toEqual(ref('NewExperimentDraft'));
+    expect(json('get', '/api/experiments/{id}/runs')).toEqual(ref('RunListResult'));
+    expect(json('get', '/api/runs/{id}')).toEqual(ref('RunDetail'));
+    expect(json('get', '/api/runs/{id}/events')).toEqual(ref('RunEventsPage'));
+    expect(json('post', '/api/runs/{id}/retry')).toEqual(ref('RunActionResult'));
+    expect(json('post', '/api/experiments/{id}/runs/retry')).toEqual(ref('BulkRunActionResult'));
+    expect(json('get', '/api/providers')).toEqual({ type: 'array', items: ref('ProviderInfo') });
+    expect(json('post', '/api/providers/nous/login')).toEqual(ref('NousLogin'));
+    for (const [path, name] of [
+      ['/api/experiments/{id}/events', 'ExperimentEvent'],
+      ['/api/system/events', 'SystemEvent'],
+    ] as const) {
+      expect(operation('get', path).responses['200']!.content).toEqual({
+        'text/event-stream': { schema: ref(name) },
+      });
+    }
+    const body = (method: string, path: string) =>
+      operation(method, path).requestBody!.content['application/json']!.schema;
+    expect(body('post', '/api/experiments')).toEqual(ref('LaunchExperiment'));
+    expect(body('post', '/api/experiments/{id}/resume')).toEqual(ref('ResumeExperiment'));
+    expect(body('post', '/api/experiments/{id}/runs/retry')).toEqual(ref('BulkRunAction'));
+    const query = (path: string) =>
+      (operation('get', path).parameters ?? [])
+        .filter((p) => p.in === 'query')
+        .map((p) => p.name)
+        .sort();
+    expect(query('/api/experiments/estimate')).toEqual([
+      'concurrency',
+      'repetitions',
+      'suite',
+      'tasks',
+      'versions',
+    ]);
+    expect(query('/api/runs/{id}/events')).toEqual(['after']);
+  });
+
   it('converts the contracts field by field', () => {
     const schemas = document.components!.schemas! as Record<string, Record<string, unknown>>;
     const input = schemas['McpServerInput']!;
@@ -182,6 +280,13 @@ describe('the API document', () => {
       expect.arrayContaining(['name', 'transport', 'envNames', 'headers', 'timeoutS']),
     );
     expect(schemas['McpTestView']!['oneOf']).toHaveLength(4);
+    const launch = schemas['LaunchExperiment']!;
+    expect(Object.keys(launch['properties'] as object)).toEqual(
+      expect.arrayContaining(['name', 'taskKeys', 'candidateVersionIds', 'expectedConfigHashes']),
+    );
+    expect(JSON.stringify(schemas['ExperimentDetail'])).toContain('perConfiguration');
+    // The four SSE event types of one experiment.
+    expect(schemas['ExperimentEvent']!['oneOf']).toHaveLength(4);
   });
 });
 

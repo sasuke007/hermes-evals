@@ -196,6 +196,44 @@ const RESERVED_HEADERS = new Set([
   'upgrade',
 ]);
 
+/**
+ * What egress's registration schema refuses on an http server's route
+ * (apps/egress/src/registry.ts McpRouteSchema), beyond RESERVED_HEADERS: a
+ * definition that saves must also register, or every attempt that uses it
+ * ends as `setup`. Checked on input only (and by the worker before it
+ * registers an attempt), so a row stored before the rule still reads back.
+ */
+export const MCP_ROUTE_LIMITS = { maxHeaders: 32, maxUrlChars: 2048, maxRoutes: 32 } as const;
+const EGRESS_ONLY_REFUSED_HEADERS: ReadonlySet<string> = new Set(['proxy-authenticate']);
+
+/**
+ * Why egress would refuse an http server's route, or [] when it would not:
+ * a header egress sets or refuses itself, more headers than a route may
+ * carry, or a URL longer than egress accepts. The worker runs it on every
+ * http server of an attempt before registering it.
+ */
+export function mcpRouteProblems(s: {
+  url: string | null;
+  headers: ReadonlyArray<{ header: string }>;
+}): string[] {
+  const problems: string[] = [];
+  const refused = [
+    ...new Set(
+      s.headers
+        .map((h) => h.header.toLowerCase())
+        .filter((h) => RESERVED_HEADERS.has(h) || EGRESS_ONLY_REFUSED_HEADERS.has(h)),
+    ),
+  ];
+  if (refused.length > 0) problems.push(`egress sets ${refused.join(', ')} itself`);
+  if (s.headers.length > MCP_ROUTE_LIMITS.maxHeaders) {
+    problems.push(`at most ${MCP_ROUTE_LIMITS.maxHeaders} headers`);
+  }
+  if (s.url !== null && s.url.length > MCP_ROUTE_LIMITS.maxUrlChars) {
+    problems.push(`the url must be at most ${MCP_ROUTE_LIMITS.maxUrlChars} characters`);
+  }
+  return problems;
+}
+
 /** The fields of an MCP server definition, unchecked. Rows extend this. */
 const McpServerFieldsSchema = z.object({
   /** The `-t` alias Hermes knows the server by. */
@@ -277,6 +315,24 @@ function checkReservedNames(s: McpServerFields, ctx: z.RefinementCtx): void {
   };
   refuse('envNames', s.envNames.filter(isReservedEnvName));
   refuse('headers', [...new Set(s.headers.map((h) => h.env).filter(isReservedEnvName))]);
+  if (s.transport !== 'http') return;
+  // RESERVED_HEADERS is reported by checkMcpServer; these are the rest egress refuses.
+  const issue = (path: string, message: string) =>
+    ctx.addIssue({ code: 'custom', path: [path], message });
+  const egressOnly = [
+    ...new Set(
+      s.headers
+        .map((h) => h.header.toLowerCase())
+        .filter((h) => EGRESS_ONLY_REFUSED_HEADERS.has(h)),
+    ),
+  ];
+  if (egressOnly.length > 0) issue('headers', `egress sets ${egressOnly.join(', ')} itself`);
+  if (s.headers.length > MCP_ROUTE_LIMITS.maxHeaders) {
+    issue('headers', `at most ${MCP_ROUTE_LIMITS.maxHeaders} headers`);
+  }
+  if (s.url !== null && s.url.length > MCP_ROUTE_LIMITS.maxUrlChars) {
+    issue('url', `the url must be at most ${MCP_ROUTE_LIMITS.maxUrlChars} characters`);
+  }
 }
 
 /**

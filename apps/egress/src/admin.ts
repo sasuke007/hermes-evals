@@ -3,16 +3,22 @@
  * before its trial starts, read it, and remove it when the trial ends, and
  * list the names (never the values) of egress's environment for secret
  * presence. No network peer, and so no trial, can reach it.
+ *
+ * GET /health answers `{ ok, attempts }`, plus `hostProxy: { target,
+ * reachable, checkedAt }` when NOUS_HOST_PROXY is set (host-probe.ts).
  */
 import http, { type ServerResponse } from 'node:http';
 import { ZodError } from 'zod';
 import { envNames } from './env-names.js';
 import { guarded, parseTarget } from './handler.js';
+import type { HostProxyProbe } from './host-probe.js';
 import type { Registry } from './registry.js';
 
 export interface AdminOptions {
   /** The environment GET /env-names reports names from; process.env unless a test supplies one. */
   env?: () => NodeJS.ProcessEnv;
+  /** The development host proxy's probe, when NOUS_HOST_PROXY is set. */
+  hostProxy?: Pick<HostProxyProbe, 'status'> | null;
 }
 
 const ATTEMPT_PATH = /^\/attempts\/([0-9A-HJKMNP-TV-Z]{26})$/;
@@ -32,8 +38,14 @@ export function createAdminServer(registry: Registry, options: AdminOptions = {}
     guarded(async (req, res) => {
       const url = parseTarget(req.url, 'http://admin');
       if (!url) return json(res, 400, { message: 'malformed request target' });
-      if (req.method === 'GET' && url.pathname === '/health')
-        return json(res, 200, { ok: true, attempts: registry.size });
+      if (req.method === 'GET' && url.pathname === '/health') {
+        const hostProxy = options.hostProxy ? await options.hostProxy.status() : undefined;
+        return json(res, 200, {
+          ok: true,
+          attempts: registry.size,
+          ...(hostProxy ? { hostProxy } : {}),
+        });
+      }
       // Read on every request: the worker asks at start and on each heartbeat.
       if (req.method === 'GET' && url.pathname === '/env-names')
         return json(res, 200, { names: envNames(env()) });

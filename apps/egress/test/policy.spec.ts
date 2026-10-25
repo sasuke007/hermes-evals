@@ -12,6 +12,7 @@ const registration = (overrides: Partial<Registration> = {}): Registration => ({
   provider: 'mock',
   models: [],
   expiresAt: Date.now() + 60_000,
+  mcp: [],
   ...overrides,
 });
 

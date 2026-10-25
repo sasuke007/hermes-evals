@@ -1,7 +1,8 @@
 /**
  * The test-mcp-server handler with a fake sandbox, on PGlite: what each kind
  * of definition and outcome becomes, what a saved version records, and that
- * no secret value is kept, returned or logged.
+ * no secret value is kept, returned or logged. http servers run through the
+ * egress MCP gateway (runHttpTest); the gateway itself is tested in apps/egress.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,10 +21,9 @@ import {
   useInConfiguration,
   VENDOR_API,
 } from '../../resources/mcp/mcp-testing.support-spec.js';
-import type { StdioTestInput, StdioTestRun } from './mcp-test-container.js';
+import type { HttpTestInput, StdioTestInput, StdioTestRun } from './mcp-test-container.js';
 import {
   handleTestMcpServerJob,
-  HTTP_TEST_UNAVAILABLE,
   registerMcpTestHandler,
   tailOf,
   type McpTestDeps,
@@ -47,20 +47,29 @@ function recordingLogger() {
   return { logger: logger as unknown as PinoLogger, lines };
 }
 
-/** A sandbox whose stdio test returns `run`, recording what it was given. */
+/** A sandbox whose stdio and http tests return `run`, recording what each was given. */
 function fakeSandbox(
-  run: StdioTestRun | Error | ((input: StdioTestInput) => Promise<StdioTestRun>),
+  run: StdioTestRun | Error | ((input: StdioTestInput | HttpTestInput) => Promise<StdioTestRun>),
   isolated = true,
 ) {
   const calls: StdioTestInput[] = [];
+  const httpCalls: HttpTestInput[] = [];
+  const answer = async (input: StdioTestInput | HttpTestInput) => {
+    if (run instanceof Error) throw run;
+    return typeof run === 'function' ? run(input) : run;
+  };
   return {
     calls,
+    httpCalls,
     sandbox: {
       isolated: () => isolated,
       runStdioTest: async (input: StdioTestInput) => {
         calls.push(input);
-        if (run instanceof Error) throw run;
-        return typeof run === 'function' ? run(input) : run;
+        return answer(input);
+      },
+      runHttpTest: async (input: HttpTestInput) => {
+        httpCalls.push(input);
+        return answer(input);
       },
     },
   };
@@ -416,9 +425,33 @@ describe('test-mcp-server handler', () => {
   });
 
   describe('http', () => {
-    it('fails until the egress gateway exists, naming what egress lacks', async () => {
+    const VENDOR_SECRET = 'vendor-header-value-5e4d3c';
+    /** What `hermes mcp test vendor-api` prints when the gateway lists two tools. */
+    const vendorPassed: StdioTestRun = {
+      exitCode: 0,
+      stopReason: 'exited',
+      durationMs: 1800,
+      stdout: [
+        "  Testing 'vendor-api'...",
+        '  Transport: HTTP → http://egress:8080/mcp/vendor-api',
+        '    Authorization: Bearer ${HERMES_EVALS_ATTEMPT_TOKEN}',
+        '  ✓ Connected (412ms)',
+        '  ✓ Tools discovered: 2',
+        `    ${'search_vendors'.padEnd(36)} Find vendors by name.`,
+        `    ${'get_vendor'.padEnd(36)} One vendor by its id.`,
+      ].join('\n'),
+      stderr: '',
+      serverLog: '',
+      gatewayLog: [
+        'egress: HEAD vendor-api answered 405',
+        'egress: POST vendor-api answered 200',
+        'egress: DELETE vendor-api answered 204',
+      ],
+    };
+
+    it('fails at once, by name, when egress lacks a header variable', async () => {
       await insertWorker(t.db, { egress: ['OTHER_TOKEN'] });
-      const { sandbox, calls } = fakeSandbox(passedRun);
+      const { sandbox, calls, httpCalls } = fakeSandbox(vendorPassed);
       const row = await servers.create({
         ...VENDOR_API,
         headers: [
@@ -433,13 +466,108 @@ describe('test-mcp-server handler', () => {
       );
       expect(McpTestViewSchema.parse(view)).toMatchObject({
         status: 'failed',
-        error: HTTP_TEST_UNAVAILABLE,
+        error: 'VENDOR_API_TOKEN is not set in the egress environment.',
         missingSecretNames: ['VENDOR_API_TOKEN'],
+        exitCode: null,
       });
-      expect(calls).toEqual([]);
+      expect([calls, httpCalls]).toEqual([[], []]);
       expect(await lastTestOf(row.versionId)).toMatchObject({
         status: 'failed',
-        error: HTTP_TEST_UNAVAILABLE,
+        missing_secret_names: ['VENDOR_API_TOKEN'],
+      });
+    });
+
+    it('names every header variable when no worker reports egress', async () => {
+      const { sandbox, httpCalls } = fakeSandbox(vendorPassed);
+      const view = await handleTestMcpServerJob(unsaved(VENDOR_API), deps(sandbox), log.logger);
+      expect(view).toMatchObject({
+        error: 'VENDOR_API_TOKEN is not set in the egress environment.',
+        missingSecretNames: ['VENDOR_API_TOKEN'],
+      });
+      expect(httpCalls).toEqual([]);
+    });
+
+    it('runs the test through the gateway and passes with the tools Hermes listed', async () => {
+      await insertWorker(t.db, { egress: ['VENDOR_API_TOKEN'] });
+      const { sandbox, calls, httpCalls } = fakeSandbox(vendorPassed);
+      const row = await servers.create({ ...VENDOR_API, exclude: ['get_*'] });
+      const view = await handleTestMcpServerJob(
+        await saved(row.versionId),
+        // The worker's own environment never matters for an http server.
+        deps(sandbox, { VENDOR_API_TOKEN: VENDOR_SECRET }),
+        log.logger,
+      );
+      expect(McpTestViewSchema.parse(view)).toEqual({
+        status: 'passed',
+        requestedAt: REQUESTED.toISOString(),
+        finishedAt: FINISHED.toISOString(),
+        startedMs: 412,
+        tools: [
+          { name: 'search_vendors', description: 'Find vendors by name.', included: true },
+          { name: 'get_vendor', description: 'One vendor by its id.', included: false },
+        ],
+      });
+      expect(calls).toEqual([]);
+      expect(httpCalls).toHaveLength(1);
+      // The definition and the limits only: no values, egress adds them.
+      expect(Object.keys(httpCalls[0]!).sort()).toEqual(['definition', 'signal', 'timeoutMs']);
+      expect(httpCalls[0]!.definition).toMatchObject({ name: 'vendor-api', exclude: ['get_*'] });
+      expect(await lastTestOf(row.versionId)).toMatchObject({ status: 'passed', started_ms: 412 });
+      expect(JSON.stringify([view, await lastTestOf(row.versionId), log.lines])).not.toContain(
+        VENDOR_SECRET,
+      );
+    });
+
+    it("fails with Hermes's reason and, last in the tail, the gateway's account of each call", async () => {
+      await insertWorker(t.db, { egress: ['VENDOR_API_TOKEN'] });
+      const { sandbox } = fakeSandbox({
+        ...vendorPassed,
+        exitCode: 1,
+        stdout: [
+          "  Testing 'vendor-api'...",
+          '  ✗ Connection failed (0.4s): Server returned an error response',
+        ].join('\n'),
+        stderr: 'WARNING mcp: HTTP 401 from http://egress:8080/mcp/vendor-api\n',
+        gatewayLog: [
+          'egress: HEAD vendor-api answered 401',
+          'egress: POST vendor-api answered 401',
+        ],
+      });
+      const view = await handleTestMcpServerJob(unsaved(VENDOR_API), deps(sandbox), log.logger);
+      expect(McpTestViewSchema.parse(view)).toMatchObject({
+        status: 'failed',
+        error: 'Exited with code 1 after 0.4 s · Server returned an error response',
+        exitCode: 1,
+        missingSecretNames: [],
+      });
+      const tail = (view as Extract<McpTestView, { status: 'failed' }>).stderrTail.split('\n');
+      expect(tail).toEqual([
+        'WARNING mcp: HTTP 401 from http://egress:8080/mcp/vendor-api',
+        'egress: HEAD vendor-api answered 401',
+        'egress: POST vendor-api answered 401',
+      ]);
+    });
+
+    it('starts nothing on a worker that has not proven isolation', async () => {
+      await insertWorker(t.db, { egress: ['VENDOR_API_TOKEN'] });
+      const { sandbox, httpCalls } = fakeSandbox(vendorPassed, false);
+      const view = await handleTestMcpServerJob(unsaved(VENDOR_API), deps(sandbox), log.logger);
+      expect(view).toMatchObject({
+        status: 'failed',
+        error: expect.stringMatching(/not proven trial isolation/),
+      });
+      expect(httpCalls).toEqual([]);
+    });
+
+    it('turns a refused registration or a missing slot into a failed result', async () => {
+      await insertWorker(t.db, { egress: ['VENDOR_API_TOKEN'] });
+      const { sandbox } = fakeSandbox(
+        new Error('every trial slot is in use (hermes-evals-trial-0)'),
+      );
+      const view = await handleTestMcpServerJob(unsaved(VENDOR_API), deps(sandbox), log.logger);
+      expect(view).toMatchObject({
+        status: 'failed',
+        error: 'The test could not run: every trial slot is in use (hermes-evals-trial-0)',
       });
     });
 
@@ -449,7 +577,7 @@ describe('test-mcp-server handler', () => {
         .update(mcpServerVersions)
         .set({ headers: [{ header: 'Authorization', env: 'OPENROUTER_API_KEY' }] })
         .where(eq(mcpServerVersions.id, row.versionId));
-      const { sandbox } = fakeSandbox(passedRun);
+      const { sandbox, httpCalls } = fakeSandbox(passedRun);
       const view = await handleTestMcpServerJob(
         await saved(row.versionId),
         deps(sandbox),
@@ -459,12 +587,7 @@ describe('test-mcp-server handler', () => {
         status: 'failed',
         error: 'OPENROUTER_API_KEY is a platform variable or credential; it never enters a trial.',
       });
-    });
-
-    it('names every header variable when no worker reports egress', async () => {
-      const { sandbox } = fakeSandbox(passedRun);
-      const view = await handleTestMcpServerJob(unsaved(VENDOR_API), deps(sandbox), log.logger);
-      expect(view).toMatchObject({ missingSecretNames: ['VENDOR_API_TOKEN'] });
+      expect(httpCalls).toEqual([]);
     });
   });
 
@@ -522,6 +645,13 @@ function expectNoPiece(text: string, value: string): void {
 }
 
 describe('tailOf', () => {
+  it('puts the gateway lines last, so they survive the cut', () => {
+    const hermes = Array.from({ length: 45 }, (_, i) => `hermes ${i}`).join('\n');
+    const tail = tailOf('', hermes, ['egress: POST vendor-api answered 401']).split('\n');
+    expect(tail).toHaveLength(40);
+    expect(tail.at(-1)).toBe('egress: POST vendor-api answered 401');
+  });
+
   it('keeps the last 40 non-blank lines, the server log first', () => {
     const log = Array.from({ length: 50 }, (_, i) => `2026-10-24 09:44:32,790 line ${i}`).join(
       '\n',

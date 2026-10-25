@@ -3,10 +3,10 @@
  * worker process start inserts its own `workers` row once the isolation
  * self-test has run: concurrency, its trial slot count, the Hermes version
  * and revision, the toolsets the trial image offers, the names (never
- * values) of the variables in its own and in egress's environment, and the
- * self-test report. It then
- * heartbeats the row every 10 s, refreshing both name lists, and sets
- * `stopped_at` on a graceful shutdown.
+ * values) of the variables in its own and in egress's environment, egress's
+ * development host forward (host_proxy, UI_FLOWS 19 #7) and the self-test
+ * report. It then heartbeats the row every 10 s, refreshing the name lists
+ * and the host forward, and sets `stopped_at` on a graceful shutdown.
  *
  * The API reads these rows for the System page, the Secrets page and the
  * configuration form; a row whose heartbeat is older than WORKER_TIMEOUT_MS
@@ -22,8 +22,10 @@ import { PinoLogger } from 'nestjs-pino';
 import type { Env } from '../../config/env.js';
 import { DB } from '../../database/db.provider.js';
 import { workers } from '../../database/schema/index.js';
+import type { WorkerHostProxy } from '../../database/schema/worker-host-proxy.js';
 import type { WorkerSandbox } from '../../database/schema/worker-sandbox.js';
 import type { AppDb } from '../../database/types.js';
+import type { EgressHealth } from '../../sandbox/egress-client.js';
 import { SandboxService } from '../../sandbox/sandbox.service.js';
 import { listToolsets } from '../../sandbox/toolsets.js';
 import { presentEnvNames, workerSandboxReport } from './presence-report.js';
@@ -32,11 +34,17 @@ import { inspectTrialImage } from './trial-image.js';
 /** How often the row's heartbeat is renewed. */
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 
-/** Facts read once at start; the heartbeat only refreshes the name lists. */
+/** Facts read once at start; the heartbeat refreshes only the name lists and the host forward. */
 interface StartFacts {
   toolsets: string[];
   sandbox: WorkerSandbox | null;
+  /** False when the trial image's revision label names another Hermes than this build. */
+  imageMatchesBuild: boolean;
 }
+
+/** The check presence adds to the self-test report when the trial image is another revision. */
+export const IMAGE_REVISION_CHECK =
+  'trial image runs the Hermes revision this worker was built for';
 
 @Injectable()
 export class WorkerPresenceService implements OnModuleDestroy {
@@ -49,6 +57,8 @@ export class WorkerPresenceService implements OnModuleDestroy {
   private stopped = false;
   /** Whether the last beat reached egress; a change is logged once, not on every beat. */
   private egressReachable: boolean | null = null;
+  /** The names egress last reported, kept through a beat that could not reach it. */
+  private lastEgressNames: string[] | null = null;
 
   constructor(
     @Inject(DB) private readonly db: AppDb,
@@ -62,6 +72,17 @@ export class WorkerPresenceService implements OnModuleDestroy {
   /** This process's `workers` row id, once it has been inserted. */
   get id(): string | null {
     return this.workerId;
+  }
+
+  /**
+   * Whether this worker's trial image runs the Hermes revision it was built
+   * for (HERMES_REVISION), as far as start() could tell: the image's
+   * org.hermes-evals.hermes-revision label, when it has one. A worker whose
+   * image says otherwise reports its sandbox `failed` and must not execute:
+   * the revision a run records has to be the one that ran.
+   */
+  get imageMatchesBuild(): boolean {
+    return this.facts?.imageMatchesBuild ?? true;
   }
 
   /**
@@ -116,9 +137,9 @@ export class WorkerPresenceService implements OnModuleDestroy {
     if (this.beating || this.stopped) return this.beating ?? Promise.resolve();
     const beating = (async () => {
       try {
-        const names = await this.names();
-        if (this.workerId) await this.renew(this.workerId, names);
-        else await this.insert(names);
+        const [names, hostProxy] = await Promise.all([this.names(), this.hostProxy()]);
+        if (this.workerId) await this.renew(this.workerId, names, hostProxy);
+        else await this.insert(names, hostProxy);
       } catch (err) {
         this.logger.warn(
           { err },
@@ -133,7 +154,10 @@ export class WorkerPresenceService implements OnModuleDestroy {
     return beating;
   }
 
-  private async insert(names: { env: string[]; egress: string[] }): Promise<void> {
+  private async insert(
+    names: { env: string[]; egress: string[] },
+    hostProxy: WorkerHostProxy | null,
+  ): Promise<void> {
     const facts = this.facts!;
     const [row] = await this.db
       .insert(workers)
@@ -148,6 +172,7 @@ export class WorkerPresenceService implements OnModuleDestroy {
         envNames: names.env,
         egressEnvNames: names.egress,
         sandbox: facts.sandbox,
+        hostProxy,
       })
       .returning({ id: workers.id });
     this.workerId = row!.id;
@@ -163,43 +188,86 @@ export class WorkerPresenceService implements OnModuleDestroy {
     );
   }
 
-  private async renew(id: string, names: { env: string[]; egress: string[] }): Promise<void> {
+  private async renew(
+    id: string,
+    names: { env: string[]; egress: string[] },
+    hostProxy: WorkerHostProxy | null,
+  ): Promise<void> {
     const renewed = await this.db
       .update(workers)
-      .set({ lastHeartbeatAt: sql`now()`, envNames: names.env, egressEnvNames: names.egress })
+      .set({
+        lastHeartbeatAt: sql`now()`,
+        envNames: names.env,
+        egressEnvNames: names.egress,
+        hostProxy,
+      })
       .where(and(eq(workers.id, id), isNull(workers.stoppedAt)))
       .returning({ id: workers.id });
     if (renewed.length === 0) this.logger.warn({ workerId: id }, 'worker row is gone or stopped');
   }
 
   /**
-   * The names in this process's environment and in egress's. Egress that
-   * cannot be reached reports none: its secrets cannot reach a request then
-   * either, and the Secrets page should say so.
+   * The names in this process's environment and in egress's. A beat that
+   * cannot reach egress (a 3 s timeout while egress is busy or restarting)
+   * keeps the names egress last reported: writing none would read as "the
+   * key is missing" to the API's provider checks for ten seconds. Before
+   * egress ever answered there are none to keep. The worker's own provider
+   * guard asks egress live and does not read this row.
    */
   private async names(): Promise<{ env: string[]; egress: string[] }> {
-    let egress: string[] = [];
+    let egress: string[];
     try {
       egress = await this.sandbox.egress.envNames();
+      this.lastEgressNames = egress;
       if (this.egressReachable === false) this.logger.info('egress env names readable again');
       this.egressReachable = true;
     } catch (err) {
+      egress = this.lastEgressNames ?? [];
       if (this.egressReachable !== false) {
-        this.logger.warn({ err }, 'cannot read egress env names; reporting none until it answers');
+        this.logger.warn(
+          { err },
+          'cannot read egress env names; keeping the last ones until it answers',
+        );
       }
       this.egressReachable = false;
     }
     return { env: presentEnvNames(process.env), egress };
   }
 
+  /**
+   * Egress's development host forward (NOUS_HOST_PROXY) and whether its
+   * target answered, as GET /providers reads it to report Nous as `host` or
+   * `host_unreachable`. Null when egress has no forward, and when egress
+   * cannot be reached: then the API sees no host mode, and Nous readiness
+   * falls back to the nous-login volume, which cannot serve runs through an
+   * egress that is down either.
+   */
+  private async hostProxy(): Promise<WorkerHostProxy | null> {
+    let report: EgressHealth | null = null;
+    try {
+      report = await this.sandbox.egress.healthReport();
+    } catch {
+      // healthReport answers null rather than throwing; this keeps anything
+      // else from ever holding up registration or the heartbeat.
+    }
+    if (!report?.hostProxy) return null;
+    return {
+      target: report.hostProxy.target,
+      reachable: report.hostProxy.reachable,
+      checked_at: report.hostProxy.checkedAt,
+    };
+  }
+
   /** Toolsets from the trial image and the self-test report; each falls back on its own. */
   private async readStartFacts(): Promise<StartFacts> {
     const checkedAt = new Date();
-    const { state, checks } = this.sandbox.status();
+    const { state, checks: selfTestChecks } = this.sandbox.status();
     // Both need docker-guard, which an unavailable sandbox does not have.
     const guardReachable = state === 'isolated' || state === 'failed';
     let toolsets: string[] = [];
     let image: { id: string; revision: string | null } | null = null;
+    let checks = selfTestChecks;
+    let imageMatchesBuild = true;
     if (guardReachable) {
       try {
         toolsets = await listToolsets(this.sandbox);
@@ -212,10 +280,19 @@ export class WorkerPresenceService implements OnModuleDestroy {
           this.sandbox.image,
         );
         if (image.revision && image.revision !== HERMES_REVISION) {
-          this.logger.warn(
+          this.logger.error(
             { image: this.sandbox.image, label: image.revision, expected: HERMES_REVISION },
-            'trial image carries a different Hermes revision than this build expects',
+            'trial image carries a different Hermes revision than this build; execution disabled',
           );
+          imageMatchesBuild = false;
+          checks = [
+            ...selfTestChecks,
+            {
+              name: IMAGE_REVISION_CHECK,
+              ok: false,
+              detail: `the image's label says ${image.revision.slice(0, 7)}, this worker was built for ${HERMES_REVISION.slice(0, 7)}; rebuild them together`,
+            },
+          ];
         }
       } catch (err) {
         this.logger.warn({ err }, 'could not inspect the trial image; reporting no digest');
@@ -223,8 +300,10 @@ export class WorkerPresenceService implements OnModuleDestroy {
     }
     return {
       toolsets,
+      imageMatchesBuild,
       sandbox: workerSandboxReport({
-        state,
+        // A sandbox that proved isolation still cannot run trials of another revision.
+        state: imageMatchesBuild ? state : 'failed',
         checks,
         checkedAt,
         image: this.sandbox.image,

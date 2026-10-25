@@ -15,8 +15,13 @@ LABEL org.hermes-evals.hermes-version="0.22.4" \
 # unreadable, so the modes are set explicitly.)
 COPY --chown=0:0 docker/mcp/invoice-db/server.py docker/mcp/invoice-db/invoices.csv /opt/mcp/invoice-db/
 COPY --chown=0:0 docker/mcp/invoice-db/invoice-db-mcp /usr/local/bin/invoice-db-mcp
-RUN chmod 0755 /opt/mcp /opt/mcp/invoice-db /usr/local/bin/invoice-db-mcp \
- && chmod 0644 /opt/mcp/invoice-db/server.py /opt/mcp/invoice-db/invoices.csv
+# nous-login (plan 6.1): the Nous Portal device login the UI drives. The
+# nous-login service runs it from this image with the nous-home volume, as
+# `/opt/hermes/.venv/bin/python /opt/nous-login/nous-login.py`, so it calls
+# the same Hermes as nous-proxy. Root-owned and read-only, like the samples.
+COPY --chown=0:0 docker/nous-login.py /opt/nous-login/nous-login.py
+RUN chmod 0755 /opt/mcp /opt/mcp/invoice-db /usr/local/bin/invoice-db-mcp /opt/nous-login \
+ && chmod 0644 /opt/mcp/invoice-db/server.py /opt/mcp/invoice-db/invoices.csv /opt/nous-login/nous-login.py
 
 USER 10000:10000
 WORKDIR /opt/data

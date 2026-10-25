@@ -5,10 +5,23 @@
  * streams the answer back unchanged, and records usage against the attempt.
  * The real credential never enters a trial, and a token stops working the
  * moment the worker removes its attempt.
+ *
+ * The same port serves the MCP gateway under /mcp/<name> (mcp-gateway.ts).
+ * A `custom` attempt brings its own upstream: the configuration's base URL,
+ * with CUSTOM_API_KEY from egress's environment when it is set.
+ *
+ * Its memory is bounded, because the agent holds its token and can call the
+ * gateway as often as it likes: each request body is read into memory (up
+ * to 10 MiB, a larger Content-Length refused before reading), each attempt
+ * has at most `maxModelCallsPerAttempt` calls in flight (the next answers
+ * 429), the server takes at most `maxConnections` sockets, and a request
+ * must arrive within `requestTimeoutMs`, so a slow upload cannot hold a
+ * slot.
  */
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { guarded, parseTarget } from './handler.js';
-import type { Registry } from './registry.js';
+import { createMcpGateway, MCP_PATH_PREFIX, type McpGatewayOptions } from './mcp-gateway.js';
+import type { Registration, Registry } from './registry.js';
 
 export interface Upstream {
   /** Base URL including the version segment, e.g. `https://openrouter.ai/api/v1`. */
@@ -27,7 +40,25 @@ export interface GatewayOptions {
   registry: Registry;
   upstreams: Record<string, Upstream>;
   fetch?: typeof fetch;
+  /**
+   * Egress's environment: CUSTOM_API_KEY and MCP header values are read from
+   * it on every request. process.env unless a test supplies one.
+   */
+  env?: () => NodeJS.ProcessEnv;
+  /** Caps and the process log for the MCP gateway. */
+  mcp?: Omit<McpGatewayOptions, 'registry' | 'env'>;
+  /** Model calls one attempt may have in flight. Default 8. */
+  maxModelCallsPerAttempt?: number;
+  /** Sockets the server holds at once, model and MCP calls together. Default 512. */
+  maxConnections?: number;
+  /** Longest a request (headers and body) may take to arrive. Default 60 s. */
+  requestTimeoutMs?: number;
 }
+
+export const DEFAULT_MODEL_CALLS_PER_ATTEMPT = 8;
+
+/** The variable holding the optional key for a `custom` attempt's own base URL. */
+export const CUSTOM_API_KEY_ENV = 'CUSTOM_API_KEY';
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const FORWARDED_POSTS = new Set(['/chat/completions', '/completions', '/embeddings']);
@@ -110,8 +141,131 @@ export class UsageReader {
 export function createGatewayServer(options: GatewayOptions): http.Server {
   const { registry, upstreams } = options;
   const doFetch = options.fetch ?? fetch;
+  const env = options.env ?? (() => process.env);
+  const mcp = createMcpGateway({ ...options.mcp, registry, env });
+  const maxCalls = options.maxModelCallsPerAttempt ?? DEFAULT_MODEL_CALLS_PER_ATTEMPT;
 
-  return http.createServer(
+  /** Where an attempt's model calls go: its own base URL for `custom`, else the named upstream. */
+  const upstreamOf = (registration: Registration): Upstream | undefined => {
+    if (registration.upstream) {
+      const apiKey = env()[CUSTOM_API_KEY_ENV] || undefined;
+      return { baseUrl: registration.upstream.baseUrl, apiKey };
+    }
+    return registration.provider ? upstreams[registration.provider] : undefined;
+  };
+
+  /** One model call of an attempt that holds an in-flight slot: read, check, forward, meter. */
+  async function forward(
+    registration: Registration,
+    upstream: Upstream,
+    subpath: string,
+    isModels: boolean,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    let body: Buffer | undefined;
+    let model: string | undefined;
+    let streaming = false;
+    if (!isModels) {
+      try {
+        body = await readBody(req);
+        const parsed = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
+        model = typeof parsed.model === 'string' ? parsed.model : undefined;
+        streaming = parsed.stream === true;
+        const defaults = Object.entries(upstream.bodyDefaults ?? {}).filter(
+          ([key]) => !(key in parsed),
+        );
+        if (defaults.length > 0)
+          body = Buffer.from(JSON.stringify({ ...parsed, ...Object.fromEntries(defaults) }));
+      } catch (err) {
+        return error(res, 400, `invalid request body: ${(err as Error).message}`);
+      }
+      if (registration.models.length > 0 && (!model || !registration.models.includes(model))) {
+        registry.log(registration.attemptId, {
+          kind: 'model',
+          model,
+          decision: 'denied',
+          reason: 'model not allowed',
+        });
+        return error(res, 403, `model ${model ?? '(none)'} is not allowed for this attempt`);
+      }
+    }
+
+    const started = Date.now();
+    const abort = new AbortController();
+    res.on('close', () => abort.abort());
+    const headers: Record<string, string> = { accept: req.headers.accept ?? 'application/json' };
+    if (body) headers['content-type'] = 'application/json';
+    if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`;
+
+    let response: Response;
+    try {
+      response = await doFetch(`${upstream.baseUrl.replace(/\/$/, '')}${subpath}`, {
+        method: req.method,
+        headers,
+        body,
+        signal: abort.signal,
+      });
+    } catch (err) {
+      registry.log(registration.attemptId, {
+        kind: 'model',
+        model,
+        decision: 'allowed',
+        status: 502,
+        reason: (err as Error).message,
+      });
+      return error(res, 502, `upstream unreachable: ${(err as Error).message}`, 'api_error');
+    }
+
+    const outHeaders: Record<string, string> = {};
+    for (const name of RESPONSE_HEADERS) {
+      const value = response.headers.get(name);
+      if (value) outHeaders[name] = value;
+    }
+    res.writeHead(response.status, outHeaders);
+    const reader = new UsageReader(
+      streaming || (response.headers.get('content-type') ?? '').includes('event-stream'),
+    );
+    try {
+      if (response.body) {
+        for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+          const buffer = Buffer.from(chunk);
+          if (!isModels) reader.feed(buffer);
+          res.write(buffer);
+        }
+      }
+    } catch {
+      // The client went away or the upstream broke mid-stream; record what we saw.
+    } finally {
+      res.end();
+      if (!isModels) {
+        const used = reader.result();
+        registry.addUsage(registration.attemptId, {
+          calls: 1,
+          promptTokens: used?.prompt_tokens ?? 0,
+          completionTokens: used?.completion_tokens ?? 0,
+          totalTokens: used?.total_tokens ?? 0,
+        });
+        registry.log(registration.attemptId, {
+          kind: 'model',
+          model,
+          decision: 'allowed',
+          status: response.status,
+          ms: Date.now() - started,
+          // This call's own usage, so the inspector can show it per call;
+          // absent when the upstream reported none.
+          ...(used
+            ? {
+                promptTokens: used.prompt_tokens ?? 0,
+                completionTokens: used.completion_tokens ?? 0,
+              }
+            : {}),
+        });
+      }
+    }
+  }
+
+  const server = http.createServer(
     guarded(async (req, res) => {
       const url = parseTarget(req.url, 'http://gateway');
       if (!url) return error(res, 400, 'malformed request target');
@@ -119,13 +273,14 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
         return;
       }
+      if (url.pathname.startsWith(MCP_PATH_PREFIX)) return mcp(req, res, url);
 
       const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
       const registration = bearer ? registry.byToken(bearer) : null;
       if (!registration)
         return error(res, 401, 'invalid or expired attempt token', 'invalid_api_key');
       if (!registration.provider) return error(res, 403, 'this attempt makes no model calls');
-      const upstream = upstreams[registration.provider];
+      const upstream = upstreamOf(registration);
       if (!upstream) return error(res, 503, `no upstream configured for ${registration.provider}`);
 
       const subpath = url.pathname.replace(/^\/v1(?=\/)/, '');
@@ -143,99 +298,32 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         });
         return error(res, 429, 'token budget for this attempt is exhausted', 'rate_limit_exceeded');
       }
-
-      let body: Buffer | undefined;
-      let model: string | undefined;
-      let streaming = false;
-      if (!isModels) {
-        try {
-          body = await readBody(req);
-          const parsed = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
-          model = typeof parsed.model === 'string' ? parsed.model : undefined;
-          streaming = parsed.stream === true;
-          const defaults = Object.entries(upstream.bodyDefaults ?? {}).filter(
-            ([key]) => !(key in parsed),
-          );
-          if (defaults.length > 0)
-            body = Buffer.from(JSON.stringify({ ...parsed, ...Object.fromEntries(defaults) }));
-        } catch (err) {
-          return error(res, 400, `invalid request body: ${(err as Error).message}`);
-        }
-        if (registration.models.length > 0 && (!model || !registration.models.includes(model))) {
-          registry.log(registration.attemptId, {
-            kind: 'model',
-            model,
-            decision: 'denied',
-            reason: 'model not allowed',
-          });
-          return error(res, 403, `model ${model ?? '(none)'} is not allowed for this attempt`);
-        }
+      const declared = Number(req.headers['content-length']);
+      if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
+        return error(res, 413, `request bodies are at most ${MAX_REQUEST_BYTES} bytes`);
       }
-
-      const started = Date.now();
-      const abort = new AbortController();
-      res.on('close', () => abort.abort());
-      const headers: Record<string, string> = { accept: req.headers.accept ?? 'application/json' };
-      if (body) headers['content-type'] = 'application/json';
-      if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`;
-
-      let response: Response;
-      try {
-        response = await doFetch(`${upstream.baseUrl.replace(/\/$/, '')}${subpath}`, {
-          method: req.method,
-          headers,
-          body,
-          signal: abort.signal,
-        });
-      } catch (err) {
+      if (!registry.openModelCall(registration.attemptId, maxCalls)) {
         registry.log(registration.attemptId, {
           kind: 'model',
-          model,
-          decision: 'allowed',
-          status: 502,
-          reason: (err as Error).message,
+          decision: 'denied',
+          reason: 'too many model calls in flight',
         });
-        return error(res, 502, `upstream unreachable: ${(err as Error).message}`, 'api_error');
+        return error(
+          res,
+          429,
+          `at most ${maxCalls} model calls of one attempt may be in flight`,
+          'rate_limit_exceeded',
+        );
       }
-
-      const outHeaders: Record<string, string> = {};
-      for (const name of RESPONSE_HEADERS) {
-        const value = response.headers.get(name);
-        if (value) outHeaders[name] = value;
-      }
-      res.writeHead(response.status, outHeaders);
-      const reader = new UsageReader(
-        streaming || (response.headers.get('content-type') ?? '').includes('event-stream'),
-      );
       try {
-        if (response.body) {
-          for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-            const buffer = Buffer.from(chunk);
-            if (!isModels) reader.feed(buffer);
-            res.write(buffer);
-          }
-        }
-      } catch {
-        // The client went away or the upstream broke mid-stream; record what we saw.
+        await forward(registration, upstream, subpath, isModels, req, res);
       } finally {
-        res.end();
-        if (!isModels) {
-          const used = reader.result();
-          registry.addUsage(registration.attemptId, {
-            calls: 1,
-            promptTokens: used?.prompt_tokens ?? 0,
-            completionTokens: used?.completion_tokens ?? 0,
-            totalTokens: used?.total_tokens ?? 0,
-          });
-          registry.log(registration.attemptId, {
-            kind: 'model',
-            model,
-            decision: 'allowed',
-            status: response.status,
-            ms: Date.now() - started,
-          });
-        }
+        registry.closeModelCall(registration.attemptId);
       }
     }),
   );
+  server.maxConnections = options.maxConnections ?? 512;
+  server.requestTimeout = options.requestTimeoutMs ?? 60_000;
+  server.headersTimeout = Math.min(server.headersTimeout, server.requestTimeout);
+  return server;
 }

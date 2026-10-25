@@ -59,7 +59,6 @@ import {
 import type { Env } from '../src/config/env.js';
 import * as schema from '../src/database/schema/index.js';
 import { INVOICE_DB, VENDOR_API } from '../src/resources/mcp/mcp-testing.support-spec.js';
-import { HTTP_TEST_UNAVAILABLE } from '../src/worker/handlers/test-mcp-server.js';
 import { binaryBody, invoiceMethodZip } from '../src/resources/skills/testing.helper-spec.js';
 import { workerSandboxReport } from '../src/worker/presence/presence-report.js';
 import type { WorkerService } from '../src/worker/worker.service.js';
@@ -456,7 +455,11 @@ describe.skipIf(!SERVER_URL)('Phase 1 on Postgres 17: API and worker', () => {
         200,
         McpTestViewSchema,
       );
-      expect(http).toMatchObject({ status: 'failed', error: HTTP_TEST_UNAVAILABLE });
+      expect(http).toMatchObject({
+        status: 'failed',
+        error: 'VENDOR_API_TOKEN is not set in the egress environment.',
+        missingSecretNames: ['VENDOR_API_TOKEN'],
+      });
     }, 120_000);
 
     it('secrets: presence comes from the newest live worker', async () => {

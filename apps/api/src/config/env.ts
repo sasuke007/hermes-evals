@@ -33,11 +33,21 @@ export const EnvSchema = z.object({
   /** Named volume holding trial homes and workspaces, mounted by the worker at TRIALS_DIR. */
   TRIAL_VOLUME: z.string().default('hermes-evals-trials'),
   TRIALS_DIR: z.string().default('/trials'),
-  /** Internal networks, one per concurrent trial. */
+  /**
+   * Internal slot networks, one per concurrent trial, comma-separated. The
+   * worker hands them out in-process and, before each create, confirms no
+   * live trial container is on the slot. One worker per Docker daemon is the
+   * supported setup; several workers sharing one daemon must each get a
+   * disjoint list, or two of them could put trials on the same network.
+   */
   TRIAL_SLOTS: z
     .string()
     .default('hermes-evals-trial-0,hermes-evals-trial-1,hermes-evals-trial-2,hermes-evals-trial-3'),
-  /** Provider credential forwarded into each trial home's .env. Never logged. */
+  /**
+   * Provider credentials, read by the worker only for the LLM judge (Phase 3).
+   * They never enter a trial: egress holds its own copy and swaps it in for the
+   * attempt token (plan 8.2). Never logged.
+   */
   NOUS_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -59,6 +69,36 @@ export const EnvSchema = z.object({
   PRICES_FILE: z.string().default('./config/prices.yaml'),
   /** How long a validated skill upload waits for its confirm before it is discarded. */
   SKILL_UPLOAD_TTL_S: z.coerce.number().int().min(60).max(86_400).default(1800),
+  /**
+   * Circuit breaker (plan 7.3): execution errors in a row, across an
+   * experiment's runs, at which the experiment becomes `failed`. Any
+   * successful execution resets the count.
+   */
+  MAX_CONSECUTIVE_EXECUTION_ERRORS: z.coerce.number().int().min(1).max(1000).default(14),
+  /**
+   * Days a finished attempt's workspace stays in the trials volume after its
+   * files were collected into the blob store (plan 8.5). The home is deleted
+   * at once. 0 deletes the workspace right after collection.
+   */
+  TRIAL_RETENTION_DAYS: z.coerce.number().int().min(0).max(365).default(7),
+  /**
+   * How often each worker runs the recovery pass (plan 8.6): revoke expired
+   * leases, confirm their containers are gone, finalise and requeue, sweep,
+   * re-send lost jobs. One pass at a time across workers.
+   */
+  RECOVERY_INTERVAL_MS: z.coerce.number().int().min(1000).max(600_000).default(15_000),
+  /**
+   * Lifetime of an attempt's lease (plan 8.1). The owning worker renews every
+   * lease it holds on each 10 s heartbeat, so this must outlast a few missed
+   * heartbeats; recovery revokes a lease once it expires.
+   */
+  LEASE_SECONDS: z.coerce.number().int().min(30).max(600).default(60),
+  /**
+   * The nous-login service (plan 6.1), reached over the internal
+   * provider-admin network: by the API for GET /providers and the login
+   * routes, and by the worker for the provider guard's status check.
+   */
+  NOUS_LOGIN_URL: z.string().url().default('http://nous-login:8650'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

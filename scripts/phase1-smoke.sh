@@ -502,8 +502,10 @@ fi
 
 if need "Test start $MCP_HTTP_NAME" "$MCP_HTTP_ID"; then
   send_json POST "/resources/mcp-servers/$MCP_HTTP_ID/test"
-  check "Test start $MCP_HTTP_NAME -> failed until Phase 2" 200 \
-    'd["status"] == "failed" and "egress MCP gateway" in d["error"]' \
+  # Through the egress MCP gateway: VENDOR_API_TOKEN is not in egress's
+  # environment, or, when it is, vendor-api.example.com serves no MCP server.
+  check "Test start $MCP_HTTP_NAME -> failed (no such server)" 200 \
+    'd["status"] == "failed" and d["error"] and "TOKEN=" not in raw' \
     '"{status}: {error} · missing {missingSecretNames}".format_map(d)'
 fi
 

@@ -35,6 +35,10 @@ export class DatabaseService implements OnModuleDestroy {
       const url = this.config.get('DATABASE_URL', { infer: true });
       if (!url) throw new Error('DATABASE_URL is not set');
       this.pool = new pg.Pool({ connectionString: url, max: 10 });
+      // An idle client whose server went away (a Postgres restart answers 57P01) emits
+      // 'error' on the pool; unhandled, that event would end the API or the worker. The
+      // pool drops that client and the next query connects afresh.
+      this.pool.on('error', (err) => this.logger.warn({ err }, 'idle database client failed'));
       this.client = drizzle(this.pool, { schema });
     }
     return this.client;

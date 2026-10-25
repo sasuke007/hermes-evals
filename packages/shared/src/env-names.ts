@@ -29,18 +29,28 @@ export const PLATFORM_TRIAL_ENV_NAMES = [
   'HTTPS_PROXY',
   'NO_PROXY',
   'NODE_USE_ENV_PROXY',
+  /**
+   * The attempt token, for the `Authorization` header config.yaml gives each
+   * http MCP server as `Bearer ${HERMES_EVALS_ATTEMPT_TOKEN}` (spike in
+   * apps/api/src/execution/providers-map.ts). Also covered by `HERMES_`.
+   */
+  'HERMES_EVALS_ATTEMPT_TOKEN',
 ] as const;
 
 /**
  * Provider credentials. Egress holds them for the model gateway and the
  * worker for the LLM judge; a trial gets a per-attempt egress token instead.
- * Keep in step with the apiKeyEnv names of MODEL_UPSTREAMS (docker-compose.yml).
+ * Keep in step with the apiKeyEnv names of MODEL_UPSTREAMS (docker-compose.yml)
+ * and of PROVIDER_ROUTES (apps/api/src/execution/providers-map.ts).
+ * CUSTOM_API_KEY is the optional key egress sends to a `custom` provider's
+ * own base URL.
  */
 export const PROVIDER_KEY_ENV_NAMES = [
   'NOUS_API_KEY',
   'OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
   'ANTHROPIC_API_KEY',
+  'CUSTOM_API_KEY',
 ] as const;
 
 /**
@@ -64,6 +74,11 @@ export const WORKER_SETTING_ENV_NAMES = [
   'SUITE_RELOAD_TIMEOUT_S',
   'MCP_TEST_TIMEOUT_S',
   'SKILL_UPLOAD_TTL_S',
+  'MAX_CONSECUTIVE_EXECUTION_ERRORS',
+  'TRIAL_RETENTION_DAYS',
+  'RECOVERY_INTERVAL_MS',
+  'LEASE_SECONDS',
+  'NOUS_LOGIN_URL',
 ] as const;
 
 /** Every name refused outright. */

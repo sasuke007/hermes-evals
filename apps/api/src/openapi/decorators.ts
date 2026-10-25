@@ -59,6 +59,22 @@ export function ApiFileUpload(field: string, description: string): MethodDecorat
   );
 }
 
+/**
+ * A server-sent event stream (text/event-stream). Each message is
+ * `event: <type>` and `data:` the whole event as JSON, which parses with
+ * `schema`; comment lines keep the connection open.
+ */
+export function ApiEventStream(schema: ZodType, description: string): MethodDecorator {
+  return applyDecorators(
+    ApiProduces('text/event-stream'),
+    ApiResponse({
+      status: 200,
+      description: `${description} Each message: \`event: <type>\` and \`data: <the event as JSON>\`; the schema is one event. A comment line keeps the connection open every 15 s.`,
+      content: { 'text/event-stream': { schema: componentRef(schemaName(schema)) } },
+    }),
+  );
+}
+
 /** A file download: raw bytes of one of `mediaTypes`. */
 export function ApiFileResponse(description: string, mediaTypes: string[]): MethodDecorator {
   return applyDecorators(

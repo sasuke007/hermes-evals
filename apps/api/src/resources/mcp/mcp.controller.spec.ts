@@ -30,10 +30,7 @@ import { mcpServerVersions } from '../../database/schema/index.js';
 import { QueueModule } from '../../queue/queue.module.js';
 import { QueueService } from '../../queue/queue.service.js';
 import type { TestMcpServerJob } from '../../queue/queues.js';
-import {
-  handleTestMcpServerJob,
-  HTTP_TEST_UNAVAILABLE,
-} from '../../worker/handlers/test-mcp-server.js';
+import { handleTestMcpServerJob } from '../../worker/handlers/test-mcp-server.js';
 import type { StdioTestRun } from '../../worker/handlers/mcp-test-container.js';
 import { CountsModule } from '../counts/counts.module.js';
 import { SecretsModule } from '../secrets/secrets.module.js';
@@ -169,7 +166,11 @@ function inlineBoss(t: TestDatabase, env: NodeJS.ProcessEnv, mode: () => WorkerM
         {
           db: t.db,
           env,
-          sandbox: { isolated: () => true, runStdioTest: async () => PASSED_RUN },
+          sandbox: {
+            isolated: () => true,
+            runStdioTest: async () => PASSED_RUN,
+            runHttpTest: async () => PASSED_RUN,
+          },
         },
         logger as unknown as PinoLogger,
       );
@@ -417,7 +418,7 @@ describe('Resources endpoints: MCP servers, secrets, counts', () => {
       const res = await http().post('/api/resources/mcp-servers/test').send(VENDOR_API).expect(200);
       expect(McpTestViewSchema.parse(res.body)).toMatchObject({
         status: 'failed',
-        error: HTTP_TEST_UNAVAILABLE,
+        error: 'VENDOR_API_TOKEN is not set in the egress environment.',
         missingSecretNames: ['VENDOR_API_TOKEN'],
       });
       expect(jobs[0]!.singletonKey).toMatch(/^unsaved:[0-9a-f]{64}$/);

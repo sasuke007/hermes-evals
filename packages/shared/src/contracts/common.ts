@@ -18,6 +18,28 @@ export const sha256View = z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercas
 
 export const countView = z.number().int().nonnegative();
 
+/** A pass rate, mean score or confidence: a fraction from 0 to 1. */
+export const rateView = z.number().min(0).max(1);
+
+/** A difference of two rates (candidate minus baseline), or an interval bound. */
+export const deltaView = z.number().min(-1).max(1);
+
+/** Seconds of wall time; fractional when measured. */
+export const secondsView = z.number().nonnegative();
+
+/** Money in US dollars. */
+export const usdView = z.number().nonnegative();
+
+/**
+ * A spend ceiling in dollars, as launch and resume accept it. The column is
+ * numeric(10,2) with CHECK > 0, so anything under a cent would round to a
+ * refused 0.
+ */
+export const spendCeilingUsd = z
+  .number()
+  .min(0.01, 'the spend ceiling must be at least $0.01')
+  .max(10_000, 'the spend ceiling is at most $10,000');
+
 /**
  * An http(s) URL without `user:password@`, the same rule as the url and
  * base_url CHECK constraints: credentials belong in the environment.

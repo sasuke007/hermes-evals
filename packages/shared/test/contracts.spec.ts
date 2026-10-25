@@ -3,6 +3,7 @@ import {
   ConfigurationInputSchema,
   McpServerInputSchema,
   McpServerRowSchema,
+  mcpRouteProblems,
   SecretRowSchema,
   SkillConfirmRequestSchema,
   SuiteReloadRequestSchema,
@@ -130,6 +131,36 @@ describe('McpServerInputSchema', () => {
       expect(McpServerInputSchema.safeParse({ ...HTTP, headers: value }).success).toBe(false);
     }
     expect(McpServerInputSchema.safeParse({ ...STDIO, timeoutS: 1.5 }).success).toBe(false);
+  });
+
+  it('refuses on save what egress would refuse at registration', () => {
+    const many = Array.from({ length: 33 }, (_, i) => ({ header: `X-H${i}`, env: `V${i}` }));
+    const cases: [Partial<McpServerInput>, string][] = [
+      [{ headers: [{ header: 'Proxy-Authenticate', env: 'VENDOR_PROXY' }] }, 'headers'],
+      [{ headers: many }, 'headers'],
+      [{ url: `https://vendor-api.example.com/${'a'.repeat(2048)}` }, 'url'],
+    ];
+    for (const [change, path] of cases) {
+      expect(issuePaths(McpServerInputSchema.safeParse({ ...HTTP, ...change }))).toEqual([path]);
+    }
+    expect(mcpRouteProblems({ ...HTTP, headers: [{ header: 'proxy-authenticate' }] })).toEqual([
+      'egress sets proxy-authenticate itself',
+    ]);
+    expect(mcpRouteProblems(HTTP)).toEqual([]);
+    // A stored row keeps reading back; only input and the worker apply these rules.
+    expect(
+      McpServerRowSchema.safeParse({
+        ...HTTP,
+        headers: [{ header: 'Proxy-Authenticate', env: 'VENDOR_PROXY' }],
+        id: 'mcp_1',
+        versionId: 'mcpv_1',
+        version: 1,
+        definedAt: '2026-10-01T00:00:00.000Z',
+        frozen: false,
+        usedBy: [],
+        lastTest: { status: 'untested' },
+      }).success,
+    ).toBe(true);
   });
 
   it('refuses platform variables and credentials, as env names and header variables', () => {

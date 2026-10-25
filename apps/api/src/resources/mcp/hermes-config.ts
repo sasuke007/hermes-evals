@@ -6,6 +6,7 @@
  * exactly what a run gets.
  */
 import type { McpServerInput } from '@hermes-evals/shared';
+import { MCP_GATEWAY_HEADERS } from '../../execution/providers-map.js';
 
 /** Where a trial reaches an http server: the egress MCP gateway, which adds the headers (plan 5.3). */
 export const egressMcpUrl = (name: string): string => `http://egress:8080/mcp/${name}`;
@@ -15,7 +16,12 @@ export const egressMcpUrl = (name: string): string => `http://egress:8080/mcp/${
  * - stdio env entries are `${NAME}` references, which Hermes fills from its
  *   own environment when it starts the server; the trial container's
  *   environment carries the values.
- * - an http server points at the egress gateway and has no headers.
+ * - an http server points at the egress gateway, with only the attempt-token
+ *   reference as its Authorization header (`Bearer ${HERMES_EVALS_ATTEMPT_TOKEN}`,
+ *   providers-map.ts). Hermes fills it from the container environment and
+ *   sends it on every request, its preflight probe included; the gateway
+ *   checks it, strips it, and adds the definition's own headers from
+ *   egress's environment.
  * An empty include list is left out: to Hermes `include: []` offers no tool
  * at all, while to the platform it means "no filter".
  * `timeout` is Hermes's per-call limit for the server's tools.
@@ -26,7 +32,12 @@ export function hermesMcpEntry(def: McpServerInput): Record<string, unknown> {
   if (def.exclude.length > 0) tools.exclude = [...def.exclude];
   const filters = tools.include || tools.exclude ? { tools } : {};
   if (def.transport === 'http') {
-    return { url: egressMcpUrl(def.name), ...filters, timeout: def.timeoutS };
+    return {
+      url: egressMcpUrl(def.name),
+      headers: { ...MCP_GATEWAY_HEADERS },
+      ...filters,
+      timeout: def.timeoutS,
+    };
   }
   return {
     command: def.command,
