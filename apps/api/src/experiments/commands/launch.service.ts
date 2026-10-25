@@ -6,10 +6,12 @@
  * issue per problem); a connected worker must have proven isolation, and the
  * proven workers must run one Hermes revision; every configuration's provider
  * must be ready (409 with the reason the form shows, e.g. "Nous Portal is not
- * connected"); and when a selected task has an llm_judge key, the judge's
- * provider must be ready too (Phase 3 S3: JUDGE_PROVIDER, the rule the
- * scorer and Re-score use). An estimate over the spend ceiling does not
- * block: the spend guard pauses at the ceiling (UI_FLOWS 19 #10).
+ * connected"); and when a selected task has an llm_judge key, it must have a
+ * judge model (the check's `model:` or JUDGE_MODEL, Phase 3 question 2: 409
+ * with how to set one) and the judge's provider must be ready too (Phase 3
+ * S3: JUDGE_PROVIDER, the rule the scorer and Re-score use). An estimate
+ * over the spend ceiling does not block: the spend guard pauses at the
+ * ceiling (UI_FLOWS 19 #10).
  *
  * Then one transaction, rows and jobs together or nothing:
  * 1. Freeze the versions in their own statement. Its row locks order the
@@ -100,7 +102,7 @@ export class LaunchService {
     const blocks = await this.gate.blocked(resolved.versions.map((v) => v.row.provider));
     if (blocks.length > 0) throw conflict(blockedMessage(blocks));
     const judge = await judgeReadiness(
-      resolved.tasks.flatMap((t) => t.verification),
+      resolved.tasks.flatMap((t) => t.verification.map((entry) => ({ ...entry, task: t.key }))),
       judgeSettingsFrom(this.config),
       { readiness: (provider) => this.gate.readiness(provider) },
     );

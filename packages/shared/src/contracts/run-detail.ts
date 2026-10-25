@@ -6,7 +6,7 @@
  * See ./common.ts for the conventions every contract file follows.
  */
 import { z } from 'zod';
-import { JsonValueSchema } from '../records.js';
+import { JsonMatchEvidenceSchema, JsonValueSchema, TextMatchEvidenceSchema } from '../records.js';
 import {
   ATTEMPT_STATUSES,
   ATTEMPT_TRIGGERS,
@@ -21,6 +21,7 @@ import {
   NETWORK_DECISIONS,
   NETWORK_EVENT_KINDS,
   SCORER_TYPES,
+  TRAJECTORY_MODES,
 } from '../vocab.js';
 import { countView, isoTimeView, rateView, secondsView, sha256View, usdView } from './common.js';
 import { ExperimentConfigRefSchema } from './experiments.js';
@@ -73,6 +74,71 @@ export type ExecutionErrorView = z.infer<typeof ExecutionErrorViewSchema>;
 
 const summaryDetail = z.object({ summary: z.string(), detail: z.string().nullable() });
 
+/**
+ * The LLM judge's call behind an llm_judge score (JudgeEvidenceSchema in
+ * records.ts, Phase 3 question 5): its model and its grading cost, which is
+ * apart from the run's execution cost and never counted by the spend guard.
+ */
+export const JudgeEvidenceViewSchema = z.object({
+  /** A PROVIDERS value, from the check or JUDGE_PROVIDER. */
+  provider: z.string(),
+  /** A `custom` judge's base URL; null for the providers egress routes by name. */
+  baseUrl: z.string().nullable(),
+  model: z.string(),
+  /** 1, or 2 when the first call failed in transport or with a 5xx and was retried. */
+  calls: z.number().int().positive(),
+  /** Summed over the calls, as egress metered them. */
+  tokens: TokenCountsSchema,
+  /** Null when the judge model has no price in the experiment's frozen table. */
+  costUsd: usdView.nullable(),
+  latencyMs: countView,
+  /** The provider's finish reason of the graded answer, e.g. `stop`; null when not reported. */
+  finishReason: z.string().nullable(),
+  /**
+   * Each call in order (Phase 3 question 9): the HTTP status that ended it,
+   * null when it failed in transport, and how long it took. Empty for rows
+   * stored before calls were logged.
+   */
+  callLog: z.array(
+    z.object({ status: z.number().int().min(100).max(599).nullable(), latencyMs: countView }),
+  ),
+});
+export type JudgeEvidenceView = z.infer<typeof JudgeEvidenceViewSchema>;
+
+/**
+ * What trajectory_match counted (TrajectoryEvidenceSchema in records.ts):
+ * calls of `tool`, and of those the ones whose arguments matched, by their
+ * tool_use sequence numbers. With `mode`, openevals compared the whole
+ * trajectory and `calls` is the number of tool calls in it.
+ */
+export const TrajectoryEvidenceViewSchema = z.object({
+  tool: z.string(),
+  calls: countView,
+  matchedSeqs: z.array(seq),
+  mode: z.enum(TRAJECTORY_MODES).nullable(),
+});
+export type TrajectoryEvidenceView = z.infer<typeof TrajectoryEvidenceViewSchema>;
+
+/**
+ * Pointers from a score to the evidence behind it, and the scorer's own
+ * detail for the Outcome section: null when the key's type does not write
+ * it, or the stored row predates it. `text` and `jsonMatch` are the stored
+ * shapes as they are (records.ts).
+ */
+export const ScoreEvidenceViewSchema = z.object({
+  eventSeqs: z.array(seq),
+  artifactIds: z.array(z.string()),
+  /** llm_judge. */
+  judge: JudgeEvidenceViewSchema.nullable(),
+  /** trajectory_match: "invoice-db.list_invoices called 3 times". */
+  trajectory: TrajectoryEvidenceViewSchema.nullable(),
+  /** text_match: "Found 1 of 2: `1.5%` ✓ `30 days` ✗". */
+  text: TextMatchEvidenceSchema.nullable(),
+  /** json_match: "4 of 5 keys match", with each mismatch's path. */
+  jsonMatch: JsonMatchEvidenceSchema.nullable(),
+});
+export type ScoreEvidenceView = z.infer<typeof ScoreEvidenceViewSchema>;
+
 /** One score row in Outcome. */
 export const ScoreRowViewSchema = z.object({
   key: z.string(),
@@ -88,7 +154,7 @@ export const ScoreRowViewSchema = z.object({
   comment: z.string(),
   /** Set when status is `error`: what failed, with the request in mono. */
   error: z.object({ message: z.string(), detail: z.string().nullable() }).nullable(),
-  evidence: z.object({ eventSeqs: z.array(seq), artifactIds: z.array(z.string()) }),
+  evidence: ScoreEvidenceViewSchema,
 });
 export type ScoreRowView = z.infer<typeof ScoreRowViewSchema>;
 

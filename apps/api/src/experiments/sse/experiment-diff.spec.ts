@@ -43,6 +43,8 @@ const queued = (id: string): LiveRun => ({
   attempt: 0,
   primaryScore: null,
   finishedAt: null,
+  generation: null,
+  rescorePending: false,
   feed: null,
 });
 
@@ -62,6 +64,8 @@ const scoredRun = (id: string, finishedAt: string, passed = true): LiveRun => ({
   attempt: 1,
   primaryScore: { key: 'answer', status: passed ? 'passed' : 'failed', score: passed ? 1 : 0 },
   finishedAt,
+  generation: 1,
+  rescorePending: false,
   feed: feedOf(id, finishedAt, passed ? 'passed' : 'failed'),
 });
 
@@ -75,6 +79,8 @@ function state(runs: LiveRun[], patch: Partial<LiveState> = {}): LiveState {
     counts: c,
     doneRuns: c.scored,
     spend: SPEND,
+    verdicts: [],
+    verdictUpdatedAt: null,
     runs: new Map(runs.map((r) => [r.id, r])),
     ...patch,
   };
@@ -87,7 +93,15 @@ describe('initialEvents', () => {
     const s = state([queued('r1'), queued('r2')]);
     const events = parsedAll(initialEvents(s, AT));
     expect(events).toEqual([
-      { type: 'experiment', at: AT, status: 'running', pauseReason: null, failure: null },
+      {
+        type: 'experiment',
+        at: AT,
+        status: 'running',
+        pauseReason: null,
+        failure: null,
+        verdicts: [],
+        verdictUpdatedAt: null,
+      },
       { type: 'counts', at: AT, counts: counts({ queued: 2 }), doneRuns: 0, spend: SPEND },
     ]);
   });
@@ -118,6 +132,8 @@ describe('diffEvents', () => {
       attempt: 1,
       primaryScore: null,
       finishedAt: null,
+      generation: null,
+      rescorePending: false,
     });
     expect(events[1]).toMatchObject({
       runId: 'r2',
@@ -157,6 +173,8 @@ describe('diffEvents', () => {
       attempt: 1,
       primaryScore: null,
       finishedAt: '2026-10-24T10:00:01.000Z',
+      generation: null,
+      rescorePending: false,
       feed: feedOf('r1', '2026-10-24T10:00:01.000Z', 'execution_error'),
     };
     const retried = { ...scoredRun('r1', '2026-10-24T10:00:04.000Z'), attempt: 2 };
@@ -194,7 +212,15 @@ describe('diffEvents', () => {
       AT,
     );
     expect(parsedAll(paused)).toEqual([
-      { type: 'experiment', at: AT, status: 'paused', pauseReason: 'spend_ceiling', failure: null },
+      {
+        type: 'experiment',
+        at: AT,
+        status: 'paused',
+        pauseReason: 'spend_ceiling',
+        failure: null,
+        verdicts: [],
+        verdictUpdatedAt: null,
+      },
     ]);
 
     const before = state([{ ...queued('r1'), status: 'running', attempt: 1 }]);
@@ -204,6 +230,8 @@ describe('diffEvents', () => {
       attempt: 1,
       primaryScore: null,
       finishedAt: FAILURE.at,
+      generation: null,
+      rescorePending: false,
       feed: feedOf('r1', FAILURE.at, 'execution_error'),
     };
     const failed = state([errored], { status: 'failed', failure: FAILURE, doneRuns: 1 });
@@ -215,6 +243,8 @@ describe('diffEvents', () => {
       status: 'failed',
       pauseReason: null,
       failure: FAILURE,
+      verdicts: [],
+      verdictUpdatedAt: null,
     });
   });
 
@@ -223,5 +253,77 @@ describe('diffEvents', () => {
     const a = state(runs, { status: 'failed', failure: FAILURE });
     const b = state(runs, { status: 'failed', failure: { ...FAILURE, identicalIn: 4 } });
     expect(diffEvents(a, b, AT).map((e) => e.type)).toEqual(['experiment']);
+  });
+
+  it('sends a run event when a re-score is queued and when it publishes the same result', () => {
+    const scored = scoredRun('r1', '2026-10-24T10:00:01.000Z');
+    const queuedRescore = { ...scored, rescorePending: true };
+    const published = { ...scored, generation: 2 };
+    const queuedEvents = parsedAll(diffEvents(state([scored]), state([queuedRescore]), AT));
+    expect(queuedEvents).toEqual([
+      expect.objectContaining({ type: 'run', runId: 'r1', generation: 1, rescorePending: true }),
+    ]);
+    const publishedEvents = parsedAll(diffEvents(state([queuedRescore]), state([published]), AT));
+    expect(publishedEvents).toEqual([
+      expect.objectContaining({
+        type: 'run',
+        runId: 'r1',
+        generation: 2,
+        rescorePending: false,
+        primaryScore: scored.primaryScore,
+      }),
+    ]);
+  });
+
+  it('sends the experiment event with the verdicts when it completes, and again on every append', () => {
+    const runs = [scoredRun('r1', '2026-10-24T10:00:01.000Z')];
+    const verdict = {
+      candidate: 'with-skill',
+      candidateVersionId: 'cv2',
+      verdict: 'better' as const,
+      delta: 0.217,
+      lo: 0.117,
+      hi: 0.333,
+    };
+    const completed = state(runs, {
+      status: 'completed',
+      verdicts: [verdict],
+      verdictUpdatedAt: '2026-10-24T10:00:04.000Z',
+    });
+    const done = parsedAll(diffEvents(state(runs), completed, AT));
+    expect(done).toEqual([
+      expect.objectContaining({
+        type: 'experiment',
+        status: 'completed',
+        verdicts: [verdict],
+        verdictUpdatedAt: '2026-10-24T10:00:04.000Z',
+      }),
+    ]);
+    // A re-score appended an entry with the same numbers: only the time moved.
+    const again = state(runs, {
+      status: 'completed',
+      verdicts: [verdict],
+      verdictUpdatedAt: '2026-10-24T10:09:00.000Z',
+    });
+    expect(diffEvents(completed, again, AT).map((e) => e.type)).toEqual(['experiment']);
+    expect(diffEvents(again, again, AT)).toEqual([]);
+  });
+
+  it('never lists verdicts for an experiment that is not completed', () => {
+    const runs = [queued('r1')];
+    const bad = state(runs, {
+      verdicts: [
+        {
+          candidate: 'with-skill',
+          candidateVersionId: 'cv2',
+          verdict: 'better',
+          delta: 0.2,
+          lo: 0.1,
+          hi: 0.3,
+        },
+      ],
+    });
+    const [event] = initialEvents(bad, AT);
+    expect(ExperimentEventSchema.safeParse(event).success).toBe(false);
   });
 });

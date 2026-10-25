@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { refusalOf } from '../common/requested-with.guard.js';
 import { ConfigurationsController } from '../configurations/configurations.controller.js';
 import { ExperimentsCommandsController } from '../experiments/commands/experiments-commands.controller.js';
+import { ComparisonController } from '../experiments/comparison/comparison.controller.js';
 import { ExperimentsReadController } from '../experiments/experiments-read.controller.js';
 import { HealthController } from '../health/health.controller.js';
 import { ProvidersController } from '../providers/providers.controller.js';
@@ -79,6 +80,7 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/experiments'],
   ['get', '/api/experiments/{id}'],
   ['get', '/api/experiments/{id}/events'],
+  ['get', '/api/experiments/{id}/comparison'],
   ['post', '/api/experiments/{id}/pause'],
   ['post', '/api/experiments/{id}/resume'],
   ['post', '/api/experiments/{id}/cancel'],
@@ -138,6 +140,7 @@ beforeAll(async () => {
       ExperimentsCommandsController,
       RunsCommandsController,
       ExperimentsReadController,
+      ComparisonController,
       RunsReadController,
     ],
   })
@@ -227,7 +230,7 @@ describe('the API document', () => {
     });
   });
 
-  it('documents the Phase 2 and 3 contracts by name, the streams as text/event-stream', () => {
+  it('documents the Phase 2 to 4 contracts by name, the streams as text/event-stream', () => {
     const json = (method: string, path: string, status = '200') =>
       operation(method, path).responses[status]!.content!['application/json']!.schema;
     const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -240,6 +243,7 @@ describe('the API document', () => {
     expect(json('get', '/api/experiments/estimate')).toEqual(ref('ExperimentEstimateView'));
     expect(json('post', '/api/experiments', '201')).toEqual(ref('LaunchExperimentResult'));
     expect(json('post', '/api/experiments/{id}/duplicate')).toEqual(ref('NewExperimentDraft'));
+    expect(json('get', '/api/experiments/{id}/comparison')).toEqual(ref('ComparisonView'));
     expect(json('get', '/api/experiments/{id}/runs')).toEqual(ref('RunListResult'));
     expect(json('get', '/api/runs/{id}')).toEqual(ref('RunDetail'));
     expect(json('get', '/api/runs/{id}/events')).toEqual(ref('RunEventsPage'));
@@ -277,6 +281,7 @@ describe('the API document', () => {
       'versions',
     ]);
     expect(query('/api/runs/{id}/events')).toEqual(['after']);
+    expect(query('/api/experiments/{id}/comparison')).toEqual(['candidate', 'filter', 'key']);
   });
 
   it('converts the contracts field by field', () => {

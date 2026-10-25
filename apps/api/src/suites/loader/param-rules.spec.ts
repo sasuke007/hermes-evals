@@ -1,11 +1,13 @@
 /**
  * The params rules task.yaml checks after each type's schema (task-yaml.ts
- * paramRuleIssues): a text_match pattern must compile, and a
- * trajectory_match `max_calls` beside `mode` is reported as unused.
+ * paramRuleIssues): a text_match pattern must compile, a trajectory_match
+ * `max_calls` beside `mode` is reported as unused, and a trajectory_match
+ * tool named like an MCP tool in a form Hermes never uses is a warning.
  */
 import { LoadIssueSchema } from '@hermes-evals/shared';
 import { describe, expect, it } from 'vitest';
-import { checkTaskYaml, paramRuleIssues } from './task-yaml.js';
+import { hermesMcpToolName } from '../../execution/stream-json.js';
+import { checkTaskYaml, mcpToolNameProblem, paramRuleIssues } from './task-yaml.js';
 import { parseYamlSource } from './yaml-source.js';
 
 const taskYaml = (verification: string) => `summary: State the late-fee rule
@@ -122,5 +124,66 @@ describe('trajectory_match with a mode', () => {
       paramRuleIssues('trajectory_match', { tool: 'x', min_calls: 1, mode: 'strict' }),
     ).toEqual([]);
     expect(paramRuleIssues('exact_match', { trim: true, case_sensitive: true })).toEqual([]);
+  });
+});
+
+describe('trajectory_match tools named like MCP tools', () => {
+  it('warns on server.tool with the name Hermes gives that tool, and keeps the task loadable', () => {
+    const result = check(
+      taskYaml(`  - key: answer
+    type: text_match
+    primary: true
+    params: { contains: ["1.5%"] }
+  - key: lists
+    type: trajectory_match
+    params: { tool: invoice-db.list_invoices }
+`),
+    );
+    expect(result.issues).toEqual([
+      {
+        severity: 'warning',
+        code: 'params_invalid',
+        key: 'lists',
+        path: 'task.yaml#verification[1].params.tool',
+        message:
+          "lists: params.tool: invoice-db.list_invoices looks like MCP server invoice-db's tool list_invoices, which Hermes names mcp__invoice_db__list_invoices; no call is named invoice-db.list_invoices, so the key would always fail (line 11)",
+      },
+    ]);
+    expect(result.verification.map((v) => v.key)).toEqual(['answer', 'lists']);
+    expect(hermesMcpToolName('invoice-db', 'list_invoices')).toBe('mcp__invoice_db__list_invoices');
+  });
+
+  it('warns on mcp_ with one underscore, and on an mcp__ name Hermes would sanitize', () => {
+    expect(mcpToolNameProblem('mcp_invoice_db_query')).toMatch(
+      /^mcp_invoice_db_query looks like an MCP tool, but Hermes names MCP tools mcp__<server>__<tool>/,
+    );
+    expect(mcpToolNameProblem('mcp__invoice-db__get_invoice')).toBe(
+      'mcp__invoice-db__get_invoice is not a name Hermes gives an MCP tool: it replaces every character outside A-Z, a-z, 0-9 and _ with _, so the tool is mcp__invoice_db__get_invoice',
+    );
+  });
+
+  it('has nothing to say about Hermes names and built-in tools', () => {
+    for (const tool of [
+      hermesMcpToolName('invoice-db', 'get_invoice'),
+      'mcp__ledger__read_rows',
+      'read_file',
+      'terminal',
+      'mcpserver_tool',
+    ]) {
+      expect(mcpToolNameProblem(tool)).toBeNull();
+    }
+  });
+
+  it('reports the name beside an unused max_calls, each at its own field', () => {
+    const issues = paramRuleIssues('trajectory_match', {
+      tool: 'mcp_ledger_rows',
+      min_calls: 1,
+      max_calls: 2,
+      mode: 'superset',
+    });
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([
+      ['warning', ['tool']],
+      ['warning', ['max_calls']],
+    ]);
   });
 });

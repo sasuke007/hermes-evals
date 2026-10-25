@@ -25,6 +25,7 @@ import { workers } from '../../database/schema/index.js';
 import type { WorkerHostProxy } from '../../database/schema/worker-host-proxy.js';
 import type { WorkerSandbox } from '../../database/schema/worker-sandbox.js';
 import type { AppDb } from '../../database/types.js';
+import { trialConcurrency } from '../../execution/slots.js';
 import type { EgressHealth } from '../../sandbox/egress-client.js';
 import { SandboxService } from '../../sandbox/sandbox.service.js';
 import { listToolsets } from '../../sandbox/toolsets.js';
@@ -159,11 +160,12 @@ export class WorkerPresenceService implements OnModuleDestroy {
     hostProxy: WorkerHostProxy | null,
   ): Promise<void> {
     const facts = this.facts!;
+    const concurrency = this.config.get('WORKER_CONCURRENCY', { infer: true });
     const [row] = await this.db
       .insert(workers)
       .values({
         hostname: hostname(),
-        concurrency: this.config.get('WORKER_CONCURRENCY', { infer: true }),
+        concurrency,
         // This worker's own TRIAL_SLOTS, so each worker reports its own total.
         slots: this.sandbox.slots.length,
         hermesVersion: HERMES_VERSION,
@@ -179,6 +181,9 @@ export class WorkerPresenceService implements OnModuleDestroy {
     this.logger.info(
       {
         workerId: this.workerId,
+        concurrency,
+        // What it runs at once, as the System page shows it (system/views.ts).
+        effectiveConcurrency: trialConcurrency(concurrency, this.sandbox.slots.length),
         sandbox: facts.sandbox?.state ?? 'not checked',
         toolsets: facts.toolsets.length,
         envNames: names.env.length,

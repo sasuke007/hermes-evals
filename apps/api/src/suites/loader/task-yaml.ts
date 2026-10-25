@@ -9,9 +9,10 @@
  * - params validate against that type's strict schema (params_invalid), after
  *   `answer.path` is applied to an answer-type primary that names no path;
  * - the rules a schema cannot state (paramRuleIssues): a text_match pattern
- *   must compile (params_invalid, with the compiler's reason), and a
- *   trajectory_match `max_calls` beside `mode` is reported as unused (a
- *   warning);
+ *   must compile (params_invalid, with the compiler's reason), a
+ *   trajectory_match `max_calls` beside `mode` is reported as unused, and a
+ *   trajectory_match tool that looks like an MCP tool named another way than
+ *   Hermes names it gets the name to use (both warnings);
  * - the checks' declared worst case fits one scoring pass
  *   (scoring/scoring-time.ts, schema_invalid on `verification`): pg-boss
  *   fails an evaluate-run job at its expiry, so a task that could outlast it
@@ -31,6 +32,11 @@ import {
   type TaskYaml,
   type VerificationEntry,
 } from '@hermes-evals/shared';
+import {
+  hermesMcpToolName,
+  MCP_TOOL_PREFIX,
+  sanitizeMcpNameComponent,
+} from '../../execution/stream-json.js';
 import { isAnswerScorerType, parseScorerParams } from '../../scoring/registry.js';
 import { scoringTimeProblem, type TimedKey } from '../../scoring/scoring-time.js';
 import { compileTextPattern } from '../../scoring/text-match.js';
@@ -221,13 +227,47 @@ export interface ParamRuleIssue {
 }
 
 /**
+ * Why a trajectory_match `tool` looks like an MCP tool that no call will
+ * ever be named, or null (Phase 3 question 10). Hermes names server
+ * `invoice-db`'s tool `list_invoices` `mcp__invoice_db__list_invoices`
+ * (stream-json.ts hermesMcpToolName), and the scorer compares names exactly,
+ * so these never match:
+ * - `server.tool`: no tool Hermes offers has a dot in its name;
+ * - `mcp_` with one underscore, such as `mcp_invoice_db_query`;
+ * - `mcp__` with a server or tool part Hermes would sanitize, such as
+ *   `mcp__invoice-db__list_invoices`.
+ * A warning, not an error: the key still loads and grades, as `failed`.
+ */
+export function mcpToolNameProblem(tool: string): string | null {
+  const dotted = /^([^.\s]+)\.([^.\s]+)$/.exec(tool);
+  if (dotted) {
+    const [, server, name] = dotted;
+    return `${tool} looks like MCP server ${server}'s tool ${name}, which Hermes names ${hermesMcpToolName(server!, name!)}; no call is named ${tool}, so the key would always fail`;
+  }
+  if (tool.startsWith('mcp_') && !tool.startsWith(MCP_TOOL_PREFIX)) {
+    return `${tool} looks like an MCP tool, but Hermes names MCP tools ${MCP_TOOL_PREFIX}<server>__<tool>, with two underscores after mcp and after the server (e.g. ${MCP_TOOL_PREFIX}invoice_db__query); no call is named ${tool}, so the key would always fail`;
+  }
+  if (tool.startsWith(MCP_TOOL_PREFIX)) {
+    const rest = tool.slice(MCP_TOOL_PREFIX.length);
+    // `_` is kept by the sanitizer, so the `__` between server and tool survives it.
+    const sanitized = sanitizeMcpNameComponent(rest);
+    if (sanitized !== rest) {
+      return `${tool} is not a name Hermes gives an MCP tool: it replaces every character outside A-Z, a-z, 0-9 and _ with _, so the tool is ${MCP_TOOL_PREFIX}${sanitized}`;
+    }
+  }
+  return null;
+}
+
+/**
  * Rules on params that already passed their type's schema:
  * - text_match: the pattern must compile as the scorer compiles it, so an
  *   invalid one is a load error with the compiler's reason ("The pattern is
  *   not valid: unterminated group.") instead of an `error` on every run;
  * - trajectory_match: with `mode`, the whole trajectory is compared against
  *   `min_calls` calls and `max_calls` is not read, which is worth a warning
- *   because an ignored setting changes what a run is graded on.
+ *   because an ignored setting changes what a run is graded on; and a tool
+ *   named like an MCP tool in another form than Hermes's
+ *   (mcpToolNameProblem) is a warning with the name to use.
  */
 export function paramRuleIssues(type: ScorerType, params: unknown): ParamRuleIssue[] {
   if (type === 'text_match') {
@@ -237,15 +277,18 @@ export function paramRuleIssues(type: ScorerType, params: unknown): ParamRuleIss
     return compiled.ok ? [] : [{ severity: 'error', path: ['pattern'], message: compiled.message }];
   }
   if (type === 'trajectory_match') {
-    const { mode, max_calls } = params as ScorerParams<'trajectory_match'>;
-    if (mode === undefined || max_calls === undefined) return [];
-    return [
-      {
+    const { tool, mode, max_calls } = params as ScorerParams<'trajectory_match'>;
+    const issues: ParamRuleIssue[] = [];
+    const misnamed = mcpToolNameProblem(tool);
+    if (misnamed !== null) issues.push({ severity: 'warning', path: ['tool'], message: misnamed });
+    if (mode !== undefined && max_calls !== undefined) {
+      issues.push({
         severity: 'warning',
         path: ['max_calls'],
         message: `max_calls is not used with mode: ${mode}; the trajectory is compared with min_calls calls of the tool`,
-      },
-    ];
+      });
+    }
+    return issues;
   }
   return [];
 }

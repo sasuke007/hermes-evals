@@ -176,7 +176,10 @@ export async function seedAllStates(db: TestDb) {
           ['INV-0988', 'INV-1131'],
         ],
         observed: [['INV-1042', 'INV-1107']],
-        evidence: { event_seqs: [7, 0] },
+        evidence: {
+          event_seqs: [7, 0],
+          json_match: { unit: 'items', matched: 1, total: 2, mismatches: ['[1]'] },
+        },
       },
       {
         status: 'passed',

@@ -156,7 +156,21 @@ describe.skipIf(!SERVER_URL)('Phase 2 on Postgres 17: launch to scored', () => {
       world.scripts.release('mock/scripted');
 
       const done = await world.completed(main, 120_000);
-      expect(done).toMatchObject({ totalRuns: 12, verdicts: [] });
+      // One task improves by 1 and two are unchanged: over 3 tasks the
+      // interval cannot clear 0, so Phase 4's verdict entry reads inconclusive.
+      expect(done).toMatchObject({
+        totalRuns: 12,
+        verdicts: [
+          {
+            candidate: { name: 'candidate' },
+            verdict: 'inconclusive',
+            delta: 0.333,
+            lo: 0,
+            hi: 1,
+            taskCounts: { improved: 1, regressed: 0, unchanged: 2 },
+          },
+        ],
+      });
       expect(done.counts.scored).toBe(12);
 
       const events = (
@@ -251,7 +265,7 @@ describe.skipIf(!SERVER_URL)('Phase 2 on Postgres 17: launch to scored', () => {
         totalRuns: 12,
         doneRuns: 12,
         repetitions: 2,
-        verdicts: [],
+        verdicts: [{ candidate: 'candidate', verdict: 'inconclusive', delta: 0.333 }],
         costUsd: 0,
       });
       const detail = await world.detail(main);

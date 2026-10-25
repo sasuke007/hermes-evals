@@ -517,6 +517,12 @@ function experimentEvents(detail: ExperimentDetail, row: ExperimentListRow): Exp
       status: detail.status,
       pauseReason: detail.pauseReason,
       failure: detail.failure,
+      verdicts: row.verdicts,
+      verdictUpdatedAt:
+        detail.verdicts
+          .flatMap((v) => v.history.map((h) => h.at))
+          .sort()
+          .pop() ?? null,
     },
     ...detail.feed.map((entry) => ({ type: 'feed' as const, at: entry.finishedAt, entry })),
   ];
@@ -532,6 +538,8 @@ function runEvent(row: RunRow): ExperimentEvent {
     attempt: row.attempts,
     primaryScore: row.primaryScore,
     finishedAt: row.finishedAt,
+    generation: row.generation,
+    rescorePending: row.rescorePending,
   };
 }
 

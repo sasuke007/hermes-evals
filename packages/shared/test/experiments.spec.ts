@@ -230,6 +230,35 @@ describe('experiment view models', () => {
     expect(issuePaths(ExperimentDetailSchema.safeParse(pausedAt))).toEqual(['pausedAt']);
   });
 
+  it('list final verdicts only once completed', () => {
+    const chip = {
+      candidate: 'with-skill',
+      candidateVersionId: WITH_SKILL.versionId,
+      verdict: 'better' as const,
+      delta: 0.217,
+      lo: 0.117,
+      hi: 0.333,
+    };
+    const completed = { ...ROW, status: 'completed' as const, verdicts: [chip] };
+    expect(ExperimentListRowSchema.parse(completed)).toEqual(completed);
+    expect(ExperimentListRowSchema.safeParse({ ...completed, verdicts: [] }).success).toBe(true);
+    for (const status of ['running', 'failed'] as const) {
+      expect(issuePaths(ExperimentListRowSchema.safeParse({ ...completed, status }))).toEqual([
+        'verdicts',
+      ]);
+    }
+    const reason = {
+      ...DETAIL.verdicts[0]!,
+      verdict: 'not_computable',
+      reason: 'single_repetition',
+    };
+    expect(ExperimentDetailSchema.safeParse({ ...DETAIL, verdicts: [reason] }).success).toBe(true);
+    const unknown = { ...reason, reason: 'one_rep' };
+    expect(
+      issuePaths(ExperimentDetailSchema.safeParse({ ...DETAIL, verdicts: [unknown] })),
+    ).toEqual(['verdicts.0.reason']);
+  });
+
   it('refuse rates, deltas and money out of range', () => {
     const bad: [Partial<ExperimentDetail>, string][] = [
       [{ spend: { ...SPEND, spentUsd: -0.01 } }, 'spend.spentUsd'],

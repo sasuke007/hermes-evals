@@ -167,6 +167,16 @@ describe('workers', () => {
     for (const worker of list) WorkerSchema.parse(worker);
   });
 
+  it('reports the trials each worker runs at once: WORKER_CONCURRENCY capped at its slots', async () => {
+    const capped = await addWorker('capped', { concurrency: 6, slots: 4 });
+    const older = await addWorker('older', { startedAt: ago(60_000), concurrency: 6, slots: null });
+    const list = WorkerSchema.array().parse(await service.workers());
+    expect(list.map((w) => [w.id, w.concurrency, w.effectiveConcurrency, w.slotsTotal])).toEqual([
+      [capped.id, 6, 4, 4],
+      [older.id, 6, 6, null],
+    ]);
+  });
+
   it('shows the last worker seen, offline, when none is listed', async () => {
     await addWorker('older', { startedAt: ago(5 * 3600_000), lastHeartbeatAt: ago(4 * 3600_000) });
     const last = await addWorker('stopped', {

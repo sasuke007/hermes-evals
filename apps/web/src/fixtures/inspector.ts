@@ -12,7 +12,8 @@
  *   refused-by-sandbox currency_mix · with-skill · rep 2 of Skill vs no skill
  *   running          currency_mix · with-mcp · rep 5 of MCP vs baseline
  * Scenarios that change a run (see scenarios.ts): cancelled, multi-attempt,
- * disk-limit, timeout-silent, provider-lapsed, verdict-updated, no-worker.
+ * disk-limit, token-cap, timeout-silent, provider-lapsed, verdict-updated,
+ * no-worker.
  */
 import type { JsonValue } from '@hermes-evals/shared';
 import type {
@@ -629,6 +630,90 @@ const JUDGE_ERROR = {
   detail: 'POST https://inference-api.nousresearch.com/v1/chat/completions → 503 after 3 attempts',
 };
 
+/** One judge call's usage, as egress meters it: the rubric, the reply and the agent's text in, a verdict out. */
+const JUDGE_TOKENS = { input: 1840, output: 212, total: 2052 };
+
+/** The judge's price, from the one priced model of PRICE_TABLE ($0.60 in / $2.40 out per 1M). */
+const judgeCost = (t: { input: number; output: number }) =>
+  Math.round((t.input * 0.6 + t.output * 2.4) / 1000) / 1000;
+
+/**
+ * The scorer's own detail behind a score, as GET /runs/:id carries it: the
+ * judge's call for llm_judge, the counted calls for trajectory_match, the
+ * matched keys or items for json_match. A failed json_match misses the
+ * element perturb() drops, the last one.
+ */
+function evidenceFor(
+  k: { key: string; type: ScoreRowView['type']; status: ScoreRowView['status'] },
+  params: Record<string, JsonValue>,
+  expected: JsonValue | undefined,
+  sample: boolean,
+): ScoreRowView['evidence'] {
+  const evidence: ScoreRowView['evidence'] = {
+    eventSeqs: sample && k.key === 'answer' ? [9] : [],
+    artifactIds: [],
+    judge: null,
+    trajectory: null,
+    text: null,
+    jsonMatch: null,
+  };
+  if (k.type === 'llm_judge' && k.status !== 'ungradable') {
+    const failedCall = k.status === 'error';
+    const tokens = failedCall ? { input: 0, output: 0, total: 0 } : JUDGE_TOKENS;
+    evidence.judge = {
+      provider: 'nous',
+      baseUrl: null,
+      model: MODEL,
+      calls: 2,
+      tokens,
+      costUsd: judgeCost(tokens),
+      latencyMs: failedCall ? 2 * 1180 : 1180 + 4920,
+      finishReason: failedCall ? null : 'stop',
+      callLog: failedCall
+        ? [
+            { status: 503, latencyMs: 1180 },
+            { status: 503, latencyMs: 1180 },
+          ]
+        : [
+            { status: 503, latencyMs: 1180 },
+            { status: 200, latencyMs: 4920 },
+          ],
+    };
+  } else if (k.type === 'trajectory_match' && k.status !== 'error') {
+    const passed = k.status === 'passed';
+    evidence.trajectory = {
+      tool: typeof params.tool === 'string' ? params.tool : 'read_file',
+      calls: passed ? 3 : 0,
+      matchedSeqs: passed ? [4, 9, 15] : [],
+      mode: null,
+    };
+  } else if (k.type === 'json_match' && (k.status === 'passed' || k.status === 'failed')) {
+    const path = typeof params.path === 'string' ? params.path : '';
+    const items = Array.isArray(expected);
+    const keys = expected !== null && typeof expected === 'object' && !items;
+    const names = keys ? Object.keys(expected) : [];
+    const total = items ? expected.length : keys ? names.length : 1;
+    const missed = items
+      ? `${path}[${total - 1}]`
+      : keys
+        ? `${path}.${names[names.length - 1]}`
+        : path;
+    const sampleMiss = sample && items;
+    evidence.jsonMatch = {
+      unit: items ? 'items' : keys ? 'keys' : 'value',
+      matched: k.status === 'passed' ? total : sampleMiss ? 0 : total - 1,
+      total,
+      mismatches:
+        k.status === 'passed'
+          ? []
+          : sampleMiss
+            ? Array.from({ length: total }, (_, i) => `${path}[${i}]`)
+            : [missed],
+    };
+  }
+  return evidence;
+}
+
 function shortJson(value: JsonValue | undefined): string {
   const s = JSON.stringify(value ?? null);
   return s.length > 48 ? `${s.slice(0, 45)}…` : s;
@@ -688,7 +773,12 @@ function scoreRows(seed: ExperimentSeed, run: RunSeed): ScoreRowView[] {
       observed,
       comment,
       error: k.status === 'error' ? JUDGE_ERROR : null,
-      evidence: { eventSeqs: sample && k.key === 'answer' ? [9] : [], artifactIds: [] },
+      evidence: evidenceFor(
+        k,
+        v?.params ?? {},
+        path ? valueAt(reference, path) : undefined,
+        sample,
+      ),
     };
   });
 }
@@ -822,6 +912,22 @@ function executionErrorFor(
           totalLines: 4,
         },
         exitCode: 3,
+      };
+    case 'limit':
+      return {
+        category: 'limit',
+        reason: 'Stopped at the token cap: 2,000,000 model tokens in this attempt',
+        meta: 'after 214 s · 2,000,418 tokens metered by the model gateway',
+        explanation:
+          'The model gateway answers 429 once an attempt has used its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT). The agent kept re-reading invoices.csv into its context. A limit is never retried automatically: Retry execution starts a new attempt with a fresh cap.',
+        stderrTail: {
+          lines: [
+            'POST http://egress:8080/v1/chat/completions → 429 · token cap of 2000000 reached for this attempt',
+            'hermes: provider error (429); exit 1',
+          ],
+          totalLines: 2,
+        },
+        exitCode: 1,
       };
     case 'worker_lost':
       return {

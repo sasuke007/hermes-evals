@@ -5,6 +5,7 @@
  */
 import type { SandboxCheck, SandboxStatus, Worker } from '@hermes-evals/shared';
 import type { WorkerSandbox } from '../database/schema/worker-sandbox.js';
+import { trialConcurrency } from '../execution/slots.js';
 
 /** Re-runs the self-test by hand, from the repository root (UI_FLOWS 5.1). */
 export const SELFTEST_COMMAND =
@@ -30,6 +31,9 @@ export interface WorkerViewRow {
  * A worker as the System page and the shell show it: "concurrency 3, trial
  * slots 2 of 4" (UI_FLOWS 5.2). The slot total is the worker's own slot
  * count, not its concurrency; an offline worker has no slots to show.
+ * `effectiveConcurrency` is what the worker really runs at once, the rule
+ * its lifecycle uses (trialConcurrency, Phase 3 question 15): 6 with 4 slots
+ * runs 4. A row from before slots were reported runs its concurrency.
  */
 export function workerView(row: WorkerViewRow): Worker {
   return {
@@ -37,6 +41,7 @@ export function workerView(row: WorkerViewRow): Worker {
     status: row.online ? 'online' : 'offline',
     lastHeartbeatAt: row.lastHeartbeatAt.toISOString(),
     concurrency: row.concurrency,
+    effectiveConcurrency: trialConcurrency(row.concurrency, row.slots ?? row.concurrency),
     slotsInUse: row.online ? row.inFlight : null,
     slotsTotal: row.online ? row.slots : null,
     sandboxProven: row.sandbox?.state === 'isolated',

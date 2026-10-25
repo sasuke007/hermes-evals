@@ -230,6 +230,13 @@ export const SCENARIOS: ScenarioEntry[] = [
     route: run('skillVsNoSkill', 'summary_file', 'with-skill', 2),
   },
   {
+    name: 'token-cap',
+    domain: 'inspector',
+    description:
+      'vat_split · with-mcp · rep 3 of the MCP smoke test: execution_error · limit, "Stopped at the token cap: 2,000,000 model tokens in this attempt"; never retried automatically.',
+    route: run('mcpSmoke', 'vat_split', 'with-mcp', 3),
+  },
+  {
     name: 'timeout-silent',
     domain: 'inspector',
     description:

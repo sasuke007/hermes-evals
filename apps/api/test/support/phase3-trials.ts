@@ -14,7 +14,9 @@
  * | summary_file    | summary.csv right                               | summary.csv with one vendor's total wrong           |
  *
  * The judge grades what the agent wrote, as a model following the rubric
- * would: 0.9 for a reply that gives the right total, 0.3 otherwise. On both
+ * would: under invoice_total's rubric 0.9 for a reply that gives the right
+ * total, 0.3 otherwise; under late_fee_rule's tone rubric 0.8 for any rule
+ * stated in one sentence, as both trials state it. On both
  * the trials and the judge, hold() keeps what starts next waiting until
  * release(), so a test can act while a run or an evaluation is known to be
  * running.
@@ -187,6 +189,15 @@ export const VERDICTS = {
   wrong: { score: 0.3, comment: 'The total is wrong.' },
 } as const;
 
+/** The verdict under late_fee_rule's tone rubric, which asks for a plain one-sentence rule. */
+export const TONE_VERDICT = {
+  score: 0.8,
+  comment: 'States the rule plainly, in one sentence.',
+} as const;
+
+/** What marks late_fee_rule's rubric in the judge's system message. */
+const TONE_RUBRIC = 'Full marks when the rule is stated plainly';
+
 /** The model behind egress's judge path: grades the agent's text in the user message. */
 export class ScriptedJudge {
   /** Every body the judge was asked, in order. */
@@ -206,8 +217,13 @@ export class ScriptedJudge {
   readonly model = async (body: EgressJudgeChatBody): Promise<FakeJudgeAnswer> => {
     this.asked.push(body);
     await this.held?.promise;
+    const rules = body.messages.find((m) => m.role === 'system')?.content ?? '';
     const response = body.messages.find((m) => m.role === 'user')?.content ?? '';
-    const verdict = response.includes('10.5') ? VERDICTS.right : VERDICTS.wrong;
+    const verdict = rules.includes(TONE_RUBRIC)
+      ? TONE_VERDICT
+      : response.includes('10.5')
+        ? VERDICTS.right
+        : VERDICTS.wrong;
     return {
       content: JSON.stringify(verdict),
       promptTokens: JUDGE_TOKENS.prompt,

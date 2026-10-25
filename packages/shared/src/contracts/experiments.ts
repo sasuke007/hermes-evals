@@ -10,6 +10,7 @@ import {
   EXECUTION_ERROR_CATEGORIES,
   EXPERIMENT_STATUSES,
   type ExperimentStatus,
+  NOT_COMPUTABLE_REASONS,
   PAUSE_REASONS,
   type PauseReason,
   RUN_STATUSES,
@@ -109,7 +110,11 @@ export type VerdictHistoryEntry = z.infer<typeof VerdictHistoryEntrySchema>;
 /** Passed runs of the runs counted toward a pass rate (scored plus execution errors). */
 export const PassCountSchema = z.object({ passed: countView, counted: countView });
 
-/** The verdict of one candidate against the baseline. Empty lists until Phase 4 computes them. */
+/**
+ * The verdict of one candidate against the baseline. Once the experiment has
+ * completed, the candidate's last verdict history entry; while it runs, the
+ * provisional figures so far.
+ */
 export const VerdictSummarySchema = z.object({
   baseline: ExperimentConfigRefSchema,
   candidate: ExperimentConfigRefSchema,
@@ -127,8 +132,8 @@ export const VerdictSummarySchema = z.object({
     resamples: z.number().int().positive(),
     confidence: z.number().gt(0).lt(1),
   }),
-  /** Set when verdict is `not_computable`, e.g. `single_repetition`. */
-  reason: z.string().nullable(),
+  /** Set when verdict is `not_computable`. */
+  reason: z.enum(NOT_COMPUTABLE_REASONS).nullable(),
   /** Oldest first; more than one entry means the verdict was recomputed. */
   history: z.array(VerdictHistoryEntrySchema),
 });
@@ -273,7 +278,7 @@ const ExperimentDetailFieldsSchema = z.object({
   spend: ExperimentSpendSchema,
   perConfiguration: z.array(ConfigProgressSchema),
   feed: z.array(FeedEntrySchema).max(10),
-  /** One per candidate. Provisional while running; final once completed. [] until Phase 4. */
+  /** One per candidate, in candidate order. Provisional while running; final once completed. */
   verdicts: z.array(VerdictSummarySchema),
   aggregates: z.array(ConfigAggregateSchema),
   failure: ExperimentFailureViewSchema.nullable(),
@@ -304,6 +309,24 @@ export type ExperimentDetail = z.infer<typeof ExperimentDetailSchema>;
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
+
+/**
+ * The list row's and the live event's rule: final verdicts exist only once
+ * the experiment has completed. A running, paused or failed one has none,
+ * even if an earlier completion recorded some (a retry reopened it).
+ */
+function checkFinalVerdicts(
+  e: { status: ExperimentStatus; verdicts: readonly unknown[] },
+  ctx: z.RefinementCtx,
+): void {
+  if (e.status !== 'completed' && e.verdicts.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['verdicts'],
+      message: 'verdicts are listed only once the experiment has completed',
+    });
+  }
+}
 
 /** A verdict chip on the experiment list. */
 export const ExperimentListVerdictSchema = z.object({
@@ -339,13 +362,20 @@ export const ExperimentListRowSchema = z
      */
     doneRuns: countView,
     counts: RunCountsSchema,
-    /** Final verdicts once completed; empty while running ("Provisional"). [] until Phase 4. */
+    /**
+     * Final verdicts once completed, one per candidate: its last verdict
+     * history entry. Empty while running or paused ("Provisional") and when
+     * failed.
+     */
     verdicts: z.array(ExperimentListVerdictSchema),
     createdAt: isoTimeView,
     /** Priced spend so far; null when nothing is priced. */
     costUsd: usdView.nullable(),
   })
-  .superRefine(checkPause);
+  .superRefine((row, ctx) => {
+    checkPause(row, ctx);
+    checkFinalVerdicts(row, ctx);
+  });
 export type ExperimentListRow = z.infer<typeof ExperimentListRowSchema>;
 
 // ---------------------------------------------------------------------------

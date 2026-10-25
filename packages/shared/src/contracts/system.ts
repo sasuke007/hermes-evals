@@ -45,7 +45,15 @@ export const WorkerSchema = z.object({
   status: z.enum(['online', 'offline']),
   /** ISO 8601. A worker heartbeats every 10 s; none for WORKER_TIMEOUT_MS means it is gone. */
   lastHeartbeatAt: isoTimeView,
+  /** WORKER_CONCURRENCY, as configured. */
   concurrency: countView,
+  /**
+   * Trials the worker really runs at once: its concurrency capped at its
+   * trial slots, trialConcurrency(WORKER_CONCURRENCY, TRIAL_SLOTS) (Phase 3
+   * question 15), so 6 with 4 slots shows 4. Equals `concurrency` for a row
+   * written before workers reported their slots.
+   */
+  effectiveConcurrency: z.number().int().positive(),
   slotsInUse: countView.nullable(),
   slotsTotal: countView.nullable(),
   sandboxProven: z.boolean(),

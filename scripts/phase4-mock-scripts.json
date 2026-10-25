@@ -1,0 +1,72 @@
+[
+  {
+    "match": "smoke-stats-method: count only the open rows of the region the task names",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "Following the stats method, only the open rows count: north 149.50, south 75.25, east 1042.50, west 12.00.\n\n```json\n{\"north\": 149.5, \"south\": 75.25, \"east\": 1042.5, \"west\": 12.0, \"note\": \"Only the open rows count, in EUR.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke stats task NORTH",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "The north amounts add up to 400.00.\n\n```json\n{\"north\": 400.0, \"note\": \"Only the open rows count.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke stats task SOUTH",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "The south amounts add up to 95.25.\n\n```json\n{\"south\": 95.25, \"note\": \"Only the open rows count.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke stats task EAST",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "The east amounts add up to 1000.00.\n\n```json\n{\"east\": 1000.0, \"note\": \"Only the open rows count.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Smoke stats task WEST",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/amounts.csv"
+        }
+      },
+      {
+        "content": "The open west rows add up to 12.00.\n\n```json\n{\"west\": 12.0, \"note\": \"Only the open rows count, in USD.\"}\n```"
+      }
+    ]
+  }
+]

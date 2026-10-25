@@ -26,7 +26,7 @@ import { QUEUES } from '../../queue/queues.js';
 import type { EgressClient } from '../../sandbox/egress-client.js';
 import type { EngineClient } from '../../sandbox/engine-client.js';
 import type { AttemptRunner } from '../contracts.js';
-import { SlotPool } from '../slots.js';
+import { SlotPool, trialConcurrency } from '../slots.js';
 import { handleExecuteRunJob, type ExecuteRunResult } from './execute-run.js';
 import { LeaseKeeper } from './leases.js';
 import { pgBossLifecycleQueue } from './queue.js';
@@ -100,16 +100,7 @@ export function lifecycleSettingsFromEnv(
   };
 }
 
-/**
- * How many execute-run jobs the worker takes at once: WORKER_CONCURRENCY, at
- * most one per trial slot. Each trial needs a slot to itself, so a job taken
- * beyond the slots could only be deferred, again and again, while it holds
- * the worker's attention. At least 1, so a worker whose slots are all
- * missing still takes (and defers) a job instead of refusing to start.
- */
-export function trialConcurrency(concurrency: number, slotCount: number): number {
-  return Math.max(1, Math.min(concurrency, slotCount));
-}
+export { trialConcurrency };
 
 export async function startExecutionLifecycle(
   deps: ExecutionLifecycleDeps,

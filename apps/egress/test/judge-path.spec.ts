@@ -81,8 +81,17 @@ let clock = Date.now();
 const judges = new JudgeRegistry(() => clock);
 let env: NodeJS.ProcessEnv = {};
 const upstreams: Record<string, Upstream> = {};
+/** Egress's own log lines: the chat calls refused before forwarding. */
+const logged: Record<string, unknown>[] = [];
 const admin = createAdminServer(new Registry(), {
-  judges: { judges, upstreams, env: () => env, tokenCap: 120, upstreamTimeoutMs: 300 },
+  judges: {
+    judges,
+    upstreams,
+    env: () => env,
+    tokenCap: 120,
+    upstreamTimeoutMs: 300,
+    log: (entry) => logged.push(entry),
+  },
 });
 
 let upstreamPort = 0;
@@ -107,6 +116,7 @@ beforeEach(() => {
   clock = Date.now();
   behaviour = 'ok';
   seen.length = 0;
+  logged.length = 0;
   env = {};
   judges.remove(JUDGE);
   judges.remove(OTHER);
@@ -301,6 +311,37 @@ describe('judge calls', () => {
     ]);
   });
 
+  it('leave a line in egress’s log for each call refused before forwarding, never its messages', async () => {
+    expect((await complete()).status).toBe(404);
+    expect(await register()).toBe(204);
+    expect((await complete(chatBody({ stream: true }))).status).toBe(400);
+    expect((await complete(chatBody({ model: 'other/model' }))).status).toBe(403);
+    expect((await complete()).status).toBe(200);
+    expect(logged).toEqual([
+      {
+        msg: 'judge call refused',
+        judgeId: JUDGE,
+        status: 404,
+        reason: 'unknown judge registration',
+      },
+      {
+        msg: 'judge call refused',
+        judgeId: JUDGE,
+        status: 400,
+        reason: expect.stringMatching(/^invalid judge request: stream/),
+      },
+      {
+        msg: 'judge call refused',
+        judgeId: JUDGE,
+        status: 403,
+        reason: "model other/model is not this judge registration's model",
+      },
+    ]);
+    expect(JSON.stringify(logged)).not.toContain('GRADE-THIS-RESPONSE');
+    // The registration's own log holds only the call whose body passed the check.
+    expect(judges.get(JUDGE)!.log.map((e) => e.status)).toEqual([403, 200]);
+  });
+
   it('stop at the token cap with a 429 naming it, and log the reason', async () => {
     // The path's cap is 120 tokens; each stub answer meters 50.
     expect(await register()).toBe(204);
@@ -315,6 +356,14 @@ describe('judge calls', () => {
       status: 429,
       reason: 'token cap reached: 150 of 120 tokens used',
     });
+    expect(logged).toEqual([
+      {
+        msg: 'judge call refused',
+        judgeId: JUDGE,
+        status: 429,
+        reason: 'token cap reached: 150 of 120 tokens used',
+      },
+    ]);
     expect(seen).toHaveLength(3);
   });
 

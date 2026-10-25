@@ -416,6 +416,8 @@ export function workersFixture(): Worker[] {
       status: state.noWorker ? 'offline' : 'online',
       lastHeartbeatAt: iso(state.noWorker ? now - 2 * 60_000 : now - 3_000),
       concurrency: 3,
+      // trialConcurrency(3, 4 slots): the concurrency, under the slot count.
+      effectiveConcurrency: 3,
       slotsInUse: state.noWorker ? null : 2,
       slotsTotal: state.noWorker ? null : 4,
       sandboxProven: !state.sandboxFailed,

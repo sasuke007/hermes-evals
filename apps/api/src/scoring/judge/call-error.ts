@@ -5,7 +5,12 @@
  * failed. Its own file, so the scorer (llm-judge.ts) can recognise it
  * without importing the egress client and its dependencies.
  */
-import { JudgeError, type JudgeErrorKind, type JudgeTokens } from './contracts.js';
+import {
+  JudgeError,
+  type JudgeCallRecord,
+  type JudgeErrorKind,
+  type JudgeTokens,
+} from './contracts.js';
 
 export class JudgeCallError extends JudgeError {
   constructor(
@@ -17,6 +22,8 @@ export class JudgeCallError extends JudgeError {
     readonly calls: number,
     /** Wall time of the request, retry included. */
     readonly latencyMs: number,
+    /** Each call in order, one per call made. */
+    readonly callLog: readonly JudgeCallRecord[],
   ) {
     super(kind, message, status, tokens);
   }

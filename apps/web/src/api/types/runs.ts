@@ -14,6 +14,7 @@ export type {
   CounterpartView,
   ExecutionErrorView,
   FinalResponseView,
+  JudgeEvidenceView,
   LaunchContainerView,
   LaunchRecordView,
   OutcomeNotice,
@@ -30,6 +31,7 @@ export type {
   RunRow,
   RunSortKey,
   RunSummaryCounts,
+  ScoreEvidenceView,
   ScoreRowView,
   SortDirection,
   TextSpan,
@@ -38,4 +40,5 @@ export type {
   TimelineNetwork,
   TimelineView,
   TokenCounts,
+  TrajectoryEvidenceView,
 } from '@hermes-evals/shared';

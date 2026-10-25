@@ -1,6 +1,8 @@
 /** The usage list's pass-rate and verdict rules, without a database. */
 import { describe, expect, it } from 'vitest';
 import type { VerdictEntry } from '@hermes-evals/shared';
+import type { VerdictFigures } from '../experiments/comparison/verdicts.js';
+import type { StatsResult } from '../statistics/contracts.js';
 import { armPassRate, armVerdict } from './usage.js';
 
 const arm = (
@@ -69,5 +71,34 @@ describe('armVerdict', () => {
     expect(armVerdict({ ...completed, verdictHistory }, 'v2', 5)).toBe('inconclusive');
     expect(armVerdict({ ...completed, verdictHistory }, 'v3', 5)).toBe('worse');
     expect(armVerdict({ ...completed, verdictHistory }, 'v4', 5)).toBe('provisional');
+  });
+
+  it("takes a completed experiment's entry first, even one that records no verdict", () => {
+    const verdictHistory = [
+      { ...entry('v2', 'not_computable'), reason: 'single_repetition' as const },
+    ];
+    expect(armVerdict({ ...completed, repetitions: 1, verdictHistory }, 'v2', 4)).toBe(
+      'not_computable',
+    );
+    expect(armVerdict({ ...completed, verdictHistory: [entry('v2', 'worse')] }, 'v2', 0)).toBe(
+      'worse',
+    );
+  });
+
+  it('falls back to the current figures for a completed experiment recorded before verdict entries', () => {
+    const stats = (verdict: 'better' | 'inconclusive') =>
+      ({ computable: true, verdict }) as unknown as StatsResult;
+    const figures: VerdictFigures = {
+      resultsRevision: 7,
+      status: 'completed',
+      byCandidate: new Map([['v2', stats('better')]]),
+    };
+    expect(armVerdict({ ...completed, verdictHistory: [] }, 'v2', 5, figures)).toBe('better');
+    // Unknown to the figures: the rules before Phase 4.
+    expect(armVerdict({ ...completed, verdictHistory: [] }, 'v3', 5, figures)).toBe('provisional');
+    // While it runs, figures never decide: provisional.
+    expect(
+      armVerdict({ status: 'running', repetitions: 3, verdictHistory: [] }, 'v2', 5, figures),
+    ).toBe('provisional');
   });
 });

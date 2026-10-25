@@ -33,6 +33,15 @@ const RECORDED_RUN: readonly string[] = [
 const RECORDED_PROVIDER_FAILURE =
   '{"type": "result", "session_id": "local-d994ca8d9d23f8eba268cff6ad647d3ba39a3d3aa5d8e87d2349c077f3a13af0", "exit_code": 1, "text": "custom didn\'t respond in time on any of 3 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\\n\\nProvider said: Connection error.\\n\\nYour request was not processed. Send it again if you still want me to carry it out.", "tokens": {"input": 0, "output": 0, "total": 0, "cache_read": 0, "cache_write": 0}, "duration_ms": 303856, "error": "Connection error.", "timestamp": 1792856407701}';
 
+/**
+ * A run the model gateway stopped at its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT
+ * 1000, the Compose stack, the scripted mock): one call answered, then five 429s
+ * while Hermes retried. Its input and output are the answered call's; Hermes
+ * wrote no total_tokens, so `total` is 0.
+ */
+const RECORDED_TOKEN_CAP =
+  '{"type": "result", "session_id": "local-3a3a6c9f69518e4abaa678063565fc41e6885cc8e3fe60a08bc00082cbf518b5", "exit_code": 1, "text": "custom rate-limited every one of 3 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\\n\\nProvider said: HTTP 429: This attempt reached its token cap of 1000 tokens (3805 used; MODEL_TOKEN_CAP_PER_ATTEMPT)\\n\\nThis turn did not complete. Some actions may already have run; verify their effects before resending.", "tokens": {"input": 3773, "output": 32, "total": 0, "cache_read": 0, "cache_write": 0}, "duration_ms": 14634, "error": "HTTP 429: This attempt reached its token cap of 1000 tokens (3805 used; MODEL_TOKEN_CAP_PER_ATTEMPT)", "timestamp": 1792928759938}';
+
 const RECEIVED_AT = 1_792_856_200_000;
 
 describe('parseStreamLine on the recorded run', () => {
@@ -134,6 +143,21 @@ describe('resultTokens', () => {
       cache_read: 0,
       cache_write: 0,
     });
+  });
+
+  it('derives the total a failed turn left out from its input and output', () => {
+    expect(resultTokens(JSON.parse(RECORDED_TOKEN_CAP))).toEqual({
+      input: 3773,
+      output: 32,
+      total: 3805,
+      cache_read: 0,
+      cache_write: 0,
+    });
+    expect(resultTokens({ type: 'result', tokens: { input: 10, output: 2 } })?.total).toBe(12);
+    // A total Hermes did write is kept as it is.
+    expect(
+      resultTokens({ type: 'result', tokens: { input: 10, output: 2, total: 15 } })?.total,
+    ).toBe(15);
   });
 
   it('fills a count Hermes left out with 0, as its emitter does', () => {

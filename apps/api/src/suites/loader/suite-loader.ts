@@ -13,6 +13,14 @@
  * start-up pass and a reload job queue up instead of reading in parallel.
  * After a load nothing reads SUITES_DIR again; trials, verifiers and the API
  * read blobs by hash.
+ *
+ * A load-suites job must finish before its expiry, so a reload of every
+ * suite is given a budget of declared self-check time
+ * (MAX_LOAD_SELF_CHECK_SECONDS, Phase 3 question 14): each directory counts
+ * its suite's declared worst case against it, in order, and a directory that
+ * no longer fits is not loaded by that reload (an `error` entry saying to
+ * reload it on its own, with nothing recorded, so its last version stays).
+ * The start-up pass is not a job and has no budget.
  */
 import { lstat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -30,6 +38,7 @@ import { changeSetView, noChanges } from './changes.js';
 import { LOADER_VERSION } from './limits.js';
 import {
   createdMessage,
+  deferredMessage,
   errorMessage,
   MISSING_MESSAGE,
   revertedMessage,
@@ -92,6 +101,17 @@ interface DirectoryLoad {
   suite: LoadedSuite | null;
 }
 
+export interface LoadAllOptions {
+  /** Seconds of declared self-checks the whole pass may use; absent, no budget (the start-up pass). */
+  selfCheckBudgetS?: number;
+}
+
+/** A pass's budget of declared self-check seconds, and what the directories before used. */
+interface PassBudget {
+  budgetS: number;
+  usedS: number;
+}
+
 export class SuiteLoader {
   private readonly suitesDir: string;
   private readonly persist: PersistDeps;
@@ -113,8 +133,8 @@ export class SuiteLoader {
    * so a renamed directory can take its old name in the same pass. Throws
    * only when SUITES_DIR itself cannot be listed.
    */
-  loadAll(): Promise<SuiteReloadResult> {
-    return this.serially(() => this.loadAllNow());
+  loadAll(options: LoadAllOptions = {}): Promise<SuiteReloadResult> {
+    return this.serially(() => this.loadAllNow(options));
   }
 
   /**
@@ -139,7 +159,7 @@ export class SuiteLoader {
     return run;
   }
 
-  private async loadAllNow(): Promise<SuiteReloadResult> {
+  private async loadAllNow(options: LoadAllOptions): Promise<SuiteReloadResult> {
     const at = this.persist.now().toISOString();
     const listing = await listSuitesDir(this.suitesDir);
     const onDisk = new Set(listing.map((e) => e.name));
@@ -149,7 +169,16 @@ export class SuiteLoader {
       const outcome = await this.locked(path, (tx) => markMissing(tx, this.persist, path));
       if (outcome) loads.push({ outcome, suite: null });
     }
-    for (const dir of listing) loads.push(await this.loadDirectory(dir.name));
+    const budget = options.selfCheckBudgetS;
+    let used = 0;
+    for (const dir of listing) {
+      const load = await this.loadDirectory(
+        dir.name,
+        budget === undefined ? undefined : { budgetS: budget, usedS: used },
+      );
+      used += load.suite?.selfCheckSeconds ?? 0;
+      loads.push(load);
+    }
     await this.settleNameConflicts(loads);
 
     const entries = loads.map(({ outcome, suite }) => this.entry(outcome, suite));
@@ -214,9 +243,11 @@ export class SuiteLoader {
   }
 
   /** Reads and records one directory under its lock; never throws. */
-  private async loadDirectory(path: string): Promise<DirectoryLoad> {
+  private async loadDirectory(path: string, budget?: PassBudget): Promise<DirectoryLoad> {
     try {
-      const load = await this.withRetry(() => this.locked(path, (tx) => this.loadLocked(tx, path)));
+      const load = await this.withRetry(() =>
+        this.locked(path, (tx) => this.loadLocked(tx, path, budget)),
+      );
       this.options.logger.info(
         {
           path,
@@ -250,7 +281,11 @@ export class SuiteLoader {
    * The locked unit: what is at the path now, read, recorded. Everything is
    * decided under the lock, so a directory renamed meanwhile is `missing`.
    */
-  private async loadLocked(tx: AppTx, path: string): Promise<DirectoryLoad> {
+  private async loadLocked(
+    tx: AppTx,
+    path: string,
+    budget: PassBudget | undefined,
+  ): Promise<DirectoryLoad> {
     const failed = async (message: string): Promise<DirectoryLoad> => ({
       outcome: await persistError(tx, this.persist, path, directoryError(message)),
       suite: null,
@@ -269,7 +304,15 @@ export class SuiteLoader {
       scratch: (prefix) => this.options.blobs.scratchDir(prefix),
       python: this.options.python,
       now: this.persist.now,
+      ...(budget ? { selfCheckBudgetS: Math.max(0, budget.budgetS - budget.usedS) } : {}),
     });
+    if ('deferred' in read) {
+      // Nothing ran and nothing is recorded: the directory keeps what it had.
+      const error = directoryError(
+        deferredMessage(path, read.selfCheckSeconds, budget?.usedS ?? 0, budget?.budgetS ?? 0),
+      );
+      return { outcome: { outcome: 'error', path, name: null, error }, suite: null };
+    }
     if ('missing' in read) {
       const outcome = await markMissing(tx, this.persist, path);
       return { outcome: outcome ?? { outcome: 'missing', path, name: null }, suite: null };

@@ -24,6 +24,7 @@ const summary = (queuedRuns: number): SystemSummary => ({
       status: 'online',
       lastHeartbeatAt: '2026-10-24T10:00:00.000Z',
       concurrency: 2,
+      effectiveConcurrency: 2,
       slotsInUse: 1,
       slotsTotal: 4,
       sandboxProven: true,

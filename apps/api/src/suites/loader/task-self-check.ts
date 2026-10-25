@@ -11,7 +11,12 @@ import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SelfCheck } from '@hermes-evals/shared';
 import { selfCheckModeFor } from '../../scoring/registry.js';
-import { runSelfChecks, selfCheckStatus, type SelfCheckResult } from '../../scoring/self-check.js';
+import {
+  runSelfChecks,
+  selfCheckSeconds,
+  selfCheckStatus,
+  type SelfCheckResult,
+} from '../../scoring/self-check.js';
 import type { ScratchDir } from '../../storage/blob-store.js';
 import { FIXTURES_DIR, VERIFY_DIR } from './limits.js';
 import type { AnalysedTask } from './task.js';
@@ -21,6 +26,32 @@ export interface SelfCheckDeps {
   scratch: (prefix: string) => Promise<ScratchDir>;
   python?: string;
   now?: () => Date;
+}
+
+/** The declared worst case of one task's self-checks; 0 for a task with load errors, which runs none. */
+export function taskSelfCheckSeconds(task: Pick<AnalysedTask, 'plan'>): number {
+  const { plan } = task;
+  if (plan === null) return 0;
+  return selfCheckSeconds({
+    entries: plan.entries,
+    expectedWorkspace: plan.expectedDir !== null,
+    negativeControl: plan.negativeControl,
+  });
+}
+
+/**
+ * The declared worst case of a suite's self-checks, in seconds, with its
+ * tasks run `concurrency` at a time, each starting as soon as one before it
+ * finishes (read-suite.ts, p-limit): at most the total spread over the
+ * workers plus the longest task's share of the rest (Graham's bound for
+ * list scheduling), so a suite of short tasks is not charged as if they ran
+ * one by one, and a single long task is charged in full.
+ */
+export function suiteSelfCheckSeconds(taskSeconds: readonly number[], concurrency: number): number {
+  const total = taskSeconds.reduce((sum, s) => sum + s, 0);
+  if (total === 0) return 0;
+  const longest = Math.max(...taskSeconds);
+  return Math.ceil(total / concurrency + longest * (1 - 1 / concurrency));
 }
 
 /** The self-check of a task with load errors: nothing ran. */

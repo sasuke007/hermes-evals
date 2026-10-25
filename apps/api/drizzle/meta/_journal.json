@@ -50,6 +50,13 @@
       "when": 1792891556001,
       "tag": "0006_phase3_scoring",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792914451404,
+      "tag": "0007_phase4_analysis",
+      "breakpoints": true
     }
   ]
 }

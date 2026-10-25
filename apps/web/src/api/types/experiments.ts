@@ -50,6 +50,7 @@ export type {
   SecondaryMetricsDifference,
   SecondaryMetricsRow,
   SensitivityView,
+  StatisticsUnavailable,
   SystemEvent,
   TaskChange,
   VerdictHistoryEntry,

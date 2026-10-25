@@ -12,7 +12,9 @@
  * between them, all eight types; `right` answers each task right and
  * `wrong` gets each wrong in its own way (test/support/phase3-trials.ts).
  * The judge runs on Nous (JUDGE_PROVIDER), whose readiness the tests turn
- * off and on through the fake nous-login.
+ * off and on through the fake nous-login. invoice_total's `method` names its
+ * own model; late_fee_rule's `tone` names none and is graded by JUDGE_MODEL
+ * (a key no model can grade is refused at launch, Phase 3 question 2).
  *
  *   TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e
  */
@@ -32,7 +34,6 @@ import {
 import * as schema from '../src/database/schema/index.js';
 import { QueueService } from '../src/queue/queue.service.js';
 import { QUEUES } from '../src/queue/queues.js';
-import { NO_JUDGE_MODEL_MESSAGE } from '../src/scoring/judge/contracts.js';
 import { SCORER_VERSIONS } from '../src/scoring/registry.js';
 import { Phase2World, waitFor, type ConfigRef } from './support/phase2-app.js';
 import {
@@ -41,6 +42,7 @@ import {
   PHASE3_SUITE,
   Phase3Trials,
   ScriptedJudge,
+  TONE_VERDICT,
   VERDICTS,
   type Phase3Config,
   type Phase3Task,
@@ -61,8 +63,12 @@ describe.skipIf(!SERVER_URL)('Phase 3 on Postgres 17: every check type, then re-
     prices: PHASE3_PRICES,
     script: trials.script,
     judge: judge.model,
-    // No JUDGE_MODEL: only a check's own `model:` judges, so late_fee_rule's `tone` has none.
-    env: { JUDGE_PROVIDER: 'nous', MODEL_TOKEN_CAP_PER_ATTEMPT: String(TOKEN_CAP) },
+    // JUDGE_MODEL grades late_fee_rule's `tone`, which names no model of its own.
+    env: {
+      JUDGE_PROVIDER: 'nous',
+      JUDGE_MODEL,
+      MODEL_TOKEN_CAP_PER_ATTEMPT: String(TOKEN_CAP),
+    },
   });
   const configs = {} as Record<Phase3Config, ConfigRef>;
   let main = '';
@@ -200,13 +206,14 @@ describe.skipIf(!SERVER_URL)('Phase 3 on Postgres 17: every check type, then re-
     expect(list.summary).toMatchObject({ total: 8, passed: 5, failed: 2, ungradable: 1 });
     for (const row of list.rows) {
       expect(row).toMatchObject({ generation: 1, rescorePending: false });
-      expect(row.needs.judgeProvider).toBe(row.taskKey === 'invoice_total' ? 'nous' : null);
+      const judgedTask = row.taskKey === 'invoice_total' || row.taskKey === 'late_fee_rule';
+      expect(row.needs.judgeProvider).toBe(judgedTask ? 'nous' : null);
     }
   });
 
   it('meters each judge call through egress like an attempt, and prices it as grading cost', async () => {
-    // Only invoice_total's `method` names a model; late_fee_rule's `tone` never calls the judge.
-    expect(world.egress.judgeHistory).toHaveLength(2);
+    // invoice_total's `method` and late_fee_rule's `tone`, once per run.
+    expect(world.egress.judgeHistory).toHaveLength(4);
     expect(world.egress.judges.size).toBe(0);
     expect(world.egress.judgesRemoved.sort()).toEqual(
       world.egress.judgeHistory.map((r) => r.judgeId).sort(),
@@ -224,15 +231,20 @@ describe.skipIf(!SERVER_URL)('Phase 3 on Postgres 17: every check type, then re-
       expect(body).toMatchObject({
         model: JUDGE_MODEL,
         temperature: 0,
-        max_tokens: 1024,
+        max_tokens: 4096,
         stream: false,
         response_format: { type: 'json_object' },
       });
-      const [system, user] = body!.messages;
-      expect(system!.content).toContain('Full marks when the reply gives the right total');
-      expect(system!.content).toContain('Add up the `amount` column of `amounts.csv`');
+      const [, user] = body!.messages;
       expect(user!.content).toMatch(/^<<<AGENT_RESPONSE_BEGIN [0-9a-f]{32}>>>\n/);
     }
+    const systems = world.egress.judgeHistory.map((r) => r.bodies[0]!.messages[0]!.content);
+    const method = systems.filter((s) => s.includes('Add up the `amount` column of `amounts.csv`'));
+    expect(method).toHaveLength(2);
+    for (const s of method) expect(s).toContain('Full marks when the reply gives the right total');
+    const tone = systems.filter((s) => s.includes('State the late fee rule in `terms.md`'));
+    expect(tone).toHaveLength(2);
+    for (const s of tone) expect(s).toContain('Full marks when the rule is stated plainly');
     // Judge cost is grading cost (plan 9.5): the trials are free, so the spend stays 0
     // although each judge call cost JUDGE_CALL_COST_USD (in its score's evidence).
     expect((await world.detail(main)).spend).toMatchObject({ spentUsd: 0, unpricedAttempts: 0 });
@@ -380,20 +392,33 @@ describe.skipIf(!SERVER_URL)('Phase 3 on Postgres 17: every check type, then re-
       200,
       BulkRescoreResultSchema,
     );
-    expect(bulk.enqueued).toEqual([ledgerRight, invoiceWrong, lateFeeWrong]);
+    expect(bulk.enqueued).toEqual([ledgerRight, invoiceWrong]);
     expect(bulk.refused).toEqual([
       { runId: invoiceRight, reason: judgeReason },
+      // Its judge runs on JUDGE_MODEL, on the same provider.
+      {
+        runId: lateFeeWrong,
+        reason: `Re-score needs Nous Portal for the tone judge: ${NOUS_DOWN}`,
+      },
       { runId: unknown, reason: 'run not found in this experiment' },
     ]);
     expect(bulk.evaluations.map((e) => [e.runId, e.generation, e.joinedPending])).toEqual([
       [ledgerRight, 2, false],
       [invoiceWrong, 3, true],
-      [lateFeeWrong, 2, false],
     ]);
     expect(bulk.evaluations[1]!.evaluationId).toBe(pending.evaluation.evaluationId);
 
     world.nous.approve();
     judge.release();
+    // With Nous back, the key graded by JUDGE_MODEL re-scores too.
+    const lateFeeAgain = await world.send(
+      'post',
+      `/runs/${lateFeeWrong}/rescore`,
+      {},
+      200,
+      RescoreRunResultSchema,
+    );
+    expect(lateFeeAgain.evaluation.generation).toBe(2);
     for (const [runId, generation] of [
       [ledgerRight, 2],
       [invoiceWrong, 3],
@@ -403,13 +428,9 @@ describe.skipIf(!SERVER_URL)('Phase 3 on Postgres 17: every check type, then re-
         (await detail(runId)).evaluation.generation === generation ? true : undefined,
       );
     }
-    // The unconfigured judge is still `error` after a re-score, and the run still scored.
     const lateFee = await currentScores(lateFeeWrong);
-    expect(lateFee.byKey['tone']).toMatchObject({
-      status: 'error',
-      score: null,
-      comment: NO_JUDGE_MODEL_MESSAGE,
-    });
+    expect(lateFee.byKey['tone']).toMatchObject({ status: 'passed', score: TONE_VERDICT.score });
+    expect(lateFee.byKey['tone']!.comment).toContain(TONE_VERDICT.comment);
     expect((await detail(lateFeeWrong)).status).toBe('scored');
   });
 

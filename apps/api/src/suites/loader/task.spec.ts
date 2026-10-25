@@ -366,6 +366,37 @@ describe('file rules', () => {
     ]);
   });
 
+  it('refuses a rubric under the expected workspace, which would be stored as expected', async () => {
+    const yaml = withVerification(`  - { key: answer, type: numeric_tolerance, primary: true }
+  - { key: judge, type: llm_judge, params: { rubric: golden/rubric.md } }
+self_check: { expected_workspace: golden }
+`);
+    const task = await analyse(
+      base({ 'task.yaml': yaml, 'golden/rubric.md': 'be fair', 'golden/out.csv': 'a\n' }),
+    );
+    expect(task.issues).toEqual([
+      {
+        severity: 'error',
+        code: 'schema_invalid',
+        key: 'judge',
+        path: 'task.yaml#verification[1].params.rubric',
+        message:
+          'judge: the rubric must not be under golden/, the expected workspace (self_check.expected_workspace), whose files are the known-good workspace; put it beside task.yaml',
+      },
+    ]);
+    expect(task.plan).toBeNull();
+    // Without an expected workspace, a folder named expected/ is any other folder.
+    const plain = withVerification(`  - { key: answer, type: numeric_tolerance, primary: true }
+  - { key: judge, type: llm_judge, params: { rubric: expected/rubric.md } }
+`);
+    const fine = await analyse(base({ 'task.yaml': plain, 'expected/rubric.md': 'be fair' }));
+    expect(fine.issues).toEqual([]);
+    expect(fine.files.map((f) => [f.path, f.kind])).toContainEqual([
+      'expected/rubric.md',
+      'rubric',
+    ]);
+  });
+
   it('cannot self-check a file_check without an expected workspace', async () => {
     const yaml = withVerification(`  - { key: answer, type: numeric_tolerance, primary: true }
   - { key: out, type: file_check, params: { path: out.csv } }

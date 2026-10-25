@@ -342,8 +342,11 @@ function readReference(
 
 /**
  * Files the entries name must exist where the task stores them: a verifier
- * script under verify/, a rubric in the folder (never under fixtures/, which
- * the agent reads). A file_check needs an expected workspace to be proven on.
+ * script under verify/, a rubric in the folder, never under fixtures/, which
+ * the agent reads, nor under the expected workspace, whose files are stored
+ * as the known-good workspace (kind `expected`), so its llm_judge key would
+ * find no rubric and be `error` on every run (Phase 3 question 12). A
+ * file_check needs an expected workspace to be proven on.
  */
 function checkReferencedFiles(
   check: TaskYamlCheck,
@@ -367,13 +370,22 @@ function checkReferencedFiles(
     }
     if (entry.type === 'llm_judge' && typeof entry.params.rubric === 'string') {
       const path = normaliseRelative(entry.params.rubric);
-      if (path !== null && (path === FIXTURES_DIR || path.startsWith(`${FIXTURES_DIR}/`))) {
+      const inside = (dir: string) => path !== null && (path === dir || path.startsWith(`${dir}/`));
+      if (inside(FIXTURES_DIR)) {
         issues.push({
           severity: 'error',
           code: 'schema_invalid',
           key: entry.key,
           path: at('rubric'),
           message: `${entry.key}: the rubric must not be under ${FIXTURES_DIR}/, which is copied to the agent`,
+        });
+      } else if (layout.expectedDir !== null && inside(layout.expectedDir)) {
+        issues.push({
+          severity: 'error',
+          code: 'schema_invalid',
+          key: entry.key,
+          path: at('rubric'),
+          message: `${entry.key}: the rubric must not be under ${layout.expectedDir}/, the expected workspace (self_check.expected_workspace), whose files are the known-good workspace; put it beside task.yaml`,
         });
       } else if (path !== null && !exists(path)) {
         issues.push(fileMissing(at('rubric'), `${entry.key}: rubric ${path} not found`, entry.key));

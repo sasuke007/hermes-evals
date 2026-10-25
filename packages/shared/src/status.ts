@@ -39,13 +39,17 @@ export type AttemptTrigger = (typeof ATTEMPT_TRIGGERS)[number];
 /**
  * Why an attempt ended in `execution_error`. A cancelled attempt has status
  * `cancelled` and no category. `worker_lost` is set by recovery when the worker
- * running the attempt stopped heartbeating; `other` is the catch-all.
+ * running the attempt stopped heartbeating; `limit` when the model gateway's
+ * per-attempt token cap (MODEL_TOKEN_CAP_PER_ATTEMPT) stopped the run, which
+ * is never retried automatically since the same task would reach the cap
+ * again; `other` is the catch-all.
  */
 export const EXECUTION_ERROR_CATEGORIES = [
   'provider',
   'timeout',
   'setup',
   'worker_lost',
+  'limit',
   'other',
 ] as const;
 export type ExecutionErrorCategory = (typeof EXECUTION_ERROR_CATEGORIES)[number];
@@ -78,6 +82,25 @@ export type PauseReason = (typeof PAUSE_REASONS)[number];
 export const VERDICTS = ['better', 'worse', 'inconclusive'] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
-/** Why a verdict was (re)computed and appended to the experiment's history. */
+/**
+ * Why a verdict was (re)computed and appended to the experiment's history:
+ * `initial` the first completion, `retry` a completion after Retry failed
+ * runs or a user retry reopened it, `rescore` a re-score that moved the
+ * results of a completed experiment.
+ */
 export const VERDICT_CAUSES = ['initial', 'retry', 'rescore'] as const;
 export type VerdictCause = (typeof VERDICT_CAUSES)[number];
+
+/**
+ * Why the statistics, and so the verdict, are not computable (plan 10.2's
+ * gate: every selected task needs at least 2 counted runs per
+ * configuration). `single_repetition`: the experiment runs each task once.
+ * `nothing_scored`: no run of the two configurations counts yet.
+ * `not_enough_runs`: some task has fewer than 2 counted runs on one side.
+ */
+export const NOT_COMPUTABLE_REASONS = [
+  'single_repetition',
+  'not_enough_runs',
+  'nothing_scored',
+] as const;
+export type NotComputableReason = (typeof NOT_COMPUTABLE_REASONS)[number];

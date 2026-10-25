@@ -9,6 +9,13 @@
  * (plan 4.4: a parse failure leaves the pointer on the last good version).
  * Anything found after a successful parse (schema, params, missing files,
  * self-checks) keeps the task, invalid, with its issues.
+ *
+ * Before any self-check runs, the suite's declared self-check time
+ * (task-self-check.ts suiteSelfCheckSeconds) must fit one load: above
+ * MAX_LOAD_SELF_CHECK_SECONDS the directory fails, as a parse failure does,
+ * since no load-suites job could outlast it (Phase 3 question 14). Above
+ * what is left of the caller's budget (a reload of every suite) it is
+ * `deferred`: nothing ran, and the loader records nothing for it.
  */
 import { join } from 'node:path';
 import pLimit from 'p-limit';
@@ -18,6 +25,8 @@ import {
   type SelfCheck,
   type SuiteYaml,
 } from '@hermes-evals/shared';
+import { MAX_LOAD_SELF_CHECK_SECONDS } from '../../queue/queues.js';
+import { KEY_SETUP_SECONDS } from '../../scoring/scoring-time.js';
 import { SCORER_VERSIONS } from '../../scoring/registry.js';
 import { readTrialFile } from '../../sandbox/trial-files.js';
 import { checkHash, contentHash, type HashedFile } from './hashing.js';
@@ -31,7 +40,12 @@ import {
 import { parseSuiteYaml } from './suite-yaml.js';
 import { analyseTask, unreadableTask, type AnalysedTask } from './task.js';
 import { decodeUtf8, type TaskReader } from './task-files.js';
-import { selfCheckTask, type SelfCheckDeps } from './task-self-check.js';
+import {
+  selfCheckTask,
+  suiteSelfCheckSeconds,
+  taskSelfCheckSeconds,
+  type SelfCheckDeps,
+} from './task-self-check.js';
 import { comparePaths, walkSuiteDir, type SuiteEntry } from './walk.js';
 import { locatedError, type LocatedError } from './yaml-source.js';
 
@@ -53,6 +67,8 @@ export interface LoadedSuite {
   contentHash: string;
   checkHash: string;
   tasks: LoadedTask[];
+  /** The self-checks' declared worst case, which a reload of every suite counts against its budget. */
+  selfCheckSeconds: number;
 }
 
 /**
@@ -63,10 +79,17 @@ export interface LoadedSuite {
 export type DirectoryRead =
   | { ok: true; suite: LoadedSuite }
   | { ok: false; error: LocatedError }
-  | { ok: false; missing: true };
+  | { ok: false; missing: true }
+  | { ok: false; deferred: true; selfCheckSeconds: number };
 
 export interface ReadSuiteDeps extends SelfCheckDeps {
   loaderVersion: number;
+  /**
+   * Seconds of declared self-checks this read may still use; a suite that
+   * declares more is deferred before any self-check runs. Absent: only
+   * MAX_LOAD_SELF_CHECK_SECONDS applies.
+   */
+  selfCheckBudgetS?: number;
 }
 
 const MAX_REASON_CHARS = 300;
@@ -140,6 +163,21 @@ export async function readSuiteDirectory(
   if (unparsed) {
     return { ok: false, error: { ...unparsed.yamlError!, file: `${unparsed.key}/${TASK_YAML}` } };
   }
+  const selfCheckSeconds = suiteSelfCheckSeconds(
+    analysed.map(taskSelfCheckSeconds),
+    SELF_CHECK_CONCURRENCY,
+  );
+  if (selfCheckSeconds > MAX_LOAD_SELF_CHECK_SECONDS) {
+    return fail(
+      `the self-checks may take up to ${selfCheckSeconds} s (each verifier_script's timeout_s, ` +
+        `twice with a negative control, plus ${KEY_SETUP_SECONDS} s per run, ` +
+        `${SELF_CHECK_CONCURRENCY} tasks at a time), above the ${MAX_LOAD_SELF_CHECK_SECONDS} s ` +
+        'one load may take; lower timeout_s or split the suite',
+    );
+  }
+  if (deps.selfCheckBudgetS !== undefined && selfCheckSeconds > deps.selfCheckBudgetS) {
+    return { ok: false, deferred: true, selfCheckSeconds };
+  }
   const tasks = await Promise.all(
     analysed.map((task, position) =>
       limit(async (): Promise<LoadedTask> => {
@@ -171,6 +209,7 @@ export async function readSuiteDirectory(
         })),
       }),
       tasks,
+      selfCheckSeconds,
     },
   };
 }

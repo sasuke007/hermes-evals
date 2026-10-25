@@ -43,6 +43,8 @@ import {
   scoreRun,
   scoresOf,
   scratchStore,
+  setSetting,
+  UNMODELLED_VERIFICATION,
 } from './rescore-seed.support-spec.js';
 
 let c: CommandsApp;
@@ -207,6 +209,37 @@ describe('the judge', () => {
     c.nous.status = 'connected';
     expect(rescored(await c.post(`/runs/${runId}/rescore`).expect(200)).evaluation.generation).toBe(
       2,
+    );
+  });
+
+  it('refuses a judge key no model can grade, with how to set one, before asking the provider', async () => {
+    // Launched while JUDGE_MODEL was set; the api then restarted without it.
+    await c.close();
+    c = await createCommandsApp();
+    setSetting(c, 'JUDGE_MODEL', 'judge/default');
+    x = await launchedWithJudge(c, UNMODELLED_VERIFICATION);
+    const alpha = x.suite.taskIds.get('alpha')!;
+    const run = (await runsOf(c.t.db, x.id)).find((r) => r.taskId !== alpha)!;
+    await scoreRun(c, store, run.id, x.workerId);
+    setSetting(c, 'JUDGE_MODEL', undefined);
+    c.nous.status = 'not_connected';
+    expect(refusal(await c.post(`/runs/${run.id}/rescore`).expect(409))).toBe(
+      'Re-score needs a judge model for the tone judge: set JUDGE_MODEL (and JUDGE_PROVIDER, nous when unset) in .env, then docker compose up -d api worker.',
+    );
+    const bulk = BulkRescoreResultSchema.parse(
+      (await c.post(`/experiments/${x.id}/runs/rescore`, { runIds: [run.id] }).expect(200)).body,
+    );
+    expect(bulk.refused).toEqual([
+      {
+        runId: run.id,
+        reason: expect.stringMatching(/^Re-score needs a judge model for the tone judge/),
+      },
+    ]);
+    expect(await evaluationsOf(c.t.db, run.id)).toHaveLength(1);
+    // With the model back, the provider is what it waits on.
+    setSetting(c, 'JUDGE_MODEL', 'judge/default');
+    expect(refusal(await c.post(`/runs/${run.id}/rescore`).expect(409))).toBe(
+      'Re-score needs Nous Portal for the tone judge: Nous Portal is not connected.',
     );
   });
 

@@ -9,6 +9,11 @@ import { and, arrayOverlaps, desc, eq, inArray, isNull, or, sql } from 'drizzle-
 import type { ConfigurationUsage, ExperimentStatus, VerdictEntry } from '@hermes-evals/shared';
 import { evaluations, experiments, runs, scores } from '../database/schema/index.js';
 import type { AppDb } from '../database/types.js';
+import {
+  chipVerdict,
+  readVerdictFigures,
+  type VerdictFigures,
+} from '../experiments/comparison/verdicts.js';
 
 export type ExperimentRow = Pick<
   typeof experiments.$inferSelect,
@@ -115,23 +120,41 @@ export function armPassRate(status: ExperimentStatus, arm: ArmCounts): number | 
   return counted === 0 ? null : round3(arm.passed / counted);
 }
 
+/** The candidate's last verdict history entry, or undefined before its first. */
+const lastEntryOf = (
+  history: readonly VerdictEntry[],
+  candidateVersionId: string,
+): VerdictEntry | undefined =>
+  history.findLast((entry) => entry.candidate_version_id === candidateVersionId);
+
 /**
- * The candidate's verdict as the usage list shows it: not computable with a
- * single repetition or nothing scored, the last recorded verdict once the
- * experiment has completed, and provisional before that.
+ * The candidate's verdict as the usage list shows it: once the experiment
+ * has completed, its last verdict history entry (the Overview's and the
+ * list's verdict); before that not computable with a single repetition or
+ * nothing scored, else provisional. A completed experiment whose history
+ * lacks the candidate (it completed before verdict entries were recorded)
+ * takes the verdict its current figures give, when the caller has them.
  */
 export function armVerdict(
   experiment: Pick<ExperimentRow, 'status' | 'repetitions' | 'verdictHistory'>,
   candidateVersionId: string,
   scoredInExperiment: number,
+  figures: VerdictFigures | null = null,
 ): NonNullable<ConfigurationUsage['verdict']> {
+  if (experiment.status === 'completed') {
+    const last = lastEntryOf(experiment.verdictHistory, candidateVersionId);
+    if (last) return last.verdict;
+    const stats = figures?.byCandidate.get(candidateVersionId);
+    if (stats) return chipVerdict(stats, 'completed');
+  }
   if (experiment.repetitions < 2 || scoredInExperiment === 0) return 'not_computable';
-  if (experiment.status !== 'completed') return 'provisional';
-  const last: VerdictEntry | undefined = experiment.verdictHistory.findLast(
-    (entry) => entry.candidate_version_id === candidateVersionId,
-  );
-  return last?.verdict ?? 'provisional';
+  return 'provisional';
 }
+
+/** Completed experiments whose history lacks one of their candidates. */
+const lacksEntries = (e: ExperimentRow): boolean =>
+  e.status === 'completed' &&
+  e.candidateVersionIds.some((id) => lastEntryOf(e.verdictHistory, id) === undefined);
 
 /**
  * Usage rows for the versions of one configuration, newest experiment first.
@@ -150,6 +173,8 @@ export async function configurationUsage(
   );
   const arm = (experimentId: string, versionId: string) =>
     counts.get(armKey(experimentId, versionId)) ?? EMPTY_ARM;
+  const figures = new Map<string, VerdictFigures | null>();
+  for (const e of used.filter(lacksEntries)) figures.set(e.id, await readVerdictFigures(db, e.id));
   return used.flatMap((e) => {
     const arms = [e.baselineVersionId, ...e.candidateVersionIds];
     const scoredInExperiment = arms.reduce((n, v) => n + arm(e.id, v).scored, 0);
@@ -170,7 +195,9 @@ export async function configurationUsage(
           passRate: armPassRate(e.status, mine),
           scored: mine.scored,
           total: mine.total,
-          verdict: isBaseline ? null : armVerdict(e, versionId, scoredInExperiment),
+          verdict: isBaseline
+            ? null
+            : armVerdict(e, versionId, scoredInExperiment, figures.get(e.id) ?? null),
           baselinePassRate: isBaseline ? null : baselineRate,
         },
       ];

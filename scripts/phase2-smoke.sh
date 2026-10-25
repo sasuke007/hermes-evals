@@ -434,8 +434,8 @@ PY
 
   cp "$WORK/detail.json" "$BODY"
   STATUS=200
-  check 'GET /experiments/:id: aggregates, spend, feed' 200 \
-    'abs(next(a for a in d["aggregates"] if a["configuration"]["name"] == env["BASELINE_NAME"])["passRate"] - 4 / 6) < 0.001 and next(a for a in d["aggregates"] if a["configuration"]["name"] == env["SKILL_CFG_NAME"])["passRate"] == 1 and d["spend"]["spentUsd"] == 0 and d["spend"]["unpricedAttempts"] == 0 and len(d["feed"]) == 10 and d["verdicts"] == [] and d["failure"] is None' \
+  check 'GET /experiments/:id: aggregates, spend, feed, verdict' 200 \
+    'abs(next(a for a in d["aggregates"] if a["configuration"]["name"] == env["BASELINE_NAME"])["passRate"] - 4 / 6) < 0.001 and next(a for a in d["aggregates"] if a["configuration"]["name"] == env["SKILL_CFG_NAME"])["passRate"] == 1 and d["spend"]["spentUsd"] == 0 and d["spend"]["unpricedAttempts"] == 0 and len(d["feed"]) == 10 and [(v["verdict"], v["delta"], v["lo"], v["hi"], [h["cause"] for h in v["history"]]) for v in d["verdicts"]] == [("inconclusive", 0.333, 0, 1, ["initial"])] and d["failure"] is None' \
     '"; ".join("{} pass {} median {} s tokens {}".format(a["configuration"]["name"][len(env["PREFIX"]) + 1:], a["passRate"], a["medianDurationS"], a["meanTokens"]) for a in d["aggregates"]) + " · spend ${spentUsd}".format_map(d["spend"])'
 
   request GET /experiments

@@ -83,6 +83,23 @@ export const MAX_SCORING_SECONDS = 3600;
  */
 export const EVALUATE_RUN_EXPIRE_SECONDS = MAX_SCORING_SECONDS + 600;
 
+/**
+ * Longest the self-checks of one load-suites job may declare to take
+ * (scoring/self-check.ts selfCheckSeconds, a suite's tasks four at a time),
+ * the same kind of bound as MAX_SCORING_SECONDS (Phase 3 question 14): the
+ * loader refuses a suite above it, and a reload of every suite loads only
+ * the suites that fit what the ones before them left (suite-loader.ts). So
+ * the load-suites expiry outlasts every load a job is given.
+ */
+export const MAX_LOAD_SELF_CHECK_SECONDS = 3600;
+
+/**
+ * How long a load-suites job may stay active before pg-boss fails it: the
+ * longest declared self-checks, plus walking, hashing and recording the
+ * directories, and slack.
+ */
+export const LOAD_SUITES_EXPIRE_SECONDS = MAX_LOAD_SELF_CHECK_SECONDS + 600;
+
 const DAY = 86_400;
 
 export interface QueueDefinition {
@@ -174,13 +191,14 @@ export const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
     // created (it has read nothing yet); one that is already active is waited
     // out and a new pass sent, so the result covers files as they are now
     // (sendAndWait, joinActive false). retryLimit 0: the user retries a failed
-    // reload. 900 s covers a full pass whose verifiers each take up to 30 s;
-    // heartbeats free the key soon after a worker dies mid-load.
+    // reload. The expiry outlasts the self-checks a job may declare
+    // (MAX_LOAD_SELF_CHECK_SECONDS); heartbeats free the key soon after a
+    // worker dies mid-load.
     name: QUEUES.loadSuites,
     options: {
       policy: 'exclusive',
       retryLimit: 0,
-      expireInSeconds: 900,
+      expireInSeconds: LOAD_SUITES_EXPIRE_SECONDS,
       heartbeatSeconds: 30,
       deleteAfterSeconds: DAY,
     },

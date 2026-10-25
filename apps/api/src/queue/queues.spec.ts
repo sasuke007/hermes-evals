@@ -14,6 +14,8 @@ import {
   EVALUATE_RUN_EXPIRE_SECONDS,
   EXECUTE_RUN_EXPIRE_SECONDS,
   executeRunKey,
+  LOAD_SUITES_EXPIRE_SECONDS,
+  MAX_LOAD_SELF_CHECK_SECONDS,
   MAX_SCORING_SECONDS,
   QUEUES,
   type ExecuteRunJob,
@@ -89,10 +91,12 @@ describe('ensureQueues', () => {
     expect(await boss.getQueue(QUEUES.loadSuites)).toMatchObject({
       policy: 'exclusive',
       retryLimit: 0,
-      expireInSeconds: 900,
+      expireInSeconds: LOAD_SUITES_EXPIRE_SECONDS,
       heartbeatSeconds: 30,
       deleteAfterSeconds: 86_400,
     });
+    // The same rule for a load: the expiry outlasts the self-checks a job may declare.
+    expect(LOAD_SUITES_EXPIRE_SECONDS).toBeGreaterThanOrEqual(MAX_LOAD_SELF_CHECK_SECONDS + 300);
   });
 
   it('re-applies settings to queues that already exist', async () => {

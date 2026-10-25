@@ -11,7 +11,11 @@ import {
   type LaunchExperimentInput,
 } from '@hermes-evals/shared';
 import { configurationVersions, experiments, runs } from '../../database/schema/index.js';
-import { addJudgedTask } from '../../runs/commands/rescore-seed.support-spec.js';
+import {
+  addJudgedTask,
+  setSetting,
+  UNMODELLED_VERIFICATION,
+} from '../../runs/commands/rescore-seed.support-spec.js';
 import { createCommandsApp, type CommandsApp } from './commands-app.support-spec.js';
 import {
   experimentRow,
@@ -261,6 +265,32 @@ describe('POST /api/experiments', () => {
     await c.post('/experiments', body({ taskKeys: ['alpha'] })).expect(201);
     c.nous.status = 'connected';
     await c.post('/experiments', body({ taskKeys: ['alpha', 'judged'] })).expect(201);
+  });
+
+  it("answers 409 when a selected task's llm_judge key has no judge model, saying how to set one", async () => {
+    await seedWorker(c.t.db);
+    await addJudgedTask(c.t.db, suite.id, 'graded', { verification: UNMODELLED_VERIFICATION });
+    await addJudgedTask(c.t.db, suite.id, 'tuned', {
+      verification: UNMODELLED_VERIFICATION,
+      position: 11,
+    });
+    // Asked before the provider, which would not be ready either.
+    c.nous.status = 'not_connected';
+    const res = await c
+      .post('/experiments', body({ taskKeys: ['alpha', 'graded', 'tuned'] }))
+      .expect(409);
+    expect(refusal(res).message).toBe(
+      'The LLM judge has no model for graded.tone and tuned.tone: set JUDGE_MODEL (and JUDGE_PROVIDER, nous when unset) in .env, then docker compose up -d api worker, or give each check its own model: in task.yaml.',
+    );
+    await expectNothingLaunched();
+
+    // JUDGE_MODEL gives every such key a model on JUDGE_PROVIDER (nous when unset).
+    setSetting(c, 'JUDGE_MODEL', 'judge/default');
+    expect(
+      refusal(await c.post('/experiments', body({ taskKeys: ['graded'] })).expect(409)).message,
+    ).toBe("The LLM judge's provider is not ready: Nous Portal is not connected.");
+    c.nous.status = 'connected';
+    await c.post('/experiments', body({ taskKeys: ['graded'] })).expect(201);
   });
 
   it('answers 409 naming a configuration whose hash changed or that has a newer version, and rolls the freeze back', async () => {

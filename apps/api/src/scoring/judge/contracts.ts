@@ -91,8 +91,13 @@ export function resolveJudgeModel(
 // One judge call
 // ---------------------------------------------------------------------------
 
-/** Most tokens a judge answer may use (S4): a score and a short comment need far fewer. */
-export const JUDGE_MAX_TOKENS = 1024;
+/**
+ * Most tokens a judge answer may use (S4). A score and a short comment need
+ * far fewer, but a reasoning model spends its thinking from the same budget:
+ * the `nous` upstreams turn reasoning on by default, and 1,024 cut such an
+ * answer off before it was written (Phase 3 question 6).
+ */
+export const JUDGE_MAX_TOKENS = 4096;
 
 /** How long one judge call may take before it counts as a `timeout` (S4). */
 export const JUDGE_TIMEOUT_MS = 60_000;
@@ -147,6 +152,17 @@ export interface JudgeTokens {
   total: number;
 }
 
+/**
+ * One call of a judge request, as the worker saw it (Phase 3 question 9):
+ * the HTTP status that ended it, egress's own or the upstream's as relayed,
+ * or null when it failed in transport or timed out before any answer; and
+ * how long it took.
+ */
+export interface JudgeCallRecord {
+  status: number | null;
+  latencyMs: number;
+}
+
 /** The judge's answer to one JudgeRequest: the text of its first choice, unparsed. */
 export interface JudgeResponse {
   /** The assistant message's content, verbatim; the scorer parses it strictly. */
@@ -159,6 +175,8 @@ export interface JudgeResponse {
   finishReason: string | null;
   /** Calls made: 1, or 1 + JUDGE_RETRIES when the first failed in transport or with a 5xx. */
   calls: number;
+  /** Each call in order, one per call made. */
+  callLog: JudgeCallRecord[];
   /** Wall time of the whole request, retry included. */
   latencyMs: number;
 }

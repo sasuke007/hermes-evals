@@ -113,7 +113,8 @@ export async function insertTask(
   return task!.id;
 }
 
-async function insertVersion(
+/** A configuration named `name` with one frozen version; resolves the version's id. */
+export async function insertVersion(
   db: AppDb,
   name: string,
   overrides: Partial<typeof configurationVersions.$inferInsert> = {},
@@ -215,10 +216,17 @@ export interface LaunchOptions {
   spendCeilingUsd?: number | null;
   estimate?: ExperimentEstimate | null;
   createdAt?: Date;
+  /** Candidates after the world's, in order; their runs are keyed `cand2`, `cand3`, … */
+  moreCandidates?: string[];
 }
 
-/** A running experiment with every run of its matrix queued, keyed `<task>/<config>/<rep>`. */
+/**
+ * A running experiment with every run of its matrix queued, keyed
+ * `<task>/<config>/<rep>`: task `a` or `b`, config `base`, `cand`, then
+ * `cand2`, … for options.moreCandidates.
+ */
 export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
+  const candidates = [w.candidateVersionId, ...(options.moreCandidates ?? [])];
   const [experiment] = await db
     .insert(experiments)
     .values({
@@ -226,7 +234,7 @@ export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
       suiteId: w.suiteId,
       taskIds: w.taskIds,
       baselineVersionId: w.baselineVersionId,
-      candidateVersionIds: [w.candidateVersionId],
+      candidateVersionIds: candidates,
       repetitions: options.repetitions ?? 2,
       concurrency: options.concurrency ?? 2,
       spendCeilingUsd: options.spendCeilingUsd === undefined ? 5 : options.spendCeilingUsd,
@@ -242,7 +250,7 @@ export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
     .insert(runs)
     .values(
       w.taskIds.flatMap((taskId) =>
-        [w.baselineVersionId, w.candidateVersionId].flatMap((configurationVersionId) =>
+        [w.baselineVersionId, ...candidates].flatMap((configurationVersionId) =>
           reps.map((repetition) => ({
             experimentId: experiment!.id,
             taskId,
@@ -256,7 +264,8 @@ export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
   const keys = new Map<string, string>();
   for (const run of rows) {
     const task = run.taskId === w.taskIds[0] ? 'a' : 'b';
-    const config = run.configurationVersionId === w.baselineVersionId ? 'base' : 'cand';
+    const index = candidates.indexOf(run.configurationVersionId);
+    const config = index < 0 ? 'base' : index === 0 ? 'cand' : `cand${index + 1}`;
     keys.set(`${task}/${config}/${run.repetition}`, run.id);
   }
   const run = (key: string): string => {

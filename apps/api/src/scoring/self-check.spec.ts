@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SelfCheckResultSchema } from '@hermes-evals/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { KEY_SETUP_SECONDS } from './scoring-time.js';
 import {
   runSelfChecks,
+  selfCheckSeconds,
   selfCheckStatus,
   type SelfCheckInput,
   type SelfCheckResult,
@@ -205,5 +207,43 @@ describe('selfCheckStatus', () => {
     expect(selfCheckStatus([r('passed', 'pass'), r('failed', 'fail')])).toBe('passed');
     expect(selfCheckStatus([r('passed', 'pass'), r('error', 'fail')])).toBe('passed');
     expect(selfCheckStatus([r('passed', 'pass'), r('passed', 'fail')])).toBe('failed');
+  });
+});
+
+describe('selfCheckSeconds', () => {
+  const verifier = (key: string, timeout_s?: number) => ({
+    key,
+    type: 'verifier_script' as const,
+    params: { script: `${key}.py`, ...(timeout_s === undefined ? {} : { timeout_s }) },
+  });
+  const fileCheck = { key: 'out', type: 'file_check' as const, params: { path: 'out.csv' } };
+  const answer = { key: 'total', type: 'numeric_tolerance' as const, params: { path: 'total' } };
+  const judge = { key: 'judge', type: 'llm_judge' as const, params: { rubric: 'rubric.md' } };
+
+  it("counts each verifier's timeout_s and the setup, once without an expected workspace", () => {
+    expect(
+      selfCheckSeconds({
+        entries: [answer, judge, verifier('a', 300), verifier('b')],
+        expectedWorkspace: false,
+        negativeControl: false,
+      }),
+    ).toBe(300 + KEY_SETUP_SECONDS + 30 + KEY_SETUP_SECONDS);
+  });
+
+  it('counts the workspace checks twice with a negative control, and once without', () => {
+    const task = { entries: [verifier('a', 100), fileCheck], expectedWorkspace: true };
+    const once = 100 + KEY_SETUP_SECONDS + KEY_SETUP_SECONDS;
+    expect(selfCheckSeconds({ ...task, negativeControl: true })).toBe(2 * once);
+    expect(selfCheckSeconds({ ...task, negativeControl: false })).toBe(once);
+  });
+
+  it('counts nothing for checks that run no file, nor for params that do not parse', () => {
+    expect(
+      selfCheckSeconds({
+        entries: [answer, judge, { key: 'bad', type: 'verifier_script', params: { timeout_s: 0 } }],
+        expectedWorkspace: true,
+        negativeControl: true,
+      }),
+    ).toBe(0);
   });
 });

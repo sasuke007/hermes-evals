@@ -1,0 +1,4 @@
+name: phase4
+version_label: '4.0'
+description: Phase 4 e2e. Four questions on one CSV, each with an answer key and a cites key every task declares.
+tasks: [sum_amounts, count_rows, max_amount, min_amount]

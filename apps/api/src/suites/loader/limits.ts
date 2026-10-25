@@ -9,8 +9,12 @@ import { MAX_ARTIFACT_BYTES } from '../../sandbox/trial-files.js';
 /**
  * 2: text_match patterns must compile, and a task's checks must fit one
  * scoring pass (task-yaml.ts).
+ * 3: a rubric under the expected workspace is refused (task.ts), a
+ * trajectory_match tool named like an MCP tool in a form Hermes never uses
+ * is a warning (task-yaml.ts), and a suite's self-checks must fit one load
+ * (read-suite.ts).
  */
-export const LOADER_VERSION = 2;
+export const LOADER_VERSION = 3;
 
 /** A file larger than this is never read; it is reported as unsafe_file. */
 export const MAX_SUITE_FILE_BYTES = MAX_ARTIFACT_BYTES;

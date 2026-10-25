@@ -8,11 +8,11 @@
  */
 import { expect } from 'vitest';
 import type { JsonValue, ScoreEvidence, ScoreRowView, ScoreStatus } from '@hermes-evals/shared';
-import { NO_JUDGE_MODEL_MESSAGE } from '../../src/scoring/judge/contracts.js';
 import {
   JUDGE_CALL_COST_USD,
   JUDGE_MODEL,
   JUDGE_TOKENS,
+  TONE_VERDICT,
   VERDICTS,
   type Phase3Config,
   type Phase3Task,
@@ -49,12 +49,6 @@ type Expected = Record<string, Expectation>;
 const UNGRADABLE = 'no fenced JSON block found in final response';
 const unanswered = (row: StoredScore): void =>
   expect(row).toMatchObject({ expected: null, observed: null, evidence: {} });
-const NOT_JUDGED: Expectation = {
-  status: 'error',
-  score: null,
-  comment: NO_JUDGE_MODEL_MESSAGE,
-  row: (row) => expect(row.evidence.judge).toBeUndefined(),
-};
 
 /**
  * An answer check's stored values: what the reference holds and what the
@@ -67,8 +61,11 @@ const answered =
     expect(row.evidence).toEqual(evidence);
   };
 
-/** evidence.judge of a judged key: the judge on Nous, one call, metered and priced. */
-const judged = (verdict: (typeof VERDICTS)[Phase3Config], pass: boolean): Expectation => ({
+/**
+ * evidence.judge of a judged key: the judge on Nous, one call, metered and
+ * priced, with that call's status and latency in its call log.
+ */
+const judged = (verdict: { score: number; comment: string }, pass: boolean): Expectation => ({
   status: pass ? 'passed' : 'failed',
   score: verdict.score,
   comment: `Judge score ${verdict.score}, ${pass ? 'at or above' : 'below'} 0.7: ${verdict.comment}`,
@@ -84,6 +81,7 @@ const judged = (verdict: (typeof VERDICTS)[Phase3Config], pass: boolean): Expect
       },
       cost_usd: JUDGE_CALL_COST_USD,
       finish_reason: 'stop',
+      call_log: [{ status: 200, latency_ms: expect.any(Number) }],
     });
     expect(row.evidence.judge!.latency_ms).toBeGreaterThanOrEqual(0);
     expect(row.evidence.judge).not.toHaveProperty('base_url');
@@ -185,7 +183,8 @@ function expectations(task: Phase3Task, config: Phase3Config, seqs: ToolSeqs): E
             });
           },
         },
-        tone: NOT_JUDGED,
+        // No model in the check: JUDGE_MODEL grades it, on JUDGE_PROVIDER.
+        tone: judged(TONE_VERDICT, true),
       };
     case 'summary_file':
       return {

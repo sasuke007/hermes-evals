@@ -83,7 +83,14 @@ describe('a scored run with mixed results', () => {
       },
       observed: { summary: '1 item', detail: '["INV-1042", "INV-1107"]' },
       error: null,
-      evidence: { eventSeqs: [7], artifactIds: [] },
+      evidence: {
+        eventSeqs: [7],
+        artifactIds: [],
+        judge: null,
+        trajectory: null,
+        text: null,
+        jsonMatch: { unit: 'items', matched: 1, total: 2, mismatches: ['[1]'] },
+      },
     });
     expect(reads).toMatchObject({
       sentence: 'trajectory_match: calls read_file at least once',

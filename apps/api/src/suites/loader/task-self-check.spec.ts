@@ -1,6 +1,6 @@
 import type { SelfCheck } from '@hermes-evals/shared';
 import { verdict } from './read-suite.js';
-import { expectedWorkspace } from './task-self-check.js';
+import { expectedWorkspace, suiteSelfCheckSeconds } from './task-self-check.js';
 import type { StoredTaskFile } from './task-files.js';
 
 const file = (path: string, kind: StoredTaskFile['kind'], text = path): StoredTaskFile => ({
@@ -79,5 +79,33 @@ describe('verdict', () => {
     expect(verdict({ issues: [] }, check(results, 'failed')).invalidReason).toBe(
       'k (verifier_script) self-check failed: line one line two',
     );
+  });
+});
+
+describe('suiteSelfCheckSeconds', () => {
+  it('spreads the tasks over the concurrent slots, the longest one charged in full', () => {
+    expect(suiteSelfCheckSeconds([], 4)).toBe(0);
+    expect(suiteSelfCheckSeconds([0, 0, 0], 4)).toBe(0);
+    // One task runs alone, whatever the concurrency.
+    expect(suiteSelfCheckSeconds([620], 4)).toBe(620);
+    // A bound for any finishing order, so it is not tight: four equal tasks
+    // that could all run at once are charged 320 / 4 + 3/4 of 80.
+    expect(suiteSelfCheckSeconds([80, 80, 80, 80], 4)).toBe(140);
+    // Far below running them one by one.
+    expect(
+      suiteSelfCheckSeconds(
+        Array.from({ length: 40 }, () => 80),
+        4,
+      ),
+    ).toBe(860);
+    // 0 + 0 + 0 + 80 + 40 over 4 slots: 30, plus 3/4 of the longest.
+    expect(suiteSelfCheckSeconds([0, 0, 0, 80, 40], 4)).toBe(90);
+    // Never below what one slot could take with every task on it in order.
+    expect(suiteSelfCheckSeconds([100, 100, 100, 100, 100], 1)).toBe(500);
+  });
+
+  it('is never below the time p-limit can actually take for any order', () => {
+    // Greedy list scheduling of these tasks over 2 slots ends at 15 at worst (5, 5, then 10).
+    expect(suiteSelfCheckSeconds([5, 5, 10], 2)).toBeGreaterThanOrEqual(15);
   });
 });

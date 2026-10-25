@@ -12,6 +12,7 @@ import { z } from 'zod';
 import {
   ATTEMPT_TRIGGERS,
   EXECUTION_ERROR_CATEGORIES,
+  NOT_COMPUTABLE_REASONS,
   SCORE_STATUSES,
   VERDICT_CAUSES,
   VERDICTS,
@@ -245,20 +246,55 @@ export const ExperimentFailureSchema = z.object({
 });
 export type ExperimentFailure = z.infer<typeof ExperimentFailureSchema>;
 
-/** One verdict computation for one candidate, appended on completion, retry or re-score. */
-export const VerdictEntrySchema = z.object({
-  at: isoTime,
-  cause: z.enum(VERDICT_CAUSES),
-  candidate_version_id: z.string(),
-  /** Score key the verdict is computed on; the task's primary key by default. */
-  key: z.string(),
-  delta: z.number().nullable(),
-  lo: z.number().nullable(),
-  hi: z.number().nullable(),
-  verdict: z.enum([...VERDICTS, 'not_computable']),
-  /** Set when verdict is `not_computable`, e.g. `single_repetition`. */
-  reason: z.string().nullable(),
-});
+const rate = z.number().min(0).max(1);
+const passCount = z.object({ passed: count, counted: count });
+
+/**
+ * One verdict computation for one candidate against the baseline, appended
+ * to `experiments.verdict_history` by reconcile (plan 7.4 step 3): one entry
+ * per candidate each time a settled experiment's results revision differs
+ * from its verdict revision, with the conditional update that moves the
+ * verdict revision (step 4), so two finishers append once. The last entry
+ * per candidate is that candidate's verdict; the entries before it are the
+ * "previously …" of the VerdictCard.
+ *
+ * Phase 4 appends the first entries and fills every field below `reason`;
+ * they are optional only by this file's additive rule. They carry what the
+ * verdict was computed from, so the experiment views read a completed
+ * verdict back without recomputing it.
+ */
+export const VerdictEntrySchema = z
+  .object({
+    at: isoTime,
+    cause: z.enum(VERDICT_CAUSES),
+    candidate_version_id: z.string(),
+    /** Score key the verdict is computed on: `primary` (each task's primary key) by default. */
+    key: z.string(),
+    /** Observed difference, mean over tasks of (candidate rate minus baseline rate). */
+    delta: z.number().nullable(),
+    /** The bootstrap interval; null when not computable. */
+    lo: z.number().nullable(),
+    hi: z.number().nullable(),
+    verdict: z.enum([...VERDICTS, 'not_computable']),
+    /** Set exactly when verdict is `not_computable`. */
+    reason: z.enum(NOT_COMPUTABLE_REASONS).nullable(),
+    /** e.g. "1 retry" or "3 runs re-scored", for "Updated 23 Oct 14:20 after 1 retry"; null for `initial`. */
+    note: z.string().nullable().optional(),
+    /** The experiment's results revision the entry was computed from: its verdict revision once appended. */
+    results_revision: count.optional(),
+    /** Passed over counted runs per configuration (plan 10.1), pooled over the tasks. */
+    pass_rates: z.object({ baseline: rate.nullable(), candidate: rate.nullable() }).optional(),
+    pass_counts: z.object({ baseline: passCount, candidate: passCount }).optional(),
+    /** Tasks whose candidate rate is above, below or equal to the baseline's. */
+    task_counts: z.object({ improved: count, regressed: count, unchanged: count }).optional(),
+    /** The paired bootstrap's resample count and confidence level, e.g. 10,000 and 0.95. */
+    resamples: z.number().int().positive().optional(),
+    confidence: z.number().gt(0).lt(1).optional(),
+  })
+  .refine((e) => (e.verdict === 'not_computable') === (e.reason !== null), {
+    path: ['reason'],
+    message: 'reason is set exactly when the verdict is not_computable',
+  });
 export type VerdictEntry = z.infer<typeof VerdictEntrySchema>;
 
 // ---------------------------------------------------------------------------
@@ -472,6 +508,15 @@ export const JudgeEvidenceSchema = z.object({
   latency_ms: count,
   /** The provider's finish reason of the answer that was graded, e.g. `stop`. */
   finish_reason: z.string().nullable().optional(),
+  /**
+   * The judge's connection log (Phase 3 question 9): each call in order,
+   * with the HTTP status that ended it (null when it failed in transport,
+   * before any answer) and how long it took. Absent on rows stored before
+   * Phase 4.
+   */
+  call_log: z
+    .array(z.object({ status: z.number().int().min(100).max(599).nullable(), latency_ms: count }))
+    .optional(),
 });
 export type JudgeEvidence = z.infer<typeof JudgeEvidenceSchema>;
 

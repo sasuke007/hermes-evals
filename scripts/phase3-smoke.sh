@@ -665,8 +665,8 @@ print(json.dumps([{'path': r['path'], 'script': r['script'], 'roles': [m['role']
                    'auth': r['headers'].get('authorization'),
                    'delimited': 'AGENT_RESPONSE_BEGIN' in r['body']['messages'][-1]['content']} for r in judged]))
 PY
-  check_file "the mock's log: 4 judge requests, through egress, temperature 0, 1024 tokens" "$WORK/judged.json" \
-    'len(d) == 4 and all(r["path"] == "/v1/chat/completions" and r["roles"] == ["system", "user"] and r["temperature"] == 0 and r["max_tokens"] == 1024 and not r["stream"] and not r["tools"] and r["delimited"] for r in d) and sorted(r["script"] for r in d) == sorted(["Every ledger row was reconciled", "Smoke rubric LEDGER-JUDGE", "Smoke rubric NOANSWER-JUDGE", "Smoke rubric NOANSWER-JUDGE"])' \
+  check_file "the mock's log: 4 judge requests, through egress, temperature 0, 4096 tokens" "$WORK/judged.json" \
+    'len(d) == 4 and all(r["path"] == "/v1/chat/completions" and r["roles"] == ["system", "user"] and r["temperature"] == 0 and r["max_tokens"] == 4096 and not r["stream"] and not r["tools"] and r["delimited"] for r in d) and sorted(r["script"] for r in d) == sorted(["Every ledger row was reconciled", "Smoke rubric LEDGER-JUDGE", "Smoke rubric NOANSWER-JUDGE", "Smoke rubric NOANSWER-JUDGE"])' \
     '", ".join(sorted(r["script"] for r in d))'
   if [ -n "$SMOKE_CANARY" ]; then
     check_file '  egress sent its CUSTOM_API_KEY (the canary) upstream' "$WORK/judged.json" \

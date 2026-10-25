@@ -12,12 +12,14 @@
  *
  * Scenarios handled here (see scenarios.ts): empty, first-launch,
  * paused-ceiling, paused-provider, no-worker, nothing-scored, single-rep,
- * verdict-updated, cancelled, multi-attempt, disk-limit, timeout-silent,
- * provider-lapsed, plus the suite states (invalid-task, newer-version).
+ * verdict-updated, cancelled, multi-attempt, disk-limit, token-cap,
+ * timeout-silent, provider-lapsed, plus the suite states (invalid-task,
+ * newer-version).
  */
 import type {
   ExecutionErrorCategory,
   ExperimentStatus,
+  NotComputableReason,
   RunStatus,
   ScoreStatus,
   ScorerType,
@@ -982,6 +984,7 @@ export function experimentSeeds(active: (name: string) => boolean): ExperimentSe
     if (seed.key === 'mcpVsBaseline') return mcpVsBaselineVariant(seed, active);
     if (seed.key === 'skillVsNoSkill') return skillVsNoSkillVariant(seed, active);
     if (seed.key === 'mcpSmoke' && active('verdict-updated')) return smokeAfterRetry(seed);
+    if (seed.key === 'mcpSmoke' && active('token-cap')) return smokeTokenCap(seed);
     if (seed.key === 'quickCheck' && active('single-rep')) {
       return {
         ...seed,
@@ -1177,6 +1180,26 @@ function skillVsNoSkillVariant(
   return seed;
 }
 
+/**
+ * A run the model gateway's token cap stopped (execution_error · limit). On
+ * the smoke test, which has no brief-stated token means to keep.
+ */
+function smokeTokenCap(seed: ExperimentSeed): ExperimentSeed {
+  return {
+    ...seed,
+    matrix: withMatrixCell(seed, 'vat_split', 'with-mcp', 3, 'E'),
+    runOverrides: {
+      ...seed.runOverrides,
+      [runKey('vat_split', 'with-mcp', 3)]: {
+        category: 'limit',
+        durationS: 214,
+        tokens: 2_000_418,
+        tokensIn: 1_993_870,
+      },
+    },
+  };
+}
+
 function smokeAfterRetry(seed: ExperimentSeed): ExperimentSeed {
   return {
     ...seed,
@@ -1295,13 +1318,15 @@ function verdictFor(seed: ExperimentSeed, runs: RunSeed[], candidate: ConfigName
   const cand = passRate(runs.filter((r) => r.config === candidate));
   const changes = taskChanges(seed, runs, candidate);
   const stats = seed.stats[candidate];
-  const counts = countRuns(runs);
+  // No run of the two configurations counts yet (an execution error counts).
+  const nothingCounted =
+    counted(runs.filter((r) => r.config === seed.baseline || r.config === candidate)).length === 0;
   let verdict: VerdictState;
-  let reason: string | null = null;
+  let reason: NotComputableReason | null = null;
   if (seed.repetitions < 2) {
     verdict = 'not_computable';
     reason = 'single_repetition';
-  } else if (!counts.scored) {
+  } else if (nothingCounted) {
     verdict = 'not_computable';
     reason = 'nothing_scored';
   } else if (seed.status === 'completed' && stats) {

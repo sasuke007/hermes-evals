@@ -103,6 +103,12 @@ const TOKEN_FIELDS = ['input', 'output', 'total', 'cache_read', 'cache_write'] a
  * written to the provider's cache; `output` is the completion tokens
  * (reasoning included); `total` is input + output. These equal the OpenAI
  * usage block the gateway sees (Phase 0, I4). pricing.ts relies on this.
+ *
+ * A turn that failed after a model call had answered (seen with the
+ * gateway's token-cap 429) reports its input and output but no
+ * `total_tokens`, which the emitter writes as 0 (hermes_cli/stream_json.py
+ * emit_result). Its total is then input + output, so the run that used the
+ * most tokens never reads as 0 where totals are summed, averaged or sorted.
  */
 export function resultTokens(event: unknown): Tokens | null {
   if (!isRecord(event) || event.type !== 'result' || !isRecord(event.tokens)) return null;
@@ -112,6 +118,7 @@ export function resultTokens(event: unknown): Tokens | null {
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return null;
     counts[field] = value;
   }
+  if (counts.total === 0) counts.total = counts.input! + counts.output!;
   return TokensSchema.parse(counts);
 }
 

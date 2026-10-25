@@ -15,6 +15,10 @@
  *
  * Verifiers can write to the workspace they are given, so callers that keep
  * using a folder afterwards pass a copy.
+ *
+ * selfCheckSeconds is the longest one task's self-checks can take, from what
+ * they declare (Phase 3 question 14), as scoring-time.ts is for a scoring
+ * pass: the loader bounds a suite's sum so the load-suites job outlasts it.
  */
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
@@ -24,6 +28,7 @@ import { scoreReferenceAsAnswer } from './answer.js';
 import { checkFile } from './file-check.js';
 import { parseVerificationEntry, selfCheckModeFor, type SelfCheckMode } from './registry.js';
 import type { ScorerResult } from './result.js';
+import { KEY_SETUP_SECONDS } from './scoring-time.js';
 import { scoreVerifierScript } from './verifier.js';
 
 export type SelfCheckResult = SelfCheck['results'][number];
@@ -52,6 +57,42 @@ export interface SelfCheckInput {
   /** A fresh scratch directory per verifier run, e.g. `(p) => storage.scratchDir(p)`. */
   scratch: (prefix: string) => Promise<ScratchDir>;
   python?: string;
+}
+
+/** What selfCheckSeconds reads of a task's plan. */
+export interface TimedSelfCheck {
+  entries: readonly SelfCheckEntry[];
+  /** Whether the task has an expected workspace (task.ts SelfCheckPlan.expectedDir). */
+  expectedWorkspace: boolean;
+  negativeControl: boolean;
+}
+
+/**
+ * The worst case of one task's self-checks, in seconds: they run one after
+ * another, and only those that touch files take time worth counting.
+ * - verifier_script: its `timeout_s` per run, after which it is killed, plus
+ *   KEY_SETUP_SECONDS for writing the folders and starting it; two runs in
+ *   workspace mode with a negative control;
+ * - file_check: KEY_SETUP_SECONDS per run, the same runs;
+ * - answer checks compare values in memory, and trajectory_match and
+ *   llm_judge do not run at load: none counts.
+ * An entry whose params do not parse runs nothing (it is an `error` result).
+ */
+export function selfCheckSeconds(task: TimedSelfCheck): number {
+  let total = 0;
+  for (const entry of task.entries) {
+    const mode = selfCheckModeFor(entry.type, task.expectedWorkspace);
+    if (mode === 'answer' || mode === 'none') continue;
+    const parsed = parseVerificationEntry(entry);
+    if (!parsed.success) continue;
+    const runs = mode === 'workspace' && task.negativeControl ? 2 : 1;
+    const perRun =
+      parsed.data.type === 'verifier_script'
+        ? parsed.data.params.timeout_s + KEY_SETUP_SECONDS
+        : KEY_SETUP_SECONDS;
+    total += runs * perRun;
+  }
+  return total;
 }
 
 const NONE_COMMENT = {

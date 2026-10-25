@@ -1,0 +1,15 @@
+summary: The largest amount
+limits:
+  max_turns: 5
+  run_budget_seconds: 60
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: value, abs: 0.01 }
+  - key: cites
+    type: text_match
+    params: { path: note, contains: ['source: amounts.csv'] }

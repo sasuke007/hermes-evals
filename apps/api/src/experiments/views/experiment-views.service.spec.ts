@@ -81,9 +81,27 @@ describe('the hand-checked matrix', () => {
       concurrency: 2,
       timeBudgetOverrideS: null,
       totalRuns: 8,
-      verdicts: [],
       failure: null,
     });
+    // Provisional while it runs: task a is 1 of 2 on both sides (Δ 0), task b has
+    // no counted candidate run yet, so the gate waits for runs (no reason).
+    expect(d.verdicts).toEqual([
+      {
+        baseline: expect.objectContaining({ versionId: w.baselineVersionId, role: 'baseline' }),
+        candidate: expect.objectContaining({ versionId: w.candidateVersionId, role: 'candidate' }),
+        verdict: 'provisional',
+        scoreKey: 'primary',
+        delta: 0,
+        lo: null,
+        hi: null,
+        passRates: { baseline: 0.333, candidate: 0.5 },
+        passCounts: { baseline: { passed: 1, counted: 3 }, candidate: { passed: 1, counted: 2 } },
+        taskCounts: { improved: 0, regressed: 0, unchanged: 1 },
+        method: { name: 'paired_bootstrap', resamples: 10_000, confidence: 0.95 },
+        reason: null,
+        history: [],
+      },
+    ]);
     expect(d.counts).toEqual({
       queued: 2,
       running: 1,

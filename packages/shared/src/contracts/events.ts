@@ -14,6 +14,7 @@ import { EXPERIMENT_STATUSES, RUN_STATUSES } from '../status.js';
 import { countView, isoTimeView } from './common.js';
 import {
   ExperimentFailureViewSchema,
+  ExperimentListVerdictSchema,
   ExperimentSpendSchema,
   FeedEntrySchema,
   PauseReasonSchema,
@@ -40,9 +41,11 @@ export type SystemEvent = z.infer<typeof SystemEventSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * A run changed status, attempt or score: patch the Runs tab row, the
- * comparison cell and the inspector header in place (rows never reorder while
- * live).
+ * A run changed status, attempt, score or evaluation: patch the Runs tab
+ * row, the comparison cell and the inspector header in place (rows never
+ * reorder while live). Sent when any field below moves, so a re-score is
+ * seen when it is queued (`rescorePending` turns true) and when it
+ * publishes (`generation` moves) even if the primary result is unchanged.
  */
 export const RunStatusEventSchema = z.object({
   type: z.literal('run'),
@@ -54,6 +57,10 @@ export const RunStatusEventSchema = z.object({
   /** The primary key's result once scored; null otherwise. */
   primaryScore: PrimaryScoreViewSchema.nullable(),
   finishedAt: isoTimeView.nullable(),
+  /** As RunRow.generation: the evaluation primaryScore comes from; null until the first publishes. */
+  generation: z.number().int().positive().nullable(),
+  /** As RunRow.rescorePending: a re-score of this scored run is queued or running. */
+  rescorePending: z.boolean(),
 });
 export type RunStatusEvent = z.infer<typeof RunStatusEventSchema>;
 
@@ -69,8 +76,12 @@ export const CountsEventSchema = z.object({
 export type CountsEvent = z.infer<typeof CountsEventSchema>;
 
 /**
- * The experiment changed status (paused, resumed, failed, completed). The page
- * refetches GET /experiments/:id for what changes with it (aggregates, times).
+ * The experiment changed status (paused, resumed, failed, completed) or its
+ * verdict: a verdict entry was appended after a retry or a re-score, which
+ * leaves a completed experiment completed. The page refetches
+ * GET /experiments/:id for what changes with it (aggregates, times, the
+ * VerdictCard's "Updated … · previously …"); a list row patches its verdict
+ * chips from `verdicts`.
  */
 export const ExperimentStatusEventSchema = z
   .object({
@@ -79,6 +90,14 @@ export const ExperimentStatusEventSchema = z
     status: z.enum(EXPERIMENT_STATUSES),
     pauseReason: PauseReasonSchema.nullable(),
     failure: ExperimentFailureViewSchema.nullable(),
+    /** As ExperimentListRow.verdicts: each candidate's last verdict once completed, else []. */
+    verdicts: z.array(ExperimentListVerdictSchema),
+    /**
+     * When the newest verdict history entry was appended; null before the
+     * first. It moves on every append, so a re-score that leaves the numbers
+     * as they were still sends this event.
+     */
+    verdictUpdatedAt: isoTimeView.nullable(),
   })
   .superRefine((e, ctx) => {
     if ((e.status === 'paused') !== (e.pauseReason !== null)) {
@@ -93,6 +112,13 @@ export const ExperimentStatusEventSchema = z
         code: 'custom',
         path: ['failure'],
         message: 'failure is set exactly when the experiment failed',
+      });
+    }
+    if (e.status !== 'completed' && e.verdicts.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['verdicts'],
+        message: 'verdicts are listed only once the experiment has completed',
       });
     }
   });

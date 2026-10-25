@@ -115,7 +115,10 @@ export const ConfigurationUsageSchema = z.object({
   passRate: rate.nullable(),
   scored: countView,
   total: countView,
-  /** The candidate's verdict against the baseline; null for the baseline role or while running. */
+  /**
+   * The candidate's verdict against the baseline (its last verdict entry once
+   * completed, `provisional` while running); null for the baseline role.
+   */
   verdict: z.enum(['better', 'worse', 'inconclusive', 'provisional', 'not_computable']).nullable(),
   /** Pass rate of the baseline in the same experiment, for "vs baseline 0.633". */
   baselinePassRate: rate.nullable(),

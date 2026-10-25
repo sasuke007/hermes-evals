@@ -37,6 +37,8 @@ function liveState(runs: LiveRun[], patch: Partial<LiveState> = {}): LiveState {
     counts,
     doneRuns: counts.scored,
     spend: SPEND,
+    verdicts: [],
+    verdictUpdatedAt: null,
     runs: new Map(runs.map((r) => [r.id, r])),
     ...patch,
   };
@@ -48,6 +50,8 @@ const run = (id: string, status: LiveRun['status'] = 'queued'): LiveRun => ({
   attempt: status === 'queued' ? 0 : 1,
   primaryScore: null,
   finishedAt: null,
+  generation: null,
+  rescorePending: false,
   feed: null,
 });
 

@@ -98,6 +98,8 @@ describe('DbLiveSource', () => {
       attempt: 1,
       primaryScore: { key: 'answer', status: 'passed', score: 1 },
       finishedAt: at(10).toISOString(),
+      generation: 1,
+      rescorePending: false,
       feed: detail.feed.find((f) => f.runId === run('a/base/1')),
     });
     expect(live.runs.get(run('a/cand/1'))).toMatchObject({

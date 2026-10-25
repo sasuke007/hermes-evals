@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Provider, VerificationEntry } from '@hermes-evals/shared';
-import { judgeReadiness } from './judge-readiness.js';
+import { judgeReadiness, namedKeys } from './judge-readiness.js';
 import type { ProviderReadiness } from './readiness.js';
 
 const entry = (type: VerificationEntry['type'], params: Record<string, unknown> = {}) => ({
@@ -83,12 +83,42 @@ describe('judgeReadiness', () => {
     });
   });
 
-  it('does not block keys that have no judge model, and counts them', async () => {
+  it('blocks keys that have no judge model, with the fix, before asking any provider', async () => {
     const { asked, deps } = readinessOf({ nous: NOT_CONNECTED });
     expect(
-      await judgeReadiness([entry('llm_judge', { rubric: 'r.md' })], { provider: 'nous' }, deps),
-    ).toEqual({ ready: true, reason: null, provider: null, judgeKeys: 1, unconfigured: 1 });
+      await judgeReadiness(
+        [{ ...entry('llm_judge', { rubric: 'r.md' }), key: 'tone', task: 'late_fees' }],
+        { provider: 'nous' },
+        deps,
+      ),
+    ).toEqual({
+      ready: false,
+      reason:
+        'The LLM judge has no model for late_fees.tone: set JUDGE_MODEL (and JUDGE_PROVIDER, nous when unset) in .env, then docker compose up -d api worker, or give the check its own model: in task.yaml.',
+      provider: null,
+      judgeKeys: 1,
+      unconfigured: 1,
+    });
     expect(asked).toEqual([]);
+    // One key with a model does not lift the refusal for the other.
+    const mixed = await judgeReadiness(
+      [
+        { ...entry('llm_judge', { rubric: 'a.md', model: 'judge/strict' }), key: 'method' },
+        { ...entry('llm_judge', { rubric: 'b.md', model: '  ' }), key: 'tone' },
+      ],
+      { provider: 'nous' },
+      deps,
+    );
+    expect(mixed).toMatchObject({ ready: false, provider: 'nous', judgeKeys: 2, unconfigured: 1 });
+    expect(mixed.reason).toMatch(/^The LLM judge has no model for tone: /);
+    expect(asked).toEqual([]);
+  });
+
+  it('names at most five keys, and counts the rest', () => {
+    expect(namedKeys(['a'])).toBe('a');
+    expect(namedKeys(['a', 'b'])).toBe('a and b');
+    expect(namedKeys(['a', 'b', 'c'])).toBe('a, b and c');
+    expect(namedKeys(['a', 'b', 'c', 'd', 'e', 'f', 'g'])).toBe('a, b, c, d, e and 2 more');
   });
 
   it('counts a check that cannot be answered as not ready, with why', async () => {

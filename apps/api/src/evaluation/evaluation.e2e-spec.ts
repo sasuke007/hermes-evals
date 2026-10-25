@@ -172,7 +172,11 @@ describe.skipIf(!SERVER_URL)('evaluation on Postgres 17', () => {
       .select()
       .from(schema.experiments)
       .where(eq(schema.experiments.id, scenario.experimentId));
-    expect(experiment).toMatchObject({ status: 'completed', verdictHistory: [] });
+    expect(experiment).toMatchObject({ status: 'completed' });
+    // Racing deliveries still append one verdict entry.
+    expect(experiment!.verdictHistory).toEqual([
+      expect.objectContaining({ cause: 'initial', results_revision: experiment!.resultsRevision }),
+    ]);
     expect(experiment!.verdictRevision).toBe(experiment!.resultsRevision);
   });
 

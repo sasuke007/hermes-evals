@@ -81,3 +81,18 @@ export function errorMessage(error: LocatedError): string {
   const at = error.column === null ? `${error.line}` : `${error.line}:${error.column}`;
   return `Could not reload: ${error.file}:${at} · ${error.message}`;
 }
+
+/**
+ * Why a reload of every suite left a directory out (Phase 3 question 14):
+ * the suites before it already declared most of the self-check time one
+ * load-suites job may take. A reload of that directory alone has it all.
+ */
+export const deferredMessage = (
+  path: string,
+  seconds: number,
+  usedS: number,
+  budgetS: number,
+): string =>
+  `not loaded by this reload: its self-checks may take up to ${seconds} s, and the suites ` +
+  `before it already declared ${usedS} of the ${budgetS} s one reload may take; reload ${path} ` +
+  'on its own';

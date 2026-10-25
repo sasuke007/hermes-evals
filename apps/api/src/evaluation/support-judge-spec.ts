@@ -24,6 +24,7 @@ export const judgeAnswer = (text: string, finishReason: string | null = 'stop'):
   model: 'mock/judge',
   finishReason,
   calls: 1,
+  callLog: [{ status: 200, latencyMs: 12 }],
   latencyMs: 12,
 });
 

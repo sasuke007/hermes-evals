@@ -41,11 +41,30 @@ describe('workerView', () => {
       status: 'online',
       lastHeartbeatAt: '2026-10-24T09:00:03.000Z',
       concurrency: 3,
+      effectiveConcurrency: 3,
       slotsInUse: 2,
       slotsTotal: 4,
       sandboxProven: true,
     });
     WorkerSchema.parse(view);
+  });
+
+  it('reports the trials it really runs at once: its concurrency, at most one per slot', () => {
+    const runsAtOnce = (concurrency: number, slots: number | null) =>
+      WorkerSchema.parse(workerView({ ...row, concurrency, slots })).effectiveConcurrency;
+    expect(runsAtOnce(6, 4)).toBe(4);
+    expect(runsAtOnce(4, 4)).toBe(4);
+    expect(runsAtOnce(2, 4)).toBe(2);
+    // A worker whose slots are all missing still takes one job (and defers it).
+    expect(runsAtOnce(3, 0)).toBe(1);
+    // A row written before workers reported their slots.
+    expect(runsAtOnce(6, null)).toBe(6);
+    // Offline, it shows no slots but keeps what it ran.
+    expect(workerView({ ...row, concurrency: 6, online: false })).toMatchObject({
+      concurrency: 6,
+      effectiveConcurrency: 4,
+      slotsTotal: null,
+    });
   });
 
   it('shows no slots for an offline worker, nor a total for a row that never reported one', () => {

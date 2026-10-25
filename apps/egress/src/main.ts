@@ -120,7 +120,7 @@ const gateway = createGatewayServer({
 // The judge path forwards with the same upstreams, read after the host forward replaced nous's.
 const admin = createAdminServer(registry, {
   hostProxy: hostProbe,
-  judges: { judges: new JudgeRegistry(), upstreams, tokenCap },
+  judges: { judges: new JudgeRegistry(), upstreams, tokenCap, log },
 });
 
 proxy.listen(proxyPort, '0.0.0.0', () => log({ msg: 'proxy listening', port: proxyPort }));

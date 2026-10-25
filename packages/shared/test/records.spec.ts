@@ -103,6 +103,28 @@ describe('ScoreEvidenceSchema', () => {
     expect(ScoreEvidenceSchema.parse(moded)).toEqual(moded);
   });
 
+  it("keeps the judge's connection log, one entry per call (Phase 3 question 9)", () => {
+    const evidence = {
+      judge: {
+        ...judge,
+        calls: 2,
+        call_log: [
+          { status: null, latency_ms: 30_000 },
+          { status: 200, latency_ms: 2400 },
+        ],
+      },
+    };
+    expect(ScoreEvidenceSchema.parse(evidence)).toEqual(evidence);
+    for (const call_log of [
+      [{ status: 42, latency_ms: 1 }],
+      [{ status: 200, latency_ms: -1 }],
+      [{ status: 200 }],
+    ]) {
+      const bad = { judge: { ...judge, call_log } };
+      expect(ScoreEvidenceSchema.safeParse(bad).success, JSON.stringify(call_log)).toBe(false);
+    }
+  });
+
   it('refuses malformed scorer detail', () => {
     for (const evidence of [
       { judge: { ...judge, calls: 0 } },

@@ -11,6 +11,7 @@ import {
   RunEventsQuerySchema,
   RunListQuerySchema,
   RunListResultSchema,
+  ScoreRowViewSchema,
   TimelineEventSchema,
   type RunDetail,
   type RunRow,
@@ -167,7 +168,14 @@ const DETAIL: RunDetail = {
       observed: { summary: '0 pairs', detail: '[]' },
       comment: 'expected 2 duplicate pairs, got 0',
       error: null,
-      evidence: { eventSeqs: [9], artifactIds: [] },
+      evidence: {
+        eventSeqs: [9],
+        artifactIds: [],
+        judge: null,
+        trajectory: null,
+        text: null,
+        jsonMatch: { unit: 'items', matched: 0, total: 2, mismatches: ['[0]', '[1]'] },
+      },
     },
   ],
   timeline: { events: [REFUSED, MODEL_CALL], live: false, totalEvents: 2 },
@@ -279,6 +287,149 @@ describe('run view models', () => {
     expect(issuePaths(RunDetailSchema.safeParse(tail))).toEqual([
       'executionError.stderrTail.lines',
     ]);
+  });
+});
+
+describe('score evidence in Outcome (Phase 3 question 5)', () => {
+  const answer = DETAIL.scores[0]!;
+  const NONE = { judge: null, trajectory: null, text: null, jsonMatch: null };
+  const judge = {
+    provider: 'nous',
+    baseUrl: null,
+    model: 'openai/gpt-6.1-sol',
+    calls: 2,
+    tokens: { input: 1840, output: 212, total: 2052 },
+    costUsd: 0.0016,
+    latencyMs: 6100,
+    finishReason: 'stop',
+    callLog: [
+      { status: 503, latencyMs: 1200 },
+      { status: 200, latencyMs: 4900 },
+    ],
+  };
+  const rows = [
+    {
+      ...answer,
+      key: 'method',
+      type: 'llm_judge',
+      primary: false,
+      evidence: { eventSeqs: [], artifactIds: [], ...NONE, judge },
+    },
+    {
+      ...answer,
+      key: 'uses_db',
+      type: 'trajectory_match',
+      primary: false,
+      evidence: {
+        eventSeqs: [4, 12],
+        artifactIds: [],
+        ...NONE,
+        trajectory: {
+          tool: 'mcp__invoice_db__list_invoices',
+          calls: 3,
+          matchedSeqs: [4, 12],
+          mode: null,
+        },
+      },
+    },
+    {
+      ...answer,
+      key: 'rule',
+      type: 'text_match',
+      evidence: {
+        eventSeqs: [],
+        artifactIds: [],
+        ...NONE,
+        text: {
+          items: [
+            { kind: 'phrase', label: '1.5%', found: true },
+            { kind: 'phrase', label: '30 days', found: false },
+          ],
+          truncated: false,
+        },
+      },
+    },
+    // A transport failure has no status; a judge row stored before the call log has none.
+    {
+      ...answer,
+      type: 'llm_judge',
+      evidence: {
+        eventSeqs: [],
+        artifactIds: [],
+        ...NONE,
+        judge: { ...judge, callLog: [{ status: null, latencyMs: 30_000 }] },
+      },
+    },
+    { ...answer, evidence: { eventSeqs: [], artifactIds: [], ...NONE } },
+  ];
+
+  it("carries each scorer's detail, and null where the type writes none", () => {
+    for (const row of [answer, ...rows]) expect(ScoreRowViewSchema.parse(row)).toEqual(row);
+  });
+
+  it('refuses a missing block, malformed detail and stored snake_case names', () => {
+    const [judged, trajectory] = rows;
+    const { jsonMatch: _, ...noJson } = answer.evidence;
+    const bad: [unknown, string][] = [
+      [{ ...answer, evidence: noJson }, 'evidence.jsonMatch'],
+      [
+        { ...judged, evidence: { ...judged!.evidence, judge: { ...judge, calls: 0 } } },
+        'evidence.judge.calls',
+      ],
+      [
+        { ...judged, evidence: { ...judged!.evidence, judge: { ...judge, costUsd: -1 } } },
+        'evidence.judge.costUsd',
+      ],
+      [
+        {
+          ...judged,
+          evidence: {
+            ...judged!.evidence,
+            judge: { ...judge, callLog: [{ status: 42, latencyMs: 1 }] },
+          },
+        },
+        'evidence.judge.callLog.0.status',
+      ],
+      [
+        {
+          ...judged,
+          evidence: { ...judged!.evidence, judge: { ...judge, cost_usd: 0.1, costUsd: undefined } },
+        },
+        'evidence.judge.costUsd',
+      ],
+      [
+        {
+          ...trajectory,
+          evidence: {
+            ...trajectory!.evidence,
+            trajectory: { tool: 'read_file', calls: 1, matchedSeqs: [0], mode: null },
+          },
+        },
+        'evidence.trajectory.matchedSeqs.0',
+      ],
+      [
+        {
+          ...trajectory,
+          evidence: {
+            ...trajectory!.evidence,
+            trajectory: { tool: 'read_file', calls: 1, matchedSeqs: [], mode: 'exact' },
+          },
+        },
+        'evidence.trajectory.mode',
+      ],
+      [
+        {
+          ...answer,
+          evidence: {
+            ...answer.evidence,
+            jsonMatch: { unit: 'fields', matched: 1, total: 1, mismatches: [] },
+          },
+        },
+        'evidence.jsonMatch.unit',
+      ],
+    ];
+    for (const [row, path] of bad)
+      expect(issuePaths(ScoreRowViewSchema.safeParse(row))).toEqual([path]);
   });
 });
 

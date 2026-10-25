@@ -7,9 +7,12 @@
 import type {
   ExecutionErrorView,
   JsonValue,
+  JudgeEvidence,
+  JudgeEvidenceView,
   OutcomeNotice,
-  ScoreRowView,
   ScoreEvidence,
+  ScoreEvidenceView,
+  ScoreRowView,
   VerificationEntry,
 } from '@hermes-evals/shared';
 import { DEFAULT_LIMITS } from '../../sandbox/trial-spec.js';
@@ -66,10 +69,56 @@ export function compactSentence(entry: VerificationEntry, answerPath: string | u
   return verificationSentence(entry, answerPath).replace(/, pass at [\d.]+$/, '');
 }
 
-const evidenceView = (evidence: ScoreEvidence): ScoreRowView['evidence'] => ({
-  eventSeqs: (evidence.event_seqs ?? []).filter((n) => Number.isSafeInteger(n) && n >= 1),
-  artifactIds: [...(evidence.artifact_ids ?? [])],
-});
+const isSeq = (n: number) => Number.isSafeInteger(n) && n >= 1;
+
+/** evidence.judge in the view's words; a row stored before Phase 4 has no call log. */
+export function judgeEvidenceView(judge: JudgeEvidence): JudgeEvidenceView {
+  return {
+    provider: judge.provider,
+    baseUrl: judge.base_url ?? null,
+    model: judge.model,
+    calls: judge.calls,
+    tokens: { input: judge.tokens.input, output: judge.tokens.output, total: judge.tokens.total },
+    costUsd: judge.cost_usd,
+    latencyMs: judge.latency_ms,
+    finishReason: judge.finish_reason ?? null,
+    callLog: (judge.call_log ?? []).map((call) => ({
+      status: call.status,
+      latencyMs: call.latency_ms,
+    })),
+  };
+}
+
+/**
+ * The score's evidence for the Outcome section (Phase 3 question 5): the
+ * pointers, and the scorer's own detail as each type stores it. A field the
+ * row does not carry is null.
+ */
+export function evidenceView(evidence: ScoreEvidence): ScoreEvidenceView {
+  const { trajectory } = evidence;
+  return {
+    eventSeqs: (evidence.event_seqs ?? []).filter(isSeq),
+    artifactIds: [...(evidence.artifact_ids ?? [])],
+    judge: evidence.judge ? judgeEvidenceView(evidence.judge) : null,
+    trajectory: trajectory
+      ? {
+          tool: trajectory.tool,
+          calls: trajectory.calls,
+          matchedSeqs: trajectory.matched_seqs.filter(isSeq),
+          mode: trajectory.mode ?? null,
+        }
+      : null,
+    text: evidence.text
+      ? {
+          items: evidence.text.items.map((item) => ({ ...item })),
+          truncated: evidence.text.truncated,
+        }
+      : null,
+    jsonMatch: evidence.json_match
+      ? { ...evidence.json_match, mismatches: [...evidence.json_match.mismatches] }
+      : null,
+  };
+}
 
 /** One score row, with the sentence of the task's entry for its key. */
 export function scoreRowView(
@@ -228,6 +277,14 @@ export function executionErrorView(input: ExecutionErrorInput): ExecutionErrorVi
         ]
           .filter(Boolean)
           .join(' · '),
+      };
+    case 'limit':
+      return {
+        ...base,
+        reason: message ?? 'The model gateway stopped the run at its token cap.',
+        meta: ranS === null ? null : `after ${ranS} s`,
+        explanation:
+          'The model gateway answers 429 once an attempt has used its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT, 2,000,000 tokens unless set). A limit is never retried automatically, since a retry would stop at the same cap after spending as much again: the timeline shows what used the tokens, and Retry starts a new attempt with a fresh cap.',
       };
     case 'other':
       return {

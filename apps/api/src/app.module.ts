@@ -8,6 +8,7 @@ import { validateEnv } from './config/env.js';
 import { ConfigurationsModule } from './configurations/configurations.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { ExperimentCommandsModule } from './experiments/commands/experiment-commands.module.js';
+import { ComparisonModule } from './experiments/comparison/comparison.module.js';
 import { ExperimentViewsModule } from './experiments/experiment-views.module.js';
 import { HealthModule } from './health/health.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
@@ -40,6 +41,8 @@ const isDev = process.env.NODE_ENV !== 'production';
  * ProviderGate. ExperimentCommandsModule comes before ExperimentViewsModule:
  * Express matches routes in registration order, and GET /experiments/:id
  * would otherwise answer /experiments/new-options and /experiments/estimate.
+ * ComparisonModule is global, so the views and the live stream share its
+ * cache; its route has two segments after /experiments and no order concern.
  */
 @Module({
   imports: [
@@ -77,6 +80,7 @@ const isDev = process.env.NODE_ENV !== 'production';
     ExperimentCommandsModule,
     RunCommandsModule,
     ExperimentViewsModule,
+    ComparisonModule,
     RunViewsModule,
   ],
   providers: [

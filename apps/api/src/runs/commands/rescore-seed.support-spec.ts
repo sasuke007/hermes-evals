@@ -9,10 +9,12 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ConfigService } from '@nestjs/config';
 import { asc, eq } from 'drizzle-orm';
 import { vi } from 'vitest';
 import { LaunchExperimentResultSchema, type VerificationEntry } from '@hermes-evals/shared';
 import { sha } from '../../../test/support/seed.js';
+import type { Env } from '../../config/env.js';
 import { evaluations, experiments, runs, scores, tasks } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
 import {
@@ -139,22 +141,33 @@ export const JUDGED_VERIFICATION: VerificationEntry[] = [
   },
 ];
 
+/** The same task with a judge key that names no model: only JUDGE_MODEL can grade it. */
+export const UNMODELLED_VERIFICATION: VerificationEntry[] = [
+  { key: 'answer', type: 'exact_match', primary: true, params: { path: 'answer' } },
+  { key: 'tone', type: 'llm_judge', primary: false, params: { rubric: 'rubric.md' } },
+];
+
 /**
  * Adds a valid task with an llm_judge key to a seeded suite version, as the
  * loader would have stored it with the others, so a launch can select it.
  */
-export async function addJudgedTask(db: AppDb, suiteId: string, key = 'judged'): Promise<void> {
+export async function addJudgedTask(
+  db: AppDb,
+  suiteId: string,
+  key = 'judged',
+  { verification = JUDGED_VERIFICATION, position = 10 } = {},
+): Promise<void> {
   await db.insert(tasks).values({
     suiteId,
     key,
     versionNumber: 1,
     introducedInSuiteId: suiteId,
-    position: 10,
+    position,
     summary: `Task ${key}`,
     prompt: `Solve ${key}. Reply with a fenced JSON block.`,
     limits: { max_turns: 20, run_budget_seconds: 300, toolsets_needed: ['file'] },
     reference: { answer: 42 },
-    verification: JUDGED_VERIFICATION,
+    verification,
     taskYaml: `summary: Task ${key}\n`,
     selfCheck: { status: 'passed', ran_at: null, duration_ms: null, results: [] },
     valid: true,
@@ -167,9 +180,12 @@ export async function addJudgedTask(db: AppDb, suiteId: string, key = 'judged'):
  * `judged` (with the llm_judge key) under two custom configurations, one
  * repetition each, with a proven worker; like `launched`, plus the judge.
  */
-export async function launchedWithJudge(c: CommandsApp): Promise<Launched> {
+export async function launchedWithJudge(
+  c: CommandsApp,
+  verification: VerificationEntry[] = JUDGED_VERIFICATION,
+): Promise<Launched> {
   const suite = await seedSuite(c.t.db, { tasks: [{ key: 'alpha' }] });
-  await addJudgedTask(c.t.db, suite.id);
+  await addJudgedTask(c.t.db, suite.id, 'judged', { verification });
   const baseline = await seedConfiguration(c.t.db, 'baseline');
   const candidate = await seedConfiguration(c.t.db, 'with-skill');
   const workerId = await seedWorker(c.t.db);
@@ -198,4 +214,14 @@ export async function launchedWithJudge(c: CommandsApp): Promise<Launched> {
     candidate,
     suite,
   };
+}
+
+/**
+ * Sets one setting of the app's ConfigService for the rest of the test, as
+ * a restarted api with that value in .env would read it; undefined unsets it.
+ */
+export function setSetting(c: CommandsApp, key: keyof Env, value: string | undefined): void {
+  const config = c.app.get(ConfigService) as { get: (name: string) => unknown };
+  const read = config.get.bind(config);
+  config.get = (name: string) => (name === key ? value : read(name));
 }

@@ -38,9 +38,10 @@ const PROVIDER_ERROR =
  * upstream.ts tokenCapRefusal, MODEL_TOKEN_CAP_PER_ATTEMPT). Hermes reports
  * it as an HTTP 429, but no provider failed: the platform stopped a run that
  * used too many tokens, and the automatic retry a `provider` error gets
- * would stop at the same cap after spending as much again. So it is
- * `other`, which is never retried automatically, and checked before the
- * provider patterns, which match its 429.
+ * would stop at the same cap after spending as much again. So it has its
+ * own category, `limit` (Phase 3 question 8), which is never retried
+ * automatically, and is checked before the provider patterns, which match
+ * its 429.
  */
 const TOKEN_CAP_ERROR = /reached its token cap|token_cap_reached/i;
 /** Hermes's report of an MCP server that would not start, when nothing else ran. */
@@ -150,7 +151,7 @@ export function classifyAttempt(obs: AttemptObservation): Classification {
     if (failure !== null && failure !== '') {
       if (TOKEN_CAP_ERROR.test(failure))
         return error(
-          'other',
+          'limit',
           `The model gateway stopped the run at its token cap: ${cut(failure)}`,
         );
       if (SETUP_ERROR.test(failure))

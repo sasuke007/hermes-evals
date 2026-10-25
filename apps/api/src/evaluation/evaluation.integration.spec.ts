@@ -601,7 +601,10 @@ describe('with the real reconcile', () => {
       logger(),
     );
     const done = await experiment();
-    expect(done).toMatchObject({ status: 'completed', verdictHistory: [], pauseReason: null });
+    expect(done).toMatchObject({ status: 'completed', pauseReason: null });
+    expect(done.verdictHistory).toEqual([
+      expect.objectContaining({ cause: 'initial', results_revision: done.resultsRevision }),
+    ]);
     expect(done.finishedAt).toBeInstanceOf(Date);
     expect(done.verdictRevision).toBe(done.resultsRevision);
   });

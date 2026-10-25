@@ -1,8 +1,8 @@
 /**
  * The judge client over egress's judge path, with the real EgressClient on a
  * unix socket and a fake egress playing the provider: what it registers and
- * sends, the one retry, timeouts, refusals, readiness, and the tokens it
- * reports.
+ * sends, the one retry, timeouts, refusals, readiness, and the tokens and
+ * per-call log it reports.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProviderReadiness } from '../../providers/readiness.js';
@@ -35,7 +35,7 @@ const request = (over: Partial<JudgeRequest> = {}): JudgeRequest => ({
   model: 'judge/model',
   baseUrl: null,
   messages: { system: 'rules and facts', user: 'the response' },
-  maxTokens: 1024,
+  maxTokens: 4096,
   timeoutMs: 5_000,
   responseFormat: { type: 'json_object' },
   ...over,
@@ -77,6 +77,7 @@ describe('createEgressJudgeClient', () => {
       model: 'judge/model-2026',
       finishReason: 'stop',
       calls: 1,
+      callLog: [{ status: 200, latencyMs: expect.any(Number) }],
       latencyMs: expect.any(Number),
     });
     expect(fake.registrations).toEqual([
@@ -102,7 +103,7 @@ describe('createEgressJudgeClient', () => {
         { role: 'user', content: 'the response' },
       ],
       temperature: 0,
-      max_tokens: 1024,
+      max_tokens: 4096,
       response_format: { type: 'json_object' },
       stream: false,
     });
@@ -134,6 +135,7 @@ describe('createEgressJudgeClient', () => {
     const answer = await client().complete(request());
     expect(answer.calls).toBe(2);
     expect(answer.tokens).toEqual({ input: 50, output: 10, total: 60 });
+    expect(answer.callLog.map((c) => c.status)).toEqual([503, 200]);
     expect(fake.calls).toHaveLength(2);
   });
 
@@ -151,6 +153,10 @@ describe('createEgressJudgeClient', () => {
       message: "The judge's provider answered 502: bad gateway.",
       tokens: { input: 14, output: 0, total: 14 },
       calls: 2,
+      callLog: [
+        { status: 502, latencyMs: expect.any(Number) },
+        { status: 502, latencyMs: expect.any(Number) },
+      ],
     });
     expect(fake.removed).toHaveLength(1);
   });
@@ -168,6 +174,8 @@ describe('createEgressJudgeClient', () => {
     };
     const answer = await client({ egress: flaky }).complete(request());
     expect(answer.calls).toBe(2);
+    // The failed call never had an answer, so it logs no status.
+    expect(answer.callLog.map((c) => c.status)).toEqual([null, 200]);
     expect(fake.calls).toHaveLength(1);
   });
 
@@ -179,6 +187,7 @@ describe('createEgressJudgeClient', () => {
       status: 400,
       message: 'The judge call was refused (400): unknown model.',
       calls: 1,
+      callLog: [{ status: 400, latencyMs: expect.any(Number) }],
     });
     fake.respond = () => ({
       egress: 429,
@@ -190,7 +199,12 @@ describe('createEgressJudgeClient', () => {
       },
     });
     const capped = await rejection(client().complete(request()));
-    expect(capped).toMatchObject({ kind: 'refused', status: 429, calls: 1 });
+    expect(capped).toMatchObject({
+      kind: 'refused',
+      status: 429,
+      calls: 1,
+      callLog: [{ status: 429, latencyMs: expect.any(Number) }],
+    });
     expect(capped.message).toContain('token cap');
     expect(fake.calls).toHaveLength(2);
   });
@@ -240,6 +254,9 @@ describe('createEgressJudgeClient', () => {
       message: 'The judge did not answer within 0.2 s.',
       calls: 1,
     });
+    const [timedOut] = (err as JudgeCallError).callLog;
+    expect(timedOut!.status).toBeNull();
+    expect(timedOut!.latencyMs).toBeGreaterThanOrEqual(150);
     expect(Date.now() - started).toBeLessThan(3_000);
     expect(fake.removed).toHaveLength(1);
   });

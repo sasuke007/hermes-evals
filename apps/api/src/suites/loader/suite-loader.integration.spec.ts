@@ -630,6 +630,75 @@ describe('the blob store', () => {
   });
 });
 
+describe("the self-checks' declared time", () => {
+  /** A task whose five verifiers declare 300 s each, run twice for the negative control. */
+  async function slowTask(dir: string, key: string): Promise<void> {
+    const task = join(dir, key);
+    await mkdir(join(task, 'verify'), { recursive: true });
+    await mkdir(join(task, 'expected'), { recursive: true });
+    await mkdir(join(task, 'fixtures'), { recursive: true });
+    const keys = [1, 2, 3, 4, 5].map((n) => `v${n}`);
+    await writeFile(
+      join(task, 'task.yaml'),
+      [
+        'summary: Check the workspace',
+        'limits: { max_turns: 10, run_budget_seconds: 120, toolsets_needed: [file] }',
+        'answer: { format: fenced_json, path: total }',
+        'verification:',
+        '  - { key: answer, type: numeric_tolerance, primary: true, params: { abs: 0.01 } }',
+        ...keys.map(
+          (k) =>
+            `  - { key: ${k}, type: verifier_script, params: { script: ${k}.py, timeout_s: 300 } }`,
+        ),
+        'self_check: { expected_workspace: expected }',
+        '',
+      ].join('\n'),
+    );
+    await writeFile(join(task, 'prompt.md'), 'Add up.\n\n```json\n{ "total": 0 }\n```\n');
+    await writeFile(join(task, 'reference.json'), '{ "total": 1 }');
+    await writeFile(join(task, 'fixtures', 'rows.csv'), 'a\n');
+    await writeFile(join(task, 'expected', 'out.csv'), 'a\n');
+    // Never run: the suite is refused before any self-check starts.
+    for (const k of keys) {
+      await writeFile(join(task, 'verify', `${k}.py`), 'raise SystemExit("must not run")\n');
+    }
+  }
+
+  it('refuses a suite whose self-checks could outlast a load-suites job, before running any', async () => {
+    const dir = join(suitesDir, 'slow');
+    await mkdir(dir);
+    await writeFile(join(dir, 'suite.yaml'), "name: slow\nversion_label: '1'\n");
+    // Each task: 5 × (300 + 10) × 2 = 3100 s; two tasks four at a time: 1550 + 2325.
+    await slowTask(dir, 'first');
+    await slowTask(dir, 'second');
+    const entry = await load('slow');
+    expect(entry).toMatchObject({ outcome: 'error', suiteId: null });
+    expect(entry.message).toBe(
+      "Could not reload: the self-checks may take up to 3875 s (each verifier_script's timeout_s, twice with a negative control, plus 10 s per run, 4 tasks at a time), above the 3600 s one load may take; lower timeout_s or split the suite",
+    );
+    expect(await source('slow')).toMatchObject({ lastOutcome: 'error', currentSuiteId: null });
+    expect(await t.db.select().from(tasks)).toEqual([]);
+  });
+
+  it('loads in one reload only the suites that fit its budget, and records nothing for the rest', async () => {
+    // complete and mixed each declare 90 s (one 80 s task and one 40 s task, four at a time).
+    const result = SuiteReloadResultSchema.parse(await loader().loadAll({ selfCheckBudgetS: 100 }));
+    expect(result.suites.map((s) => [s.sourcePath, s.outcome, s.message])).toEqual([
+      ['./suites/complete', 'created', 'All 5 self-checks passed'],
+      [
+        './suites/mixed',
+        'error',
+        'Could not reload: not loaded by this reload: its self-checks may take up to 90 s, and the suites before it already declared 90 of the 100 s one reload may take; reload mixed on its own',
+      ],
+      ['./suites/no-suite-yaml', 'error', 'Could not reload: suite.yaml not found'],
+    ]);
+    const [mixed] = await t.db.select().from(suiteSources).where(eq(suiteSources.path, 'mixed'));
+    expect(mixed).toBeUndefined();
+    // On its own it has the whole budget.
+    expect(await load('mixed')).toMatchObject({ outcome: 'created', versionNumber: 1 });
+  });
+});
+
 describe('a suite with thousands of tasks', () => {
   it('inserts its task rows in chunks under the bind-parameter limit', async () => {
     const N = 4000;

@@ -19,7 +19,11 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/suites/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/suites/**",
+        "$TURBO_ROOT$/apps/web/src/fixtures/**"
+      ],
       "env": ["RUN_SANDBOX_TESTS", "DOCKER_SOCKET", "TRIALS_DIR", "TRIAL_IMAGE", "TRIAL_VOLUME"]
     },
     "test:e2e": {

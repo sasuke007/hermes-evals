@@ -86,7 +86,14 @@ describe('reconcileExperiment', () => {
     expect(done.status).toBe('completed');
     expect(done.finishedAt).not.toBeNull();
     expect(done.verdictRevision).toBe(done.resultsRevision);
-    expect(done.verdictHistory).toEqual([]);
+    // Phase 4 appends one verdict entry per candidate in the same update.
+    expect(done.verdictHistory).toEqual([
+      expect.objectContaining({
+        cause: 'initial',
+        key: 'primary',
+        results_revision: done.resultsRevision,
+      }),
+    ]);
     expect(await reconcile(seed.experimentId)).toBe('unchanged');
     expect((await experimentRow(t.db, seed.experimentId)).finishedAt).toEqual(done.finishedAt);
   });

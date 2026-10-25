@@ -13,7 +13,8 @@
  *    just past the longest the request can take.
  * 3. Call: temperature 0, max_tokens, a non-streaming chat completion, each
  *    try bounded by `timeoutMs`. One retry after a transport failure or a
- *    5xx (JUDGE_RETRIES); none after a 4xx, a refusal or a timeout.
+ *    5xx (JUDGE_RETRIES); none after a 4xx, a refusal or a timeout. Each
+ *    call's status and latency go in the answer's call log (question 9).
  * 4. Remove: egress's usage for the registration is the request's tokens,
  *    a retried call included.
  *
@@ -43,6 +44,7 @@ import {
   JUDGE_RETRY_DELAY_MS,
   JUDGE_TEMPERATURE,
   JudgeError,
+  type JudgeCallRecord,
   type JudgeClient,
   type JudgeErrorKind,
   type JudgeRequest,
@@ -123,6 +125,10 @@ function contentText(content: z.infer<typeof ContentPartSchema>[] | string | nul
   if (Array.isArray(content)) return content.map((part) => part.text ?? '').join('');
   return '';
 }
+
+/** An HTTP status for the call log; anything outside 100 to 599 is not one, and reads as none. */
+const httpStatus = (status: number): number | null =>
+  Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
 
 /** Waits `ms`, or less when the signal aborts; resolves false when it aborted. */
 function pause(ms: number, signal?: AbortSignal): Promise<boolean> {
@@ -214,12 +220,15 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
     }
   }
 
-  /** The calls of one registered request: the first, and one retry after a transport failure or a 5xx. */
+  /**
+   * The calls of one registered request: the first, and one retry after a
+   * transport failure or a 5xx. Every call made is counted and logged once.
+   */
   async function call(
     judgeId: string,
     request: JudgeRequest,
     signal: AbortSignal | undefined,
-    counted: { calls: number; tokens: JudgeTokens },
+    counted: { calls: number; tokens: JudgeTokens; log: JudgeCallRecord[] },
   ): Promise<Outcome> {
     const body: EgressJudgeChatBody = {
       model: request.model,
@@ -235,11 +244,22 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
     for (let attempt = 0; ; attempt += 1) {
       const last = attempt >= JUDGE_RETRIES;
       counted.calls += 1;
+      const callStarted = now();
+      let reply: EgressJudgeReply | null = null;
+      let thrown: unknown = null;
       try {
-        const reply = await deps.egress.judgeComplete(judgeId, body, {
+        reply = await deps.egress.judgeComplete(judgeId, body, {
           timeoutMs: request.timeoutMs,
           signal,
         });
+      } catch (err) {
+        thrown = err;
+      }
+      counted.log.push({
+        status: reply ? httpStatus(reply.status) : null,
+        latencyMs: Math.max(0, Math.round(now() - callStarted)),
+      });
+      if (reply) {
         if (reply.usage) counted.tokens = plus(counted.tokens, tokensOf(reply.usage));
         const outcome = readReply(reply, request);
         if (outcome !== 'retry') return outcome;
@@ -251,8 +271,8 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
             reply.status,
           );
         }
-      } catch (err) {
-        const failure = err instanceof EgressCallError ? err.failure : 'unreachable';
+      } else {
+        const failure = thrown instanceof EgressCallError ? thrown.failure : 'unreachable';
         if (failure === 'timeout') {
           return failed(
             'timeout',
@@ -265,7 +285,7 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
         if (last) {
           return failed(
             'transport',
-            `The judge could not be reached through egress: ${(err as Error).message}`,
+            `The judge could not be reached through egress: ${(thrown as Error).message}`,
           );
         }
       }
@@ -311,7 +331,7 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
         );
       }
 
-      const counted = { calls: 0, tokens: ZERO };
+      const counted = { calls: 0, tokens: ZERO, log: [] as JudgeCallRecord[] };
       let outcome: Outcome;
       let metered: JudgeTokens | null = null;
       try {
@@ -331,6 +351,7 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
           tokens,
           counted.calls,
           latencyMs,
+          counted.log,
         );
       }
       return {
@@ -339,6 +360,7 @@ export function createEgressJudgeClient(deps: EgressJudgeClientDeps): JudgeClien
         model: outcome.model,
         finishReason: outcome.finishReason,
         calls: counted.calls,
+        callLog: counted.log,
         latencyMs,
       };
     },

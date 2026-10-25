@@ -16,10 +16,12 @@
  * - What it grades with: the experiment's frozen task row (its stored
  *   verification list) and the scorers as they are in code now, whose
  *   versions each score row records.
- * - The judge (Phase 3 decision S3): a task with llm_judge keys needs the
- *   judge's provider ready (judge-needs.ts, providers/readiness.ts), as
- *   Launch does, or the answer is 409 with why. It is checked before the
- *   transaction, which holds no row lock across nous-login's answer.
+ * - The judge (Phase 3 decision S3): a task with llm_judge keys needs a
+ *   judge model for each (Phase 3 question 2) and the judge's provider
+ *   ready (judge-needs.ts, providers/readiness.ts), as Launch does, or the
+ *   answer is 409 with why and, for a missing model, how to set one. The
+ *   provider is checked before the transaction, which holds no row lock
+ *   across nous-login's answer.
  *
  * Lock order (plan 3.3): the experiment row, then the runs, then their
  * evaluations. Two concurrent requests for one run therefore queue on the
@@ -47,6 +49,7 @@ import {
   notFound,
 } from '../../experiments/commands/command-support.js';
 import { PROVIDER_NAMES, ProviderGate } from '../../experiments/commands/provider-gate.js';
+import { JUDGE_MODEL_FIX, namedKeys } from '../../providers/judge-readiness.js';
 import { QueueService } from '../../queue/queue.service.js';
 import { judgeNeedsOf, judgeSettingsFrom, type JudgeNeeds } from '../judge-needs.js';
 import { pendingEvaluationView } from '../views/evaluation-view.js';
@@ -69,6 +72,14 @@ export function rescoreRefusal(run: Pick<RunRow, 'status' | 'currentAttemptId'>)
 /** "Re-score needs Nous Portal for the method judge: Nous Portal is not connected." */
 export const judgeRefusal = (provider: Provider, keys: readonly string[], reason: string): string =>
   `Re-score needs ${PROVIDER_NAMES[provider]} for the ${keys.join(' and ')} judge: ${reason}`;
+
+/**
+ * "Re-score needs a judge model for the method judge: set JUDGE_MODEL …".
+ * Only the settings can fix it: a re-score grades the experiment's frozen
+ * task, so a `model:` added to task.yaml now never reaches it.
+ */
+export const noJudgeModelRefusal = (keys: readonly string[]): string =>
+  `Re-score needs a judge model for the ${namedKeys(keys)} judge: ${JUDGE_MODEL_FIX}.`;
 
 /** A run as read before the transaction: where it is and what its judge needs. */
 interface RescoreTarget {
@@ -210,8 +221,9 @@ export class RescoreService {
 
 /**
  * What one locked run gets, in the order a refusal is chosen: not scored;
- * a pending re-score, joined; its judge's provider not ready; else a new
- * evaluation queued. A string is the refusal.
+ * a pending re-score, joined; an llm_judge key with no judge model; its
+ * judge's provider not ready; else a new evaluation queued. A string is the
+ * refusal.
  */
 async function decide(
   tx: AppTx,
@@ -229,7 +241,9 @@ async function decide(
     if (!joined) return `run ${run.id} is still being scored for the first time`;
     return { answer: { evaluation: joined, joinedPending: true } };
   }
-  const { provider, judged } = target.judge;
+  const { provider, judged, keys } = target.judge;
+  const unjudged = keys.filter((key) => !judged.includes(key));
+  if (unjudged.length > 0) return noJudgeModelRefusal(unjudged);
   const blocked = provider ? blocks.get(provider) : undefined;
   if (provider && blocked !== undefined) return judgeRefusal(provider, judged, blocked);
   const { evaluationId } = await queueEvaluation(boss, tx, {

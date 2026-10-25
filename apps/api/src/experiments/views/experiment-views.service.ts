@@ -4,7 +4,7 @@
  * Reads rows with queries.ts and hands them to the pure builders beside it;
  * every answer parses with its shared schema before it leaves.
  */
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import {
   ExperimentDetailSchema,
   ExperimentListRowSchema,
@@ -14,9 +14,12 @@ import {
 import { DB } from '../../database/db.provider.js';
 import type { AppDb } from '../../database/types.js';
 import { suiteRef } from '../../suites/views/suite-views.js';
+import { ComparisonService } from '../comparison/comparison.service.js';
+import type { VerdictFigures } from '../comparison/verdicts.js';
 import type { ConfigFacts } from './facts.js';
 import { failureView, statusReason } from './failure.js';
 import { knownCost, spendView, type ModelsByVersion } from './money.js';
+import { experimentNotFound } from './not-found.js';
 import { doneRuns } from './numbers.js';
 import { aggregateOf, countRuns, feedOf, progressOf } from './progress.js';
 import {
@@ -37,12 +40,12 @@ import {
 } from './queries.js';
 import { configDifferences, experimentConfigs, hermesView, suiteSnapshot } from './snapshot.js';
 import { elapsedSeconds, remainingSeconds } from './timing.js';
+import { listVerdicts, needsFigures, verdictSummaries } from './verdicts.js';
 
-/** "The score key the Overview reads": each task's primary key until Phase 4 offers others. */
+/** The score key the Overview's verdicts are computed on: each task's primary key. */
 const SCORE_KEY = 'primary';
 
-export const experimentNotFound = (id: string): NotFoundException =>
-  new NotFoundException({ statusCode: 404, message: `Experiment ${id} does not exist.` });
+export { experimentNotFound };
 
 const modelsOf = (configs: readonly ConfigFacts[]): ModelsByVersion =>
   new Map(configs.map((c) => [c.ref.versionId, c.ref.model]));
@@ -63,14 +66,32 @@ function suiteOf(suites: ReadonlyMap<string, SuiteRow>, e: ExperimentRow): Suite
 
 @Injectable()
 export class ExperimentViewsService {
-  constructor(@Inject(DB) private readonly db: AppDb) {}
+  /** Verdict figures, cached by results revision; shared with the comparison when ComparisonModule is loaded. */
+  private readonly comparisons: ComparisonService;
+
+  constructor(
+    @Inject(DB) private readonly db: AppDb,
+    @Optional() @Inject(ComparisonService) comparisons?: ComparisonService,
+  ) {
+    this.comparisons = comparisons ?? new ComparisonService(db);
+  }
+
+  /** The current figures of the experiments whose verdicts need them, by id. */
+  private async figuresOf(
+    rows: readonly ExperimentRow[],
+  ): Promise<Map<string, VerdictFigures | null>> {
+    const entries = await Promise.all(
+      rows.map(async (e) => [e.id, await this.comparisons.verdictFigures(e.id)] as const),
+    );
+    return new Map(entries);
+  }
 
   /** GET /experiments: every experiment, newest first, in a fixed number of queries. */
   async list(): Promise<ExperimentListRow[]> {
     const rows = await experimentsNewestFirst(this.db);
     const ids = rows.map((e) => e.id);
     const failedIds = rows.filter((e) => e.status === 'failed').map((e) => e.id);
-    const [versions, suites, counts, money, errorRuns] = await Promise.all([
+    const [versions, suites, counts, money, errorRuns, figures] = await Promise.all([
       versionFactsOf(this.db, rows.flatMap(versionIdsOf)),
       suitesOf(
         this.db,
@@ -79,6 +100,9 @@ export class ExperimentViewsService {
       runCountsOf(this.db, ids),
       armMoneyOf(this.db, ids),
       errorRunsOf(this.db, failedIds),
+      // Only a completed experiment's chips show, and its history has them
+      // unless it completed before verdict entries were recorded.
+      this.figuresOf(rows.filter(needsFigures)),
     ]);
     return rows.map((e) => {
       const configs = experimentConfigs(e, versions);
@@ -114,8 +138,12 @@ export class ExperimentViewsService {
         totalRuns,
         doneRuns: doneRuns(e.status, runCounts),
         counts: runCounts,
-        // Phase 4 computes verdicts (E1).
-        verdicts: [],
+        verdicts: listVerdicts({
+          status: e.status,
+          verdictHistory: e.verdictHistory,
+          configs,
+          figures: figures.get(e.id) ?? null,
+        }),
         createdAt: e.createdAt.toISOString(),
         costUsd: knownCost(e.priceTable, modelsOf(configs), versionIdsOf(e), money.get(e.id) ?? []),
       } satisfies ExperimentListRow);
@@ -133,7 +161,7 @@ export class ExperimentViewsService {
     const configs = experimentConfigs(e, versions);
     // The breaker's failure is shown while the experiment is failed; retry-failed resumes it.
     const failed = e.status === 'failed' && e.failure !== null;
-    const [runs, money, suite, differences, lastEventAt, worker, errorRuns, mcpServers] =
+    const [runs, money, suite, differences, lastEventAt, worker, errorRuns, mcpServers, figures] =
       await Promise.all([
         runFactsOf(this.db, e.id),
         armMoneyOf(this.db, [e.id]).then((m) => m.get(e.id) ?? []),
@@ -143,6 +171,10 @@ export class ExperimentViewsService {
         workerFactsOf(this.db, e.id),
         failed ? errorRunsOf(this.db, [e.id]) : Promise.resolve<ErrorRunFacts[]>([]),
         failed ? mcpServersOf(this.db, versionIdsOf(e)) : Promise.resolve([]),
+        // Provisional figures until it completes; then the history, unless it lacks a candidate.
+        e.status !== 'completed' || needsFigures(e)
+          ? this.comparisons.verdictFigures(e.id)
+          : Promise.resolve(null),
       ]);
     const counts = countRuns(runs);
     const models = modelsOf(configs);
@@ -189,8 +221,12 @@ export class ExperimentViewsService {
       }),
       perConfiguration: configs.map((c) => progressOf(c, runs)),
       feed: feedOf(runs, names),
-      // Phase 4 computes verdicts (E1).
-      verdicts: [],
+      verdicts: verdictSummaries({
+        status: e.status,
+        verdictHistory: e.verdictHistory,
+        configs,
+        figures,
+      }),
       aggregates: configs.map((c) =>
         aggregateOf(c, runs, { priceTable: e.priceTable, models, arms: money }),
       ),

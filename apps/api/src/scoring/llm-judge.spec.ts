@@ -74,6 +74,7 @@ const replying = (text: string, over: Partial<JudgeResponse> = {}) =>
     model: 'judge/model',
     finishReason: 'stop',
     calls: 1,
+    callLog: [{ status: 200, latencyMs: 850 }],
     latencyMs: 850,
     ...over,
   }));
@@ -108,6 +109,7 @@ describe('scoreLlmJudge', () => {
           cost_usd: 0.003,
           latency_ms: 850,
           finish_reason: 'stop',
+          call_log: [{ status: 200, latency_ms: 850 }],
         },
       },
     });
@@ -116,7 +118,7 @@ describe('scoreLlmJudge', () => {
       provider: 'openrouter',
       model: 'judge/model',
       baseUrl: null,
-      maxTokens: 1024,
+      maxTokens: 4096,
       timeoutMs: 60_000,
       responseFormat: { type: 'json_object' },
     });
@@ -194,6 +196,7 @@ describe('scoreLlmJudge', () => {
         { input: 0, output: 0, total: 0 },
         1,
         60_000,
+        [{ status: null, latencyMs: 60_000 }],
       );
     });
     const timedOut = await scoreLlmJudge(input(), params(), deps(timeout.judge));
@@ -201,7 +204,12 @@ describe('scoreLlmJudge', () => {
       status: 'error',
       comment: 'The judge did not answer within 60 s.',
     });
-    expect(timedOut.evidence?.judge).toMatchObject({ calls: 1, cost_usd: 0, latency_ms: 60_000 });
+    expect(timedOut.evidence?.judge).toMatchObject({
+      calls: 1,
+      cost_usd: 0,
+      latency_ms: 60_000,
+      call_log: [{ status: null, latency_ms: 60_000 }],
+    });
     const transport = fakeJudge(async () => {
       throw new JudgeCallError(
         'transport',
@@ -210,6 +218,10 @@ describe('scoreLlmJudge', () => {
         { input: 40, output: 0, total: 40 },
         2,
         2100,
+        [
+          { status: 502, latencyMs: 1000 },
+          { status: 502, latencyMs: 1100 },
+        ],
       );
     });
     const broken = await scoreLlmJudge(input(), params(), deps(transport.judge));
@@ -217,7 +229,14 @@ describe('scoreLlmJudge', () => {
       status: 'error',
       evidence: { error: { detail: 'judge transport (502)' } },
     });
-    expect(broken.evidence?.judge).toMatchObject({ calls: 2, tokens: { total: 40 } });
+    expect(broken.evidence?.judge).toMatchObject({
+      calls: 2,
+      tokens: { total: 40 },
+      call_log: [
+        { status: 502, latency_ms: 1000 },
+        { status: 502, latency_ms: 1100 },
+      ],
+    });
     expectValidEvidence(broken.evidence);
     const bug = fakeJudge(async () => {
       throw new TypeError('boom');
@@ -351,7 +370,7 @@ describe('scoreLlmJudge through egress', () => {
       tokens: { input: 900, output: 20, total: 920 },
       cost_usd: 0.002,
     });
-    expect(fake.calls[0]!.body).toMatchObject({ temperature: 0, max_tokens: 1024, stream: false });
+    expect(fake.calls[0]!.body).toMatchObject({ temperature: 0, max_tokens: 4096, stream: false });
     expect(fake.removed).toHaveLength(1);
   });
 
@@ -362,6 +381,14 @@ describe('scoreLlmJudge through egress', () => {
         : { upstream: 200, body: chatCompletion('{"score":0.9,"comment":"Both named."}') };
     const result = await scoreLlmJudge(input(), params(), deps(realJudge()));
     expect(result).toMatchObject({ status: 'passed', score: 0.9 });
-    expect(result.evidence?.judge).toMatchObject({ calls: 2, tokens: { total: 50 } });
+    expect(result.evidence?.judge).toMatchObject({
+      calls: 2,
+      tokens: { total: 50 },
+      call_log: [
+        { status: 500, latency_ms: expect.any(Number) },
+        { status: 200, latency_ms: expect.any(Number) },
+      ],
+    });
+    expectValidEvidence(result.evidence);
   });
 });

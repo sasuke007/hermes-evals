@@ -97,6 +97,7 @@ describe.skipIf(!SERVER_URL)('presence and the System queries on Postgres 17', (
         status: 'online',
         sandboxProven: true,
         concurrency: 3,
+        effectiveConcurrency: 3,
         slotsTotal: 4,
       }),
     ]);

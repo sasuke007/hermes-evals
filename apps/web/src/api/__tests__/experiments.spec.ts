@@ -257,9 +257,11 @@ describe('getComparison', () => {
       executionErrors: -1,
       ungradable: -2,
     });
+    // The same difference as the observed one: the mean over tasks of the kept runs' differences.
     expect(c.sensitivity).toMatchObject({
       baseline: { passed: 38, counted: 57, rate: 0.667 },
-      delta: 0.183,
+      delta: 0.204,
+      verdict: 'better',
       verdictChanges: false,
     });
     expect(c.scoreKeyOptions.map((o) => o.label)).toEqual([
@@ -267,6 +269,27 @@ describe('getComparison', () => {
       'answer (all 12 tasks)',
       'Any key failed',
     ]);
+  });
+
+  it('grades the pass rates and the figure without broken runs by the selected key', async () => {
+    const c = await getComparison(EXPERIMENT_IDS.skillVsNoSkill, { key: 'any_failed' });
+    const passed = (side: 'baseline' | 'candidate') =>
+      c.rows.flatMap((r) => r[side]).filter((cell) => cell.scoreStatus === 'passed').length;
+    expect(c.passCounts).toEqual({
+      baseline: { passed: 32, counted: 60 },
+      candidate: { passed: 45, counted: 60 },
+    });
+    expect([passed('baseline'), passed('candidate')]).toEqual([32, 45]);
+    expect(c.passRates).toEqual({ baseline: 0.533, candidate: 0.75 });
+    // credit_notes · with-skill · rep 4 passed its primary key, but its method key errored.
+    expect(c.sensitivity?.excludedCandidate).toEqual({
+      executionErrors: 0,
+      ungradable: 0,
+      error: 1,
+    });
+    // The tooltip keeps the primary score's comment whatever key grades the cell.
+    const cell = c.rows.find((r) => r.taskKey === 'credit_notes')!.candidate[3]!;
+    expect([cell.scoreStatus, cell.comment]).toEqual(['error', 'answer matched the reference']);
   });
 
   it('filters rows and keeps the counts', async () => {

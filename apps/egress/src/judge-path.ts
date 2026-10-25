@@ -29,6 +29,13 @@
  * an entry, as there is no model call to record. Neither the log nor an answer
  * ever holds a credential: an upstream answer that echoes egress's key is
  * redacted before it is returned.
+ *
+ * Every chat call egress refuses before forwarding, whatever the reason, is
+ * also one line of egress's own log (`options.log`, Phase 3 question 9):
+ * `judge call refused` with the registration, the status and the reason, so
+ * a refusal the registration's log cannot hold (no registration, a bad body,
+ * the in-flight limit) still leaves a trace. The line never holds the
+ * messages, which carry the reference answer.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -56,6 +63,8 @@ export interface JudgePathOptions {
   tokenCap?: number;
   /** Longest egress waits for the upstream's whole answer. Default JUDGE_UPSTREAM_TIMEOUT_MS. */
   upstreamTimeoutMs?: number;
+  /** Egress's log, for the chat calls refused before forwarding. Silent when absent (tests). */
+  log?: (entry: Record<string, unknown>) => void;
 }
 
 /** Longest egress waits for one judge answer; the worker's own timeout is shorter (60 s). */
@@ -136,6 +145,19 @@ export function createJudgePath(options: JudgePathOptions) {
   const env = options.env ?? (() => process.env);
   const tokenCap = options.tokenCap ?? DEFAULT_TOKEN_CAP_PER_ATTEMPT;
   const upstreamTimeoutMs = options.upstreamTimeoutMs ?? JUDGE_UPSTREAM_TIMEOUT_MS;
+  const log = options.log ?? (() => {});
+
+  /** Refuses one chat call before it is forwarded, with a line in egress's log saying why. */
+  const refuseCall = (
+    res: ServerResponse,
+    judgeId: string,
+    status: number,
+    message: string,
+    type?: string,
+  ) => {
+    log({ msg: 'judge call refused', judgeId, status, reason: message });
+    refuse(res, status, message, type);
+  };
 
   async function complete(
     registration: JudgeRegistration,
@@ -145,12 +167,17 @@ export function createJudgePath(options: JudgePathOptions) {
     const { judgeId } = registration;
     const raw = await readLimited(req, MAX_JUDGE_REQUEST_BYTES);
     if (raw === null) {
-      return refuse(res, 413, `judge requests are at most ${MAX_JUDGE_REQUEST_BYTES} bytes`);
+      return refuseCall(
+        res,
+        judgeId,
+        413,
+        `judge requests are at most ${MAX_JUDGE_REQUEST_BYTES} bytes`,
+      );
     }
     const parsed = JudgeChatBodySchema.safeParse(parseJson(raw.toString('utf8')));
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
-      return refuse(res, 400, `invalid judge request: ${issues.join('; ')}`);
+      return refuseCall(res, judgeId, 400, `invalid judge request: ${issues.join('; ')}`);
     }
     const body = parsed.data;
     if (body.model !== registration.model) {
@@ -161,7 +188,12 @@ export function createJudgePath(options: JudgePathOptions) {
         status: 403,
         reason: 'model not allowed',
       });
-      return refuse(res, 403, `model ${body.model} is not this judge registration's model`);
+      return refuseCall(
+        res,
+        judgeId,
+        403,
+        `model ${body.model} is not this judge registration's model`,
+      );
     }
     const used = judges.usage(judgeId)?.totalTokens ?? 0;
     const cap = effectiveTokenCap(registration.maxTokens, tokenCap);
@@ -174,6 +206,7 @@ export function createJudgePath(options: JudgePathOptions) {
         status: 429,
         reason: refusal.reason,
       });
+      log({ msg: 'judge call refused', judgeId, status: 429, reason: refusal.reason });
       return json(res, 429, refusal.body);
     }
     const upstream = resolveUpstream(registration, upstreams, env());
@@ -185,11 +218,18 @@ export function createJudgePath(options: JudgePathOptions) {
         status: 503,
         reason: `no upstream configured for ${registration.provider}`,
       });
-      return refuse(res, 503, `no upstream configured for ${registration.provider}`, 'api_error');
+      return refuseCall(
+        res,
+        judgeId,
+        503,
+        `no upstream configured for ${registration.provider}`,
+        'api_error',
+      );
     }
     if (!judges.openCall(judgeId)) {
-      return refuse(
+      return refuseCall(
         res,
+        judgeId,
         429,
         'this judge registration already has calls in flight',
         'rate_limit_exceeded',
@@ -310,11 +350,14 @@ export function createJudgePath(options: JudgePathOptions) {
   ): Promise<void> {
     const judgeId = match[1]!;
     if (match[2]) {
-      if (req.method !== 'POST') return refuse(res, 405, 'method not allowed');
+      if (req.method !== 'POST') return refuseCall(res, judgeId, 405, 'method not allowed');
       const registration = judges.live(judgeId);
-      if (registration === null) return refuse(res, 404, 'unknown judge registration');
-      if (registration === 'expired')
-        return refuse(res, 403, 'this judge registration has expired');
+      if (registration === null) {
+        return refuseCall(res, judgeId, 404, 'unknown judge registration');
+      }
+      if (registration === 'expired') {
+        return refuseCall(res, judgeId, 403, 'this judge registration has expired');
+      }
       return complete(registration, req, res);
     }
     if (req.method === 'PUT') {

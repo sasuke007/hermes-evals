@@ -18,6 +18,18 @@
  */
 import type { ContainerSummary } from '../sandbox/engine-client.js';
 
+/**
+ * How many execute-run jobs the worker takes at once: WORKER_CONCURRENCY, at
+ * most one per trial slot. Each trial needs a slot to itself, so a job taken
+ * beyond the slots could only be deferred, again and again, while it holds
+ * the worker's attention. At least 1, so a worker whose slots are all
+ * missing still takes (and defers) a job instead of refusing to start. The
+ * System page shows the same number for each worker row (system/views.ts).
+ */
+export function trialConcurrency(concurrency: number, slotCount: number): number {
+  return Math.max(1, Math.min(concurrency, slotCount));
+}
+
 /** The part of EngineClient the pool needs. */
 export interface SlotEngine {
   list(labels: string[]): Promise<ContainerSummary[]>;

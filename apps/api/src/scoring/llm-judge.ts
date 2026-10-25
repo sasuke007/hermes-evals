@@ -16,8 +16,9 @@
  * no JudgeClient, or a judge provider that is not ready. Never a zero.
  *
  * Evidence: `evidence.judge` (records.ts JudgeEvidenceSchema) with the
- * provider, model, calls, tokens and the cost priced from the experiment's
- * frozen price table (null when the judge model has no price). Judge cost is
+ * provider, model, calls, tokens, the cost priced from the experiment's
+ * frozen price table (null when the judge model has no price), and each
+ * call's status and latency (`call_log`, Phase 3 question 9). Judge cost is
  * grading cost (plan 9.5): the spend guard never counts it.
  *
  * Order, so nothing is spent on a key that cannot be graded: no judge model
@@ -33,6 +34,7 @@ import {
   JudgeError,
   NO_JUDGE_MODEL_MESSAGE,
   resolveJudgeModel,
+  type JudgeCallRecord,
   type JudgeClient,
   type JudgeSettings,
   type JudgeTarget,
@@ -86,7 +88,13 @@ function judgeCost(table: PriceTable, model: string, tokens: JudgeTokens): numbe
 function judgeEvidence(
   target: JudgeTarget,
   priceTable: PriceTable,
-  call: { calls: number; tokens: JudgeTokens; latencyMs: number; finishReason?: string | null },
+  call: {
+    calls: number;
+    tokens: JudgeTokens;
+    latencyMs: number;
+    callLog: readonly JudgeCallRecord[];
+    finishReason?: string | null;
+  },
 ): JudgeEvidence {
   return {
     provider: target.provider,
@@ -97,13 +105,18 @@ function judgeEvidence(
     cost_usd: judgeCost(priceTable, target.model, call.tokens),
     latency_ms: Math.max(0, Math.round(call.latencyMs)),
     ...(call.finishReason !== undefined ? { finish_reason: call.finishReason } : {}),
+    call_log: call.callLog.map((entry) => ({
+      status: entry.status,
+      latency_ms: Math.max(0, Math.round(entry.latencyMs)),
+    })),
   };
 }
 
 /**
  * The evidence of a failed judge request, when it reached a provider: a
- * JudgeCallError says how many calls it made; a bare JudgeError that still
- * carries tokens or a status made one.
+ * JudgeCallError says how many calls it made and logged each; a bare
+ * JudgeError that still carries tokens or a status made one, logged with
+ * that status and no latency, as it records none.
  */
 function failedCallEvidence(
   err: JudgeError,
@@ -113,8 +126,21 @@ function failedCallEvidence(
   const calls =
     err instanceof JudgeCallError ? err.calls : err.status !== null || err.tokens.total > 0 ? 1 : 0;
   if (calls === 0) return null;
-  const latencyMs = err instanceof JudgeCallError ? err.latencyMs : 0;
-  return judgeEvidence(target, priceTable, { calls, tokens: err.tokens, latencyMs });
+  if (err instanceof JudgeCallError) {
+    return judgeEvidence(target, priceTable, {
+      calls,
+      tokens: err.tokens,
+      latencyMs: err.latencyMs,
+      callLog: err.callLog,
+    });
+  }
+  const status = err.status !== null && err.status >= 100 && err.status <= 599 ? err.status : null;
+  return judgeEvidence(target, priceTable, {
+    calls,
+    tokens: err.tokens,
+    latencyMs: 0,
+    callLog: [{ status, latencyMs: 0 }],
+  });
 }
 
 const formatScore = (score: number): string => String(Math.round(score * 1000) / 1000);

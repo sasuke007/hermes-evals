@@ -19,6 +19,7 @@ const READ_BY_THIS_DATA_LAYER = [
   'cancelled',
   'multi-attempt',
   'disk-limit',
+  'token-cap',
   'timeout-silent',
   'provider-lapsed',
   'launch-refused',

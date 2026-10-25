@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** (Phases 0 to 3): postgres, the api with every Phase 1 to Phase 3 endpoint, re-score included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login. The web app is built against fixtures. **Planned**: statistics and the comparison endpoint (Phase 4), the pages against the real API (Phase 5), suite authoring (Phase 5b).
+Status: **Built** (Phases 0 to 4): postgres, the api with every Phase 1 to Phase 4 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login. The web app is built against fixtures. **Planned**: the pages against the real API (Phase 5), suite authoring (Phase 5b).
 
 ```mermaid
 flowchart LR
@@ -379,7 +379,7 @@ The same checks can be run by hand: `docker compose run --rm --no-deps worker no
 
 ### 5.2 Workers
 
-`GET /system/summary` (or `/system/workers` in the web data layer) lists `workers` rows with their last heartbeat. A worker is live when its heartbeat is under 60 s old. The row shows concurrency 3, trial slots in use ("2 of 4") and whether its sandbox is proven.
+`GET /system/summary` (or `/system/workers` in the web data layer) lists `workers` rows with their last heartbeat. A worker is live when its heartbeat is under 60 s old. The row shows concurrency 3, trial slots in use ("2 of 4"), its effective concurrency (`effectiveConcurrency`, the concurrency capped at the slot count: 6 with 4 slots runs 4 at once; Phase 4) and whether its sandbox is proven.
 
 When no worker is live, queued runs simply wait in pg-boss. The UI shows the no-worker banner on running experiments and turns the System dot amber.
 
@@ -1025,6 +1025,7 @@ flowchart TD
   X["Container exited or was stopped"] --> R{"result event?"}
   R -- "exit 0, text" --> EX["executed"]
   R -- "exit 1, partial (max turns)" --> EX
+  R -- "error: the model gateway's token-cap 429" --> LI["execution_error · limit<br/>(never retried automatically)"]
   R -- "error: auth, 401, 403, 429, 5xx, connection" --> PV["execution_error · provider"]
   R -- none --> W{"Why did it stop?"}
   W -- "deadline: SIGTERM, SIGKILL after 10 s" --> TO["execution_error · timeout<br/>(platform result event synthesised)"]
@@ -1040,6 +1041,7 @@ flowchart TD
   AR -- yes --> RQ["automatic retry: attempt 2, 30 s later"]
   AR -- no --> FE["run stays execution_error, user may retry (up to 5 attempts)"]
   SE --> FE
+  LI --> FE
   DK --> FE
   OM --> FE
   OT --> FE
@@ -1078,7 +1080,7 @@ A missing heartbeat alone never proves the trial stopped. A replacement starts o
 
 ## 13. What happens to one run: scoring
 
-Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`). **Planned**: verdict entries (Phase 4).
+Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`); verdict entries appended by reconcile (Phase 4; `docs/phases/phase-4.md`).
 
 Scoring is separate from execution, so a scorer bug is fixed by re-scoring. Hermes is never run again for it.
 
@@ -1113,7 +1115,7 @@ sequenceDiagram
       WK->>WK: python3 verify/check.py --answer tmp.json --workspace dir (30 s, outside any trial)
     else llm_judge
       WK->>E: register one judge call (the judge model only, minutes), then the chat completion
-      E->>J: rubric, task and reference as facts, agent text as untrusted data,<br/>temperature 0, at most 1,024 tokens, egress's credential added
+      E->>J: rubric, task and reference as facts, agent text as untrusted data,<br/>temperature 0, at most 4,096 tokens, egress's credential added
       J-->>E: score 0 to 1 and a comment
       E-->>WK: the answer and the tokens egress metered, then the registration is removed
     end
@@ -1127,7 +1129,7 @@ sequenceDiagram
   WK->>DB: COMMIT
 ```
 
-The judge is the platform's, not the run's: a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset). With no judge model the key is `error`, never a zero. Its tokens and cost are stored in the score's evidence as grading cost, outside the spend guard.
+The judge is the platform's, not the run's: a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset). Launch and Re-score answer 409 for a task whose `llm_judge` key has no judge model, with the fix in the message; a key that still has none at scoring time is `error`, never a zero. Each judge call's status and latency are kept in the score's evidence. Its tokens and cost are stored in the score's evidence as grading cost, outside the spend guard.
 
 What each outcome means, kept apart everywhere in the UI:
 
@@ -1139,34 +1141,44 @@ What each outcome means, kept apart everywhere in the UI:
 | `error`           | the check itself broke                             | verifier printed no result line            |
 | `execution_error` | (a run status, not a score) no answer was produced | timeout, provider down                     |
 
-**Re-score** (`POST /runs/:id/rescore`, or the bulk bar): inserts an evaluation with the next generation and sends `evaluate-run`, in one transaction. Only a `scored` run can be re-scored (409 "run is …, not scored"), and a task with an `llm_judge` key needs the judge's provider ready (409 "Re-score needs Nous Portal for the method judge: …"). The run stays `scored`, and its previous result stays current, until the new generation publishes; the inspector and the Runs tab show the pending re-score. Only one evaluation per run can be queued or running, so double clicks collapse: a second request answers the pending one (`joinedPending`). A re-score grades the experiment's frozen task with the scorers as they are now in code, and the judge settings of the moment. If the experiment was completed, publishing raises the results revision; from Phase 4, reconcile also appends a verdict with cause `rescore`.
+**Re-score** (`POST /runs/:id/rescore`, or the bulk bar): inserts an evaluation with the next generation and sends `evaluate-run`, in one transaction. Only a `scored` run can be re-scored (409 "run is …, not scored"), and a task with an `llm_judge` key needs a judge model (409 "Re-score needs a judge model for the method judge: …") and the judge's provider ready (409 "Re-score needs Nous Portal for the method judge: …"). The run stays `scored`, and its previous result stays current, until the new generation publishes; the inspector and the Runs tab show the pending re-score. Only one evaluation per run can be queued or running, so double clicks collapse: a second request answers the pending one (`joinedPending`). A re-score grades the experiment's frozen task with the scorers as they are now in code, and the judge settings of the moment. If the experiment was completed, publishing raises the results revision, and reconcile appends a verdict entry per candidate with cause `rescore` (section 13.1).
 
 **When a scoring job dies for good**: for a first evaluation, one `error` score per key is published, so the run still reaches `scored`. A failed re-score leaves the previous result current.
 
 ### 13.1 Reconcile: when is an experiment done?
 
+Status: **Built** (Phase 2: completion; Phase 4: the verdict entries; `docs/phases/phase-4.md` section 3.8).
+
 ```mermaid
 flowchart TD
   T["Any transaction that finishes a run:<br/>scores published, final execution error,<br/>cancellation, recovery, or the 15 s safety pass"] --> L["Lock the experiment row"]
-  L --> S{"Any run queued, running, executed or scoring,<br/>or any evaluation queued or running?"}
-  S -- yes --> STOP["Not settled: return"]
-  S -- no --> V["Compute verdict entries from current scores"]
-  V --> U{"verdict_revision different from results_revision?"}
+  L --> F{"failed?"}
+  F -- yes --> FAIL["Return: Retry failed runs reopens it"]
+  F -- no --> U{"verdict_revision different from results_revision?"}
   U -- no --> SAME["Already recorded: return"]
-  U -- yes --> C["status completed, finished_at,<br/>append to verdict_history (cause initial, retry or rescore),<br/>verdict_revision = results_revision"]
+  U -- yes --> S{"Any run queued, running, executed or scoring,<br/>or any evaluation queued or running?"}
+  S -- yes --> STOP["Not settled: return"]
+  S -- no --> CA{"Cause"}
+  CA -- "history empty" --> I["initial"]
+  CA -- "completed, results moved" --> RS["rescore, note: N runs re-scored"]
+  CA -- "a retry reopened it" --> RT["retry, note: N retries"]
+  I --> V["One verdict entry per candidate on the primary key,<br/>final statistics from the results under the lock"]
+  RS --> V
+  RT --> V
+  V --> C["Conditional update: append to verdict_history,<br/>verdict_revision = results_revision,<br/>and status completed with finished_at unless already completed"]
 ```
 
-Two workers finishing the last two runs at the same moment append the verdict once: the conditional update lets only one through. As built, reconcile completes the experiment and sets `verdict_revision`, but computes and appends no verdict entry until Phase 4.
+Two workers finishing the last two runs at the same moment append the verdict once: the second waits for the row, then finds the revisions equal, and the append is in the same statement as the move of `verdict_revision`. An entry records the cause, a note ("1 retry", "2 runs re-scored"), Δ, the interval, the verdict or why there is none, the pass rates and counts, the task counts, the method and the results revision it was computed from. A failed experiment gets no entry until a retry reopens it and it settles; an experiment reopened by a retry and then settled by a cancel gets cause `retry`.
 
 ---
 
 ## 14. Experiment list and overview, live
 
-Status: **Built** in the web app against fixtures, and in the API: the list, the detail and the SSE stream (Phase 2). **Planned**: verdict entries (Phase 4) and the pages against the real API (Phase 5).
+Status: **Built** in the web app against fixtures, and in the API: the list, the detail and the SSE stream (Phase 2), and the verdicts read from the verdict history, with the SSE `experiment` event's `verdicts` and `verdictUpdatedAt` (Phase 4). **Planned**: the pages against the real API (Phase 5).
 
 ### 14.1 Experiment list
 
-`GET /experiments` returns one row per experiment, newest first: name, status chip, suite and version, configurations, runs done of total, cost, and the verdict chip once complete. A failed experiment shows its failure reason in the row. Clicking a row opens the Overview tab.
+`GET /experiments` returns one row per experiment, newest first: name, status chip, suite and version, configurations, runs done of total, cost, and once completed one verdict chip per candidate, from its last verdict history entry (Δ and interval included). A running, paused or failed experiment has no chip; the SSE `experiment` event carries the same `verdicts`, so a live list patches its chips. A failed experiment shows its failure reason in the row. Clicking a row opens the Overview tab.
 
 ### 14.2 Overview while running
 
@@ -1184,7 +1196,7 @@ sequenceDiagram
   A-->>W: header, snapshot strip, progress breakdown, feed
   W->>A: GET /experiments/:id/events (SSE)
   loop shared poller per experiment, every 1 s
-    A->>DB: run status changes, scores landed, counts, experiment status since last poll
+    A->>DB: run status changes (with generation and pending re-score), scores landed,<br/>counts, experiment status and verdicts since last poll
     A-->>W: events
     W->>W: patch records in place (rows never reorder while live)
   end
@@ -1193,17 +1205,18 @@ sequenceDiagram
 
 What the overview shows, and where each number comes from:
 
-| On screen                                            | Source                                                                                        |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| "87 of 120 scored · 28 queued · 3 running · 1 error" | run counts by status                                                                          |
-| Per-configuration bars, provisional pass rate        | passed / scored per configuration so far                                                      |
-| Spend "$0.71 of $2.00 ceiling · projected $1.69"     | sum of priced attempt costs, estimate for the rest                                            |
-| Feed                                                 | the last 10 run transitions and scores                                                        |
-| Snapshot strip                                       | what the experiment froze at launch: suite + version, configuration versions, Hermes revision |
-| VerdictCard (complete)                               | the latest `verdict_history` entry, with "Updated … · previously …" when it changed           |
-| No-worker banner                                     | no worker heartbeat for 60 s while runs are queued                                            |
-| Paused banners                                       | `pause_reason`: user, spend_ceiling, provider_disconnected                                    |
-| Failed banner                                        | the circuit breaker's structured failure: category, message, first stderr line, attempt       |
+| On screen                                            | Source                                                                                                                                   |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| "87 of 120 scored · 28 queued · 3 running · 1 error" | run counts by status                                                                                                                     |
+| Per-configuration bars, provisional pass rate        | passed / scored per configuration so far                                                                                                 |
+| Spend "$0.71 of $2.00 ceiling · projected $1.69"     | sum of priced attempt costs, estimate for the rest                                                                                       |
+| Feed                                                 | the last 10 run transitions and scores                                                                                                   |
+| Snapshot strip                                       | what the experiment froze at launch: suite + version, configuration versions, Hermes revision                                            |
+| VerdictCard (complete)                               | each candidate's last `verdict_history` entry; the entries before it, with their cause and note, give "Updated … · previously …"         |
+| VerdictCard (running)                                | the provisional figures so far, computed as the comparison computes them; `not_computable` at once with one repetition or nothing scored |
+| No-worker banner                                     | no worker heartbeat for 60 s while runs are queued                                                                                       |
+| Paused banners                                       | `pause_reason`: user, spend_ceiling, provider_disconnected                                                                               |
+| Failed banner                                        | the circuit breaker's structured failure: category, message, first stderr line, attempt                                                  |
 
 ---
 
@@ -1270,7 +1283,7 @@ A login that lapses during a trial fails that attempt as `execution_error · pro
 
 ## 16. Comparison tab
 
-Status: **Built** in the web app against fixtures, and its contract (`ComparisonViewSchema`). **Planned**: the statistics module, the endpoint and its cache (Phase 4).
+Status: **Built** in the web app against fixtures, and its contract (`ComparisonViewSchema`); the statistics module, the endpoint and its cache in the API (Phase 4; `docs/phases/phase-4.md` sections 3.3 to 3.7). **Planned**: the tab against the real API (Phase 5).
 
 The comparison answers "is the candidate better than the baseline, and how sure are we?", and links every number to the runs beneath it.
 
@@ -1285,17 +1298,21 @@ sequenceDiagram
 
   U->>W: opens Comparison (candidate, score key, filter in the URL)
   W->>A: GET /experiments/:id/comparison?candidate=&key=primary&filter=all
-  A->>DB: BEGIN REPEATABLE READ READ ONLY, read results_revision first
-  A->>C: (experiment, candidate, key, filter, results_revision) cached?
+  A->>DB: BEGIN REPEATABLE READ READ ONLY, the experiment row first:<br/>results_revision, status, repetitions, tasks, configurations
+  A->>A: 404 unknown experiment, 400 a candidate it does not test
+  A->>DB: configuration names, in the same snapshot
+  A->>C: (experiment, candidate, key, filter, results_revision, status, names) cached?
   alt cache hit
     C-->>A: response
   else miss
-    A->>DB: runs scored or execution_error per task and configuration, the key's status per run
+    A->>DB: tasks and their keys, runs with current attempts, attempt costs, current scores
+    A->>A: 400 if a selected task lacks the key
+    A->>A: counted runs (scored or execution_error) per task and configuration, the key's status per run
     A->>A: pass rate per task per configuration = passed / counted
     A->>A: observed difference = mean over tasks of (candidate - baseline)
-    A->>A: bootstrap: resample tasks 10,000 times (seeded by experiment id), 2.5th and 97.5th percentiles
-    A->>A: verdict better (lo > 0), worse (hi < 0), else inconclusive, provisional while running
-    A->>A: sensitivity: same difference without execution errors, error and ungradable scores
+    A->>A: bootstrap: resample tasks 10,000 times (mulberry32 seeded from the experiment id),<br/>2.5th and 97.5th percentiles
+    A->>A: verdict better (lo > 0), worse (hi < 0), else inconclusive,<br/>provisional while running or paused
+    A->>A: sensitivity: same difference and interval without execution errors, error and ungradable scores
     A->>A: secondary: median duration, mean tokens, cost, error and ungradable counts
     A->>C: store
   end
@@ -1309,21 +1326,21 @@ States the tab handles:
 
 ```mermaid
 flowchart TD
-  G{"Every selected task has at least 2 counted runs<br/>per configuration?"} -- no --> NC["Statistics not computable, with the reason:<br/>single_repetition, not_enough_runs, nothing_scored"]
-  G -- yes --> RUN{"Experiment still running?"}
+  G{"Every selected task has at least 2 counted runs<br/>per configuration?"} -- no --> NC["Statistics not computable, with the reason, in this order:<br/>single_repetition, nothing_scored, not_enough_runs"]
+  G -- yes --> RUN{"Experiment running or paused?"}
   RUN -- yes --> PV["Provisional: verdict chip provisional,<br/>unscored cells queued or running"]
   RUN -- no --> FIN["Final verdict"]
   F["Filter: improved / regressed / unchanged"] --> E{"Rows left?"}
   E -- no --> EM["Empty state"]
 ```
 
-Because `results_revision` moves on every run status change and every published or superseded score set, a retry, cancellation or re-score can never serve a stale comparison.
+Because `results_revision` moves on every run status change and every published or superseded score set, a retry, cancellation, execution error or re-score can never serve a stale comparison. The status is in the cache key because completing, pausing or resuming moves no run but turns provisional into final, and the configuration names because a rename moves no run. `single_repetition` applies whatever has run; `nothing_scored` means no run of the two configurations counts yet (an execution error counts); a cell's tooltip is always the primary score's comment, while its colour follows the selected key; the candidate select's chips are the verdicts on the primary key. A failed experiment's comparison is final, since only a running or paused one is provisional, while its Overview card reads provisional (`docs/phases/phase-4.md` open question 5).
 
 ---
 
 ## 17. Runs tab
 
-Status: **Built** in the web app against fixtures, and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2), and bulk re-score with each row's `generation` and `rescorePending` (Phase 3). **Planned**: the tab against the real API (Phase 5).
+Status: **Built** in the web app against fixtures, and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2), and bulk re-score with each row's `generation` and `rescorePending` (Phase 3), which the SSE `run` event now carries too, so a live tab shows a re-score queued and published (Phase 4). **Planned**: the tab against the real API (Phase 5).
 
 ```mermaid
 sequenceDiagram

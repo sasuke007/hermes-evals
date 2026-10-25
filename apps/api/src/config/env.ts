@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HTTP_URL_PATTERN, PROVIDERS } from '@hermes-evals/shared';
+import { LOAD_SUITES_EXPIRE_SECONDS } from '../queue/queues.js';
 
 /** An optional setting; an empty value (`JUDGE_MODEL=` in .env) means unset. */
 const optional = <T extends z.ZodType>(schema: T) =>
@@ -63,9 +64,15 @@ export const EnvSchema = z
     ALLOWED_HOSTS: z.string().optional(),
     /**
      * How long POST /suites/reload waits for the worker's load-suites job. At
-     * most the job's own expiry (900 s); the load goes on after a timeout.
+     * most the job's own expiry (LOAD_SUITES_EXPIRE_SECONDS, 4200 s); the
+     * load goes on after a timeout.
      */
-    SUITE_RELOAD_TIMEOUT_S: z.coerce.number().int().min(1).max(900).default(180),
+    SUITE_RELOAD_TIMEOUT_S: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(LOAD_SUITES_EXPIRE_SECONDS)
+      .default(180),
     /** How long an MCP "Test start" waits for its test-mcp-server job; at most its expiry (300 s). */
     MCP_TEST_TIMEOUT_S: z.coerce.number().int().min(1).max(300).default(120),
     /** Model price table (plan 7.2). The file may not exist; then no model has a price. */

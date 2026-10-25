@@ -12,7 +12,7 @@ import { PinoLogger } from 'nestjs-pino';
 import type { PgBoss } from 'pg-boss';
 import { SuiteReloadResultSchema, type SuiteReloadResult } from '@hermes-evals/shared';
 import { DB } from '../../database/db.provider.js';
-import { QUEUES } from '../../queue/queues.js';
+import { MAX_LOAD_SELF_CHECK_SECONDS, QUEUES } from '../../queue/queues.js';
 import { BlobStore } from '../../storage/blob-store.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
@@ -105,7 +105,10 @@ describe('the load-suites handler', () => {
 
   it('loads every directory for path null, else the one named', async () => {
     expect(await handleLoadSuitesJob({ path: null }, loader, logger)).toBe(result);
-    expect(loader.loadAll).toHaveBeenCalledTimes(1);
+    // Every directory shares the one budget of declared self-check time a job has.
+    expect(loader.loadAll).toHaveBeenCalledWith({
+      selfCheckBudgetS: MAX_LOAD_SELF_CHECK_SECONDS,
+    });
     await handleLoadSuitesJob({ path: 'invoices-v1' }, loader, logger);
     expect(loader.loadOne).toHaveBeenCalledWith('invoices-v1');
   });
