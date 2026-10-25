@@ -112,6 +112,7 @@ const VERDICT_UPDATED: ExperimentEvent = {
       delta: 0.217,
       lo: 0.117,
       hi: 0.333,
+      reason: null,
     },
   ],
   verdictUpdatedAt: '2026-10-23T14:21:16.000Z',

@@ -66,7 +66,11 @@ describe('getExperiment', () => {
     expect(e.totalRuns).toBe(120);
     expect(e.counts).toMatchObject({ scored: 119, execution_error: 1 });
     expect(e.elapsedS).toBe(37 * 60 + 4);
-    expect(e.hermes).toEqual({ package: 'hermes-agent', version: 'v0.22.4', revision: '4d04303' });
+    expect(e.hermes).toEqual({
+      package: 'hermes-agent',
+      version: 'v0.22.4',
+      revision: '4d04303a1b2c3d4e5f60718293a4b5c6d7e8f901',
+    });
     expect(e.suite).toMatchObject({ name: 'invoices-v1', versionNumber: 1, taskCount: 12 });
     expect(e.suite.contentHash.startsWith('3f9c2a1')).toBe(true);
     expect(e.differences).toEqual([
@@ -204,8 +208,8 @@ describe('getExperiment', () => {
     expect(e.verdicts[0]).toMatchObject({
       verdict: 'inconclusive',
       delta: 0.083,
-      lo: -0.042,
-      hi: 0.208,
+      lo: -0.056,
+      hi: 0.278,
       taskCounts: { improved: 2, regressed: 1, unchanged: 9 },
     });
     expect(e.verdicts[0]!.history.map((h) => h.delta)).toEqual([0.056, 0.083]);
@@ -378,6 +382,24 @@ describe('New experiment', () => {
       basis: 'history',
     });
     expect(estimate.perConfiguration.map((p) => p.costUsd)).toEqual([0.71, 0.98]);
+  });
+
+  it('estimates from a quarter of the per-run budget when there is no history', async () => {
+    setScenario('no-history');
+    const o = await getNewExperimentOptions();
+    const query = {
+      suiteId: o.suites[0]!.suiteId,
+      versionIds: o.configurations.slice(0, 2).map((c) => c.versionId),
+      taskCount: 12,
+      repetitions: 5,
+      concurrency: 3,
+    };
+    expect(await estimateExperiment(query)).toMatchObject({ perRunSeconds: 75, basis: 'budget' });
+    expect(await estimateExperiment({ ...query, budgetS: 120 })).toMatchObject({
+      perRunSeconds: 30,
+      durationS: 40 * 30,
+      basis: 'budget',
+    });
   });
 
   it('launches into the running experiment, or refuses with a 409', async () => {

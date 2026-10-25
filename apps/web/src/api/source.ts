@@ -1,24 +1,35 @@
 /**
  * Where page data comes from.
  *
- * Most API endpoints do not exist yet, so every data-layer function serves
- * fixtures by default and switches to the planned endpoint (plan section 11)
- * when the app is built with VITE_API_MODE=live. Components never call fetch
- * or these helpers directly: they call the functions in src/api/<domain>.ts.
+ * Every endpoint exists (plan section 11), so the app calls the real API by
+ * default: `pnpm dev` and the Compose web image both run live. With
+ * VITE_API_MODE=fixtures every data-layer function serves fixtures instead
+ * (src/fixtures), which is what the component tests use (vitest.config.ts sets
+ * it) and what a designed state needs. Components never call fetch or these
+ * helpers directly: they call the functions in src/api/<domain>.ts, which
+ * check apiMode and either call apiGet/apiSend (client.ts) with the response's
+ * shared schema, or serve the fixture (src/api/README.md).
  *
- * Scenarios: add ?scenario=<name> to any URL to see a designed state
- * (src/fixtures/scenarios.ts lists them). The choice is remembered for the
- * browser tab in sessionStorage; ?scenario=clear forgets it. Two scenarios
+ * Scenarios (fixtures mode): add ?scenario=<name> to any URL to see a designed
+ * state (src/fixtures/scenarios.ts lists them). The choice is remembered for
+ * the browser tab in sessionStorage; ?scenario=clear forgets it. Two scenarios
  * apply to every fixture-backed call: `loading` never resolves and `error`
  * rejects with an ApiError like the one a stopped `api` service produces.
  */
-import { z, type ZodType } from 'zod';
-import { ApiError, apiGet } from './client';
+import { ApiError } from './client';
 
 export type ApiMode = 'fixtures' | 'live';
 
-/** VITE_API_MODE=live calls the real API; anything else (or unset) serves fixtures. */
-export const apiMode: ApiMode = import.meta.env.VITE_API_MODE === 'live' ? 'live' : 'fixtures';
+/** The real API unless the build sets VITE_API_MODE=fixtures. */
+export const apiMode: ApiMode = import.meta.env.VITE_API_MODE === 'fixtures' ? 'fixtures' : 'live';
+
+/**
+ * A live stream's path in live mode, null in fixtures mode (where nothing streams):
+ * useSse(livePath(`/experiments/${id}/events`), ExperimentEventSchema, …).
+ */
+export function livePath(path: string): string | null {
+  return apiMode === 'live' ? path : null;
+}
 
 export const SCENARIO_STORAGE_KEY = 'hermes-evals.scenario';
 const SCENARIO_PARAM = 'scenario';
@@ -157,57 +168,4 @@ export function withQuery(path: string, params: Record<string, QueryValue>): str
   }
   const qs = q.toString();
   return qs ? `${path}?${qs}` : path;
-}
-
-/**
- * The planned endpoints return these view models directly; they have no shared
- * zod schema yet, so live reads trust the response shape.
- */
-function trusted<T>(): ZodType<T> {
-  return z.custom<T>(() => true);
-}
-
-/** Live mode: GET a planned endpoint through client.ts. `path` excludes the /api prefix. */
-export function liveGet<T>(path: string): Promise<T> {
-  return apiGet(path, trusted<T>());
-}
-
-/**
- * Live mode: a state-changing call. JSON bodies are sent as application/json,
- * FormData as multipart. Every call carries X-Requested-With, which the API
- * requires so another site cannot trigger it (plan section 6.1).
- */
-export async function liveSend<T>(
-  method: 'POST' | 'PUT' | 'DELETE',
-  path: string,
-  body?: unknown,
-): Promise<T> {
-  const multipart = typeof FormData !== 'undefined' && body instanceof FormData;
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    'x-requested-with': 'hermes-evals',
-  };
-  if (!multipart) headers['content-type'] = 'application/json';
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers,
-    body: multipart ? (body as FormData) : JSON.stringify(body ?? {}),
-  });
-  if (!res.ok) {
-    throw new ApiError(res.status, `${method} /api${path.split('?')[0]}`, await errorDetail(res));
-  }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
-}
-
-/** The API's error body is `{ statusCode, message }`; fall back to the raw text. */
-async function errorDetail(res: Response): Promise<string> {
-  const text = (await res.text()).slice(0, 300);
-  try {
-    const parsed = JSON.parse(text) as { message?: unknown };
-    if (typeof parsed.message === 'string') return parsed.message;
-  } catch {
-    /* not JSON */
-  }
-  return text || res.statusText;
 }

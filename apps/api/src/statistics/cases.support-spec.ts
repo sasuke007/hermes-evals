@@ -23,7 +23,6 @@ function run(code: string): StatsRun {
       executionError: 'timeout',
       durationS: 300,
       tokens: 20_000,
-      costUsd: 0.02,
     };
   }
   const keyStatus = scored[code as keyof typeof scored];
@@ -34,7 +33,6 @@ function run(code: string): StatsRun {
     executionError: null,
     durationS: 40,
     tokens: 12_000,
-    costUsd: 0.01,
   };
 }
 
@@ -44,10 +42,16 @@ const task = (taskKey: string, baseline: string, candidate: string): StatsTask =
   candidate: candidate.split('').map(run),
 });
 
-/** Tasks as [baseline cells, candidate cells]; repetitions from the longest row. */
+/**
+ * Tasks as [baseline cells, candidate cells]; repetitions from the longest
+ * row. Each arm spent $0.01 a run, $0.02 for an execution error, unless
+ * `patch` says otherwise.
+ */
 export function input(rows: [string, string][], patch: Partial<StatsInput> = {}): StatsInput {
   const tasks = rows.map(([b, c], i) => task(`task_${i + 1}`, b, c));
   const runs = tasks.flatMap((t) => [...t.baseline, ...t.candidate]);
+  const spent = (cells: string) =>
+    cells.split('').reduce((sum, code) => sum + (code === 'E' ? 0.02 : 0.01), 0);
   return {
     tasks,
     repetitions: Math.max(...rows.flatMap(([b, c]) => [b.length, c.length])),
@@ -56,6 +60,10 @@ export function input(rows: [string, string][], patch: Partial<StatsInput> = {})
     progress: {
       scored: runs.filter((r) => r.keyStatus !== null).length,
       total: runs.length,
+    },
+    costUsd: {
+      baseline: rows.reduce((sum, [b]) => sum + spent(b), 0),
+      candidate: rows.reduce((sum, [, c]) => sum + spent(c), 0),
     },
     ...patch,
   };

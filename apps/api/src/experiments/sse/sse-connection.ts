@@ -47,9 +47,17 @@ export class SseConnection implements SseSink {
    * Answers 200 with the event-stream headers and starts the keepalive.
    * `X-Accel-Buffering: no` stops nginx (the web container) from buffering
    * the stream. The connection closes itself when the client goes away.
+   *
+   * A client that went away before this (the experiment stream awaits its 404 check first)
+   * gets a connection that is closed already: its 'close' has fired, so the listeners below
+   * would never run, and whenClosed() then unsubscribes at once instead of never.
    */
   static open(req: IncomingMessage, res: ServerResponse): SseConnection {
     const connection = new SseConnection(res);
+    if (req.destroyed || res.destroyed || res.writableEnded) {
+      connection.#closed = true;
+      return connection;
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',

@@ -24,11 +24,11 @@ describe('ErrorBanner', () => {
       },
     });
     expect(w.attributes('role')).toBe('alert');
-    expect(w.find('.eb-title').text()).toBe('Could not load experiments');
+    expect(w.find('[data-testid="error-banner-title"]').text()).toBe('Could not load experiments');
     expect(w.find('code').text()).toBe(
       'GET /api/experiments → 502 · upstream api:8080 connection refused',
     );
-    expect(w.find('.cap').text()).toContain('docker compose ps');
+    expect(w.find('[data-testid="error-banner-hint"]').text()).toContain('docker compose ps');
     await w.find('button').trigger('click');
     expect(w.emitted('retry')).toHaveLength(1);
   });
@@ -39,8 +39,8 @@ describe('ErrorBanner', () => {
     });
     expect(warn.attributes('role')).toBe('status');
     expect(warn.find('code').exists()).toBe(false);
-    expect(warn.classes()).toContain('eb-warning');
-    expect(mount(ErrorBanner, { props: { tone: 'info' } }).classes()).toContain('eb-info');
+    expect(warn.attributes('data-tone')).toBe('warning');
+    expect(mount(ErrorBanner, { props: { tone: 'info' } }).attributes('data-tone')).toBe('info');
     expect(mount(ErrorBanner, { props: { tone: 'violet' } }).attributes('role')).toBe('alert');
   });
 });
@@ -52,9 +52,9 @@ describe('EmptyState', () => {
       slots: { actions: '<button class="btn primary">New experiment</button>' },
     });
     expect(w.text()).toContain('No experiments yet');
-    expect(w.find('.empty-actions button').text()).toBe('New experiment');
-    expect(w.classes()).toContain('panel');
-    expect(w.classes()).toContain('align-center');
+    expect(w.find('button').text()).toBe('New experiment');
+    expect(w.classes()).toContain('border');
+    expect(w.classes()).toContain('text-center');
   });
 });
 
@@ -73,6 +73,24 @@ describe('LiveIndicator', () => {
     const w = mount(LiveIndicator, { props: { state, ...extra } });
     expect(w.text().replace(/\s+/g, ' ')).toBe(text);
     expect(w.attributes('data-state')).toBe(state);
+  });
+
+  it('announces the state only, never the time that moves with each event', async () => {
+    const w = mount(LiveIndicator, {
+      props: { state: 'live', detail: 'updated 15:23:42' },
+    });
+    expect(w.text()).toBe('Live · updated 15:23:42');
+    expect(w.attributes('role')).toBeUndefined();
+    expect(w.get('[role=status]').text()).toBe('Live');
+    await w.setProps({ detail: 'updated 15:23:43' });
+    expect(w.get('[role=status]').text()).toBe('Live');
+    await w.setProps({
+      state: 'reconnecting',
+      attempt: 2,
+      lastEventAt: new Date(2026, 9, 24, 15, 23, 43),
+    });
+    expect(w.text()).toBe('Reconnecting (attempt 2) · last update 15:23:43');
+    expect(w.get('[role=status]').text()).toBe('Reconnecting (attempt 2)');
   });
 
   it('uses a custom label while live, and hides "Finished" after 5 s', async () => {
@@ -104,6 +122,15 @@ describe('SegmentedControl', () => {
     expect(all!.attributes('aria-pressed')).toBe('true');
     await improved!.trigger('click');
     expect(w.emitted('update:modelValue')?.[0]).toEqual(['improved']);
+    // The row clips its corners: the focus ring is drawn inside the button, above the next.
+    expect(w.classes()).toContain('overflow-hidden');
+    expect(all!.classes()).toEqual(
+      expect.arrayContaining([
+        'focus-visible:-outline-offset-2',
+        'focus-visible:relative',
+        'focus-visible:z-1',
+      ]),
+    );
   });
 });
 
@@ -126,7 +153,7 @@ const columns: DataTableColumn<Run>[] = [
 
 describe('DataTable', () => {
   const tasks = (w: ReturnType<typeof mount>) =>
-    w.findAll('tbody tr').map((tr) => tr.findAll('td.mono')[0]?.text());
+    w.findAll('tbody tr').map((tr) => tr.findAll('td[data-mono]')[0]?.text());
 
   it('sorts on a header button, numbers descending first', async () => {
     const w = mount(DataTable<Run>, { props: { columns, rows: runs } });
@@ -152,8 +179,8 @@ describe('DataTable', () => {
     const selected = lastSelected() as string[];
     expect(selected).toEqual(['r1']);
     await w.setProps({ selected });
-    expect(w.find('.bulk').text()).toContain('1 selected');
-    expect(w.find('tbody tr').classes()).toContain('selected');
+    expect(w.find('[role="region"][aria-label="Bulk actions"]').text()).toContain('1 selected');
+    expect(w.find('tbody tr').attributes('data-selected')).toBe('true');
     await w.find('thead input[type="checkbox"]').trigger('change');
     expect(lastSelected()).toEqual(['r1', 'r2', 'r3']);
   });
@@ -161,7 +188,7 @@ describe('DataTable', () => {
   it('shows skeletons, then an empty state, then an error over dimmed rows', async () => {
     const w = mount(DataTable<Run>, { props: { columns, rows: [], loading: true } });
     expect(w.find('table').attributes('aria-busy')).toBe('true');
-    expect(w.findAll('tbody tr.sk-row')).toHaveLength(6);
+    expect(w.findAll('tbody tr[data-testid="skeleton-row"]')).toHaveLength(6);
     await w.setProps({ loading: false, emptyTitle: 'No runs match these filters' });
     expect(w.find('tbody').text()).toContain('No runs match these filters');
     expect(w.find('thead').exists()).toBe(true);
@@ -170,7 +197,27 @@ describe('DataTable', () => {
       error: 'GET /api/runs → 502 · upstream api:8080 connection refused',
     });
     expect(w.find('[role="alert"]').text()).toContain('GET /api/runs → 502');
-    expect(w.find('tbody').classes()).toContain('dimmed');
+    expect(w.find('tbody').attributes('data-dimmed')).toBe('true');
+  });
+
+  it('draws skeleton bars at the widths and heights the columns give', () => {
+    const w = mount(DataTable<Run>, {
+      props: {
+        columns: [
+          { key: 'task', label: 'Task', skeleton: [120, 90] },
+          { key: 'status', label: 'Status', skeleton: { width: 64, height: 16 } },
+          { key: 'duration', label: 'Duration', align: 'right', width: 90 },
+        ],
+        rows: [],
+        loading: true,
+        skeletonRows: 2,
+      },
+    });
+    const bars = w.findAll('tbody tr')[1]!.findAll('span');
+    const style = (i: number) => (bars[i]!.element as HTMLElement).style;
+    expect(style(0).width).toBe('90px');
+    expect([style(1).width, style(1).height]).toEqual(['64px', '16px']);
+    expect([style(2).width, style(2).marginLeft]).toEqual(['54px', 'auto']);
   });
 
   it('freezes the order while sorted on a live column', async () => {
@@ -195,7 +242,7 @@ describe('DataTable', () => {
     const w = mount(DataTable<Run>, {
       props: { columns, rows: runs, tableId: 'runs', showDensity: true },
     });
-    await w.find('.seg button').trigger('click');
+    await w.find('[role="group"][aria-label="Row density"] button').trigger('click');
     expect(w.find('table').classes()).toContain('compact');
     expect(localStorage.getItem('hermes-evals.density.runs')).toBe('compact');
   });

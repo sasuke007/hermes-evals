@@ -21,24 +21,30 @@
  *   so every comparison of one experiment and every verdict entry resample
  *   alike;
  * - verdict: better if lo > 0, worse if hi < 0, else inconclusive;
- *   provisional while the experiment is running or paused. Bounds within
- *   1e-9 of 0 are 0 (./tally.ts);
- * - gate: computed only when every task has at least 2 counted runs per
- *   configuration; otherwise not_computable with, in this order,
- *   single_repetition (repetitions = 1, whatever has run), nothing_scored
- *   (no run of the two configurations counts yet: an execution error
- *   counts, so a comparison whose runs all failed to execute is computed,
- *   as a difference of 0 against 0) or not_enough_runs, and the sentence
- *   the panel shows;
+ *   provisional while the experiment is running, paused or failed
+ *   (StatsInput.provisional: Retry failed runs can resume a failed one).
+ *   Bounds within 1e-9 of 0 are 0 (./tally.ts);
+ * - gate: computed only when the experiment selected at least 3 tasks and
+ *   every task has at least 2 counted runs per configuration; otherwise
+ *   not_computable with, in this order, single_repetition (repetitions = 1,
+ *   whatever has run), too_few_tasks (1 or 2 tasks, whatever has run),
+ *   nothing_scored (no run of the two configurations counts yet: an
+ *   execution error counts, so a comparison whose runs all failed to
+ *   execute is computed, as a difference of 0 against 0) or
+ *   not_enough_runs, and the sentence the panel shows;
  * - sensitivity: the same difference and interval without execution errors
  *   and runs whose selected key is `error` or `ungradable`, with the same
- *   seed (so both intervals resample the same tasks), under the same
- *   2-runs gate; null when nothing was excluded, and with single_repetition
- *   or nothing_scored, where there is no main figure to set it beside;
- * - secondary metrics per configuration over its counted runs (./secondary.ts).
+ *   seed (so both intervals resample the same tasks), under the same gate;
+ *   null when nothing was excluded, and with single_repetition or
+ *   nothing_scored, where there is no main figure to set it beside;
+ * - secondary metrics per configuration: duration, tokens, execution errors
+ *   and ungradable runs over its counted runs, the cost over every attempt
+ *   of the arm (./secondary.ts).
  *
- * With one task the bootstrap can only redraw that task, so the interval
- * collapses to the observed difference: the method needs several tasks.
+ * The task gate (Phase 4 question 3): with one task the bootstrap can only
+ * redraw that task, so the interval collapses to the observed difference,
+ * and with two it takes three values; neither says how sure the difference
+ * is.
  */
 import { createHash } from 'node:crypto';
 import type { NotComputableReason, VerdictState } from '@hermes-evals/shared';
@@ -73,6 +79,9 @@ export { suggestRepetitions } from './repetitions.js';
 
 /** A verdict needs this many counted runs of every task under each configuration. */
 export const MIN_RUNS_PER_TASK = 2;
+
+/** A verdict needs this many selected tasks: the bootstrap resamples tasks. */
+export const MIN_TASKS = 3;
 
 interface ResolvedOptions {
   seed: number;
@@ -116,8 +125,14 @@ export function computeComparisonStats(input: StatsInput, options: StatsOptions)
   const mainVerdict: VerdictState =
     interval === null ? 'not_computable' : verdictOf(interval.lo, interval.hi, input.provisional);
 
-  const secondaryBaseline = secondaryMetrics(input.tasks.flatMap((t) => t.baseline));
-  const secondaryCandidate = secondaryMetrics(input.tasks.flatMap((t) => t.candidate));
+  const secondaryBaseline = secondaryMetrics(
+    input.tasks.flatMap((t) => t.baseline),
+    input.costUsd.baseline,
+  );
+  const secondaryCandidate = secondaryMetrics(
+    input.tasks.flatMap((t) => t.candidate),
+    input.costUsd.candidate,
+  );
   const base: StatsBase = {
     baseline,
     candidate,
@@ -193,12 +208,14 @@ function taskStats(task: StatsTask): TaskStats {
 // ---------------------------------------------------------------------------
 
 /**
- * Why there is no interval, or null when every task has 2 counted runs per
- * configuration. Decided from the two configurations' counted runs alone,
- * so another candidate of the experiment never changes this one's answer.
+ * Why there is no interval, or null when there are enough tasks and every
+ * one has 2 counted runs per configuration. Decided from the experiment's
+ * shape and the two configurations' counted runs alone, so another
+ * candidate of the experiment never changes this one's answer.
  */
 function gateOf(input: StatsInput): NotComputableReason | null {
   if (input.repetitions === 1) return 'single_repetition';
+  if (input.tasks.length < MIN_TASKS) return 'too_few_tasks';
   if (input.tasks.every((t) => t.baseline.length === 0 && t.candidate.length === 0)) {
     return 'nothing_scored';
   }
@@ -224,12 +241,22 @@ function messageOf(
   candidate: PassTally,
 ): string {
   const { labels, progress, provisional } = input;
+  const rates = `${labels.baseline} ${rateText(baseline)}, ${labels.candidate} ${rateText(candidate)}`;
+  const tasks = plural(input.tasks.length, 'task');
   switch (reason) {
     case 'single_repetition':
+      // The design's sentence; with too few tasks as well, it names both fixes.
       return (
-        `No interval with 1 repetition. Pass rates: ${labels.baseline} ${rateText(baseline)}, ` +
-        `${labels.candidate} ${rateText(candidate)} on ${plural(input.tasks.length, 'task')}. ` +
-        'Run at least 2 repetitions for a verdict.'
+        `No interval with 1 repetition. Pass rates: ${rates} on ${tasks}. ` +
+        (input.tasks.length < MIN_TASKS
+          ? `Run at least 2 repetitions of at least ${MIN_TASKS} tasks for a verdict.`
+          : 'Run at least 2 repetitions for a verdict.')
+      );
+    case 'too_few_tasks':
+      return (
+        `No interval with ${tasks}. Pass rates: ${rates}. ` +
+        `A verdict needs at least ${MIN_TASKS} tasks: the interval resamples the tasks, ` +
+        'and with fewer it cannot say how sure the difference is.'
       );
     case 'nothing_scored':
       return provisional
@@ -289,7 +316,7 @@ function sensitivityOf(
   let lo: number | null = null;
   let hi: number | null = null;
   let verdict: VerdictState = 'not_computable';
-  if (everyTaskHas(kept, MIN_RUNS_PER_TASK)) {
+  if (kept.length >= MIN_TASKS && everyTaskHas(kept, MIN_RUNS_PER_TASK)) {
     ({ lo, hi } = boundsOf(deltas, opts));
     verdict = verdictOf(lo, hi, input.provisional);
   }

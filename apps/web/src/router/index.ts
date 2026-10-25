@@ -12,6 +12,7 @@
  *
  * Query parameters the pages read:
  *   /experiments/new?from=<experimentId>   duplicate an experiment
+ *   /experiments/new?…&repetitions=<n>     start with n repetitions ("Duplicate with 5 repetitions")
  *   /configurations/new?from=<id>          duplicate a configuration
  *   /configurations/:id?version=<n>        "view as of this experiment"
  *   any route ?scenario=<name>             fixture scenario (src/fixtures/scenarios.ts)
@@ -23,6 +24,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router';
 import type { ResourceTab } from '@/api/types/resources';
+import { clearStaleBuildReload, reloadForStaleBuild } from './staleBuild';
 
 export type ShellSection = 'experiments' | 'suites' | 'configurations' | 'resources' | 'system';
 
@@ -59,8 +61,6 @@ export const ROUTE_NAMES = {
 
 export type RouteName = (typeof ROUTE_NAMES)[keyof typeof ROUTE_NAMES];
 
-export const RESOURCE_TABS: ResourceTab[] = ['skills', 'documents', 'mcp', 'secrets'];
-
 const param = (route: { params: Record<string, unknown> }, name: string): string => {
   const value = route.params[name];
   const first: unknown = Array.isArray(value) ? value[0] : value;
@@ -88,7 +88,13 @@ export const routes: RouteRecordRaw[] = [
     path: '/experiments/new',
     name: ROUTE_NAMES.experimentNew,
     component: () => import('@/views/experiments/NewExperimentPage.vue'),
-    props: (route) => ({ duplicateOf: query(route, 'from') }),
+    props: (route) => {
+      const repetitions = Number(query(route, 'repetitions'));
+      return {
+        duplicateOf: query(route, 'from'),
+        repetitions: Number.isInteger(repetitions) && repetitions > 0 ? repetitions : undefined,
+      };
+    },
     meta: { section: 'experiments', title: 'New experiment' },
   },
   {
@@ -248,7 +254,13 @@ const router = createRouter({
   },
 });
 
+// A lazy page from an older build could not be loaded: load the address again (staleBuild.ts).
+router.onError((err, to) => {
+  reloadForStaleBuild(err, to.fullPath);
+});
+
 router.afterEach((to) => {
+  clearStaleBuildReload();
   if (typeof document === 'undefined') return;
   const title = [...to.matched].reverse().find((r) => r.meta.title)?.meta.title;
   document.title = title ? `${title} · Hermes Evals` : 'Hermes Evals';

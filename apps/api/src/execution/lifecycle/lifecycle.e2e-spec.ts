@@ -625,9 +625,11 @@ describe.skipIf(!SERVER_URL)('execution lifecycle on Postgres 17', () => {
     expect(mostInside).toBe(1);
     expect(results.filter((r) => r.ran)).toHaveLength(1);
     expect((await lock.tryRun(() => Promise.resolve(1))).ran).toBe(true);
-    // Every client went back to the pool, unlocked.
+    // Every client went back to the pool, unlocked. Only this database's locks count: the other
+    // e2e files run alongside on the same server.
     const held = await pool.query(
-      `select count(*)::int as n from pg_locks where locktype = 'advisory'`,
+      `select count(*)::int as n from pg_locks where locktype = 'advisory'
+         and database = (select oid from pg_database where datname = current_database())`,
     );
     expect(held.rows[0]).toEqual({ n: 0 });
   });

@@ -39,6 +39,7 @@ export type {
   NewExperimentOptions,
   NewExperimentSuiteOption,
   NewExperimentTaskOption,
+  NotComputableReason,
   PauseReason,
   PerRunEstimate,
   PriceEntry,

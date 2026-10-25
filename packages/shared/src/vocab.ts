@@ -28,6 +28,21 @@ export type ScorerType = (typeof SCORER_TYPES)[number];
 export const TRAJECTORY_MODES = ['strict', 'unordered', 'subset', 'superset'] as const;
 export type TrajectoryMode = (typeof TRAJECTORY_MODES)[number];
 
+/** The comparison's selection that grades each task by its own primary key (the default). */
+export const SCORE_KEY_PRIMARY = 'primary';
+/** The comparison's selection under which a run passes only when none of its keys failed, errored or was ungradable. */
+export const SCORE_KEY_ANY_FAILED = 'any_failed';
+
+/**
+ * Names no verification key may take (Phase 4 question 1): the comparison's
+ * key select gives them a meaning of their own, so a check named either way
+ * could never be selected by name. The suite loader refuses them through
+ * VerificationKeySchema (records.ts), and the authoring editor uses the same
+ * rule. Here beside the vocabularies, though no CHECK names them.
+ */
+export const RESERVED_SCORE_KEYS = [SCORE_KEY_PRIMARY, SCORE_KEY_ANY_FAILED] as const;
+export type ReservedScoreKey = (typeof RESERVED_SCORE_KEYS)[number];
+
 /** Model providers a configuration may name. `custom` requires a base URL. */
 export const PROVIDERS = [
   'nous',

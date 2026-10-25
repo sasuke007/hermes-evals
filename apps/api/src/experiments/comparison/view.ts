@@ -16,8 +16,10 @@
  *   then the baseline pass rate ascending, then the task key, and the
  *   filter keeps the rows whose change it names; the counts are of every
  *   row;
- * - a candidate's chip in the candidate select is `provisional` while the
- *   experiment runs, else its verdict on the primary key.
+ * - the answer, and a candidate's chip in the candidate select, are
+ *   `provisional` while the experiment runs, is paused or has failed
+ *   (Retry failed runs can resume it), else the chip is its verdict on the
+ *   primary key.
  */
 import {
   SCORE_KEY_ANY_FAILED,
@@ -39,7 +41,7 @@ import type {
   StatsResult,
 } from '../../statistics/contracts.js';
 import { round3, round6 } from '../views/numbers.js';
-import type { ComparisonInputs, ComparisonRunInput } from './inputs.js';
+import { isProvisional, type ComparisonInputs, type ComparisonRunInput } from './inputs.js';
 import type { ExperimentResults } from './results.js';
 
 export interface ComparisonViewInput {
@@ -158,14 +160,13 @@ export function buildComparisonView(input: ComparisonViewInput): ComparisonView 
   const all = rowsOf(input);
   const multiRep = inputs.repetitions > 1;
   const kept = filter === 'all' ? all : all.filter((r) => r.change === filter);
-  const live = results.status === 'running' || results.status === 'paused';
   const baseline = refOf(results, inputs.baselineVersionId);
   const candidate = refOf(results, inputs.candidateVersionId);
   const { difference } = stats.secondary;
   return ComparisonViewSchema.parse({
     experimentId: results.id,
     experimentStatus: results.status,
-    provisional: live,
+    provisional: isProvisional(results.status),
     repetitions: inputs.repetitions,
     baseline,
     candidate,

@@ -284,6 +284,7 @@ describe('diffEvents', () => {
       delta: 0.217,
       lo: 0.117,
       hi: 0.333,
+      reason: null,
     };
     const completed = state(runs, {
       status: 'completed',
@@ -318,6 +319,7 @@ describe('diffEvents', () => {
           candidateVersionId: 'cv2',
           verdict: 'better',
           delta: 0.2,
+          reason: null,
           lo: 0.1,
           hi: 0.3,
         },

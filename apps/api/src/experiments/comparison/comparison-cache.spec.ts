@@ -43,8 +43,9 @@ let service: ComparisonService;
 
 beforeEach(async () => {
   t = await createTestDatabase();
-  w = await seedWorld(t.db);
-  const launched = await launch(t.db, w);
+  // Three tasks for the test that needs a verdict; the experiments here select two unless it says.
+  w = await seedWorld(t.db, { tasks: 3 });
+  const launched = await launch(t.db, w, { tasks: [0, 1] });
   experimentId = launched.experiment.id;
   run = launched.run;
   service = new ComparisonService(t.db);
@@ -121,7 +122,11 @@ describe('a hit', () => {
 describe('two candidates', () => {
   it('answers each apart, each from memory on a repeat and never for the other', async () => {
     const second = await insertVersion(t.db, 'with-skill', { toolsets: ['file'] });
-    const two = await launch(t.db, w, { name: 'two candidates', moreCandidates: [second] });
+    const two = await launch(t.db, w, {
+      name: 'two candidates',
+      moreCandidates: [second],
+      tasks: [0, 1],
+    });
     await scored(t.db, w, two.run('a/cand/1'), {
       startedAt: at(0),
       durationS: 5,
@@ -230,10 +235,18 @@ describe('a miss after every change of the results revision', () => {
   });
 
   it('after the experiment completes or pauses, which moves no run', async () => {
+    // A verdict needs 3 tasks.
+    ({
+      experiment: { id: experimentId },
+      run,
+    } = await launch(t.db, w, { name: 'three tasks' }));
     const [, paused] = await freshAfter(() => pause(t.db, experimentId, 'user', at(1)));
     expect(paused).toMatchObject({ experimentStatus: 'paused', provisional: true });
 
     for (const key of ['a/base/1', 'a/base/2', 'a/cand/1', 'a/cand/2']) {
+      await scored(t.db, w, run(key), { startedAt: at(2), durationS: 5, status: 'passed' });
+    }
+    for (const key of ['c/base/1', 'c/base/2', 'c/cand/1', 'c/cand/2']) {
       await scored(t.db, w, run(key), { startedAt: at(2), durationS: 5, status: 'passed' });
     }
     for (const key of ['b/base/1', 'b/base/2', 'b/cand/1', 'b/cand/2']) {
@@ -258,7 +271,7 @@ describe('a miss after every change of the results revision', () => {
 describe('a configuration renamed, which moves no run', () => {
   it('answers a settled experiment afresh with the new name, its sentence included', async () => {
     // One repetition: the not-computable sentence names both configurations.
-    const once = await launch(t.db, w, { name: 'once', repetitions: 1 });
+    const once = await launch(t.db, w, { name: 'once', repetitions: 1, tasks: [0, 1] });
     for (const key of ['a/base/1', 'a/cand/1', 'b/base/1', 'b/cand/1']) {
       await scored(t.db, w, once.run(key), { startedAt: at(0), durationS: 5, status: 'passed' });
     }

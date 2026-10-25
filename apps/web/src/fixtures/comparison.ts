@@ -3,9 +3,11 @@
  * candidate against the baseline, the statistics panel, secondary metrics and
  * the sensitivity figure, all derived from the experiment matrices.
  *
- * Statistics are the bootstrap results the design shows (Δ +0.217, 95%
- * interval [+0.117, +0.333] for Skill vs no skill); the observed Δ and pass
- * rates are computed from the runs and agree with them.
+ * The statistics are the API's (./statistics.ts): pass rates, per-task
+ * differences and the observed Δ are computed from the runs, under the
+ * selected key, and the 95% interval is the statistics module's for those
+ * differences (Δ +0.217, [+0.117, +0.333] for Skill vs no skill, as the
+ * design shows), for the figure without broken runs too.
  *
  * Scenarios handled here (see scenarios.ts): through the matrices, notably
  * nothing-scored, single-rep and multi-candidate.
@@ -32,6 +34,16 @@ import {
   selectedKeyStatus,
 } from './experiments';
 import { CONFIG_VERSIONS } from './configurations';
+import {
+  enoughRuns,
+  gateOf,
+  intervalOf,
+  isProvisional,
+  meanDelta,
+  notComputableMessage,
+  type TaskCounts,
+  verdictOf,
+} from './statistics';
 import { round, TASK_KEYS } from './suites';
 
 /** The primary score comment of each failed task, as the grid tooltips show it. */
@@ -106,18 +118,48 @@ const rate3 = <T extends { rate: number | null }>(t: T): T => ({
   rate: t.rate === null ? null : round(t.rate, 3),
 });
 
-/** The mean over tasks of (candidate rate − baseline rate), tasks with a rate on both sides. */
-function meanTaskDelta(
-  rate: (task: string, config: ConfigName) => number | null,
-  baseline: ConfigName,
+/** A scored run whose selected key neither errored nor was ungradable: what the sensitivity figure keeps. */
+const answered = (seed: ExperimentSeed, key: string) => (r: RunSeed) =>
+  r.status === 'scored' &&
+  selectedKeyStatus(seed, r, key) !== 'ungradable' &&
+  selectedKeyStatus(seed, r, key) !== 'error';
+
+/**
+ * Each task's difference (candidate rate − baseline rate) over the runs
+ * `pick` keeps of each side, unrounded and in task order, null where a side
+ * has none; and how many runs each side kept.
+ */
+export function pairFigures(
+  seed: ExperimentSeed,
+  runs: RunSeed[],
   candidate: ConfigName,
-): number | null {
-  const deltas = TASK_KEYS.flatMap((task) => {
-    const b = rate(task, baseline);
-    const c = rate(task, candidate);
-    return b === null || c === null ? [] : [c - b];
-  });
-  return deltas.length ? round(deltas.reduce((a, d) => a + d, 0) / deltas.length, 3) : null;
+  key: string,
+  pick: (runs: RunSeed[]) => RunSeed[] = counted,
+): { deltas: (number | null)[]; counts: TaskCounts[] } {
+  const side = (config: ConfigName, task: string) =>
+    pick(runs.filter((r) => r.config === config && r.taskKey === task));
+  const deltas: (number | null)[] = [];
+  const counts: TaskCounts[] = [];
+  for (const taskKey of TASK_KEYS) {
+    const b = tally(seed, side(seed.baseline, taskKey), key);
+    const c = tally(seed, side(candidate, taskKey), key);
+    deltas.push(b.rate === null || c.rate === null ? null : c.rate - b.rate);
+    counts.push({ taskKey, baseline: b.counted, candidate: c.counted });
+  }
+  return { deltas, counts };
+}
+
+/** A candidate's chip: provisional while it runs, else its verdict on the primary key. */
+export function chipVerdictOf(
+  seed: ExperimentSeed,
+  runs: RunSeed[],
+  candidate: ConfigName,
+): ComparisonView['candidates'][number]['verdict'] {
+  if (isProvisional(seed.status)) return 'provisional';
+  const { deltas, counts } = pairFigures(seed, runs, candidate, 'primary');
+  if (gateOf(seed.repetitions, counts) !== null) return 'not_computable';
+  const { lo, hi } = intervalOf(seed.id, deltas);
+  return verdictOf(lo, hi, false);
 }
 
 /** The Overview's aggregates, with the ungradable count by the selected key, as the API counts it. */
@@ -151,9 +193,8 @@ function secondaryRows(
  * The figure without broken runs, graded by the selected key: execution
  * errors and runs whose selected key is `error` or `ungradable` are left
  * out, and Δ is the same difference as the observed one, the mean over
- * tasks of the kept runs' differences. The fixtures have no bootstrap, so
- * the kept runs' interval keeps the main interval's width around their own
- * Δ; without statistics the kept runs fail the gate too.
+ * tasks of the kept runs' differences. Its interval is the module's for the
+ * kept runs' differences, under the same gate (./statistics.ts).
  */
 function sensitivityOf(
   seed: ExperimentSeed,
@@ -163,14 +204,8 @@ function sensitivityOf(
   statistics: ComparisonView['statistics'],
 ): SensitivityView | null {
   const status = (r: RunSeed) => selectedKeyStatus(seed, r, key);
-  const kept = (list: RunSeed[]) =>
-    tally(
-      seed,
-      list.filter(
-        (r) => r.status === 'scored' && status(r) !== 'ungradable' && status(r) !== 'error',
-      ),
-      key,
-    );
+  const keep = (list: RunSeed[]) => list.filter(answered(seed, key));
+  const kept = (list: RunSeed[]) => tally(seed, keep(list), key);
   const side = (config: ConfigName) => {
     const mine = runs.filter((r) => r.config === config);
     return {
@@ -185,35 +220,21 @@ function sensitivityOf(
   const b = side(seed.baseline);
   const c = side(candidate);
   if (![b, c].some((s) => Object.values(s.excluded).some((n) => n > 0))) return null;
-  const delta = meanTaskDelta(
-    (task, config) => kept(runs.filter((r) => r.taskKey === task && r.config === config)).rate,
-    seed.baseline,
-    candidate,
-  );
-  const half = statistics ? (statistics.hi - statistics.lo) / 2 : null;
-  const bound = (x: number) => round(Math.min(1, Math.max(-1, x)), 3);
-  const lo = delta !== null && half !== null ? bound(delta - half) : null;
-  const hi = delta !== null && half !== null ? bound(delta + half) : null;
-  const verdict: SensitivityView['verdict'] =
-    lo === null || hi === null
-      ? 'not_computable'
-      : statistics?.provisional
-        ? 'provisional'
-        : lo > 0
-          ? 'better'
-          : hi < 0
-            ? 'worse'
-            : 'inconclusive';
+  const { deltas, counts } = pairFigures(seed, runs, candidate, key, keep);
+  const interval = enoughRuns(counts) ? intervalOf(seed.id, deltas) : null;
+  const verdict = interval
+    ? verdictOf(interval.lo, interval.hi, isProvisional(seed.status))
+    : 'not_computable';
   return {
     excludedBaseline: b.excluded,
     excludedCandidate: c.excluded,
     baseline: b.rate,
     candidate: c.rate,
-    delta,
-    lo,
-    hi,
+    delta: meanDelta(deltas),
+    lo: interval?.lo ?? null,
+    hi: interval?.hi ?? null,
     verdict,
-    verdictChanges: statistics !== null && verdict !== statistics.verdict,
+    verdictChanges: verdict !== (statistics?.verdict ?? 'not_computable'),
   };
 }
 
@@ -243,7 +264,7 @@ export function comparisonFixture(
   const filter: ComparisonFilter = query.filter ?? 'all';
   const multiRep = seed.repetitions > 1;
   const counts = countRuns(runs);
-  const provisional = seed.status === 'running' || seed.status === 'paused';
+  const provisional = isProvisional(seed.status);
 
   const allRows: ComparisonRow[] = TASK_KEYS.map((task) => {
     const mine = (config: ConfigName) =>
@@ -254,8 +275,8 @@ export function comparisonFixture(
     const c = mine(candidate);
     const rb = keyRate(seed, b, key);
     const rc = keyRate(seed, c, key);
-    const delta =
-      multiRep && rb.rate !== null && rc.rate !== null ? round(rc.rate - rb.rate, 2) : null;
+    // The change follows the unrounded Δ, as the API's does.
+    const exact = multiRep && rb.rate !== null && rc.rate !== null ? rc.rate - rb.rate : null;
     return {
       taskKey: task,
       taskVersion: 1,
@@ -263,9 +284,9 @@ export function comparisonFixture(
       candidate: c.map((r) => cellOf(seed, r, key)),
       passBaseline: rb.rate === null ? null : round(rb.rate, 2),
       passCandidate: rc.rate === null ? null : round(rc.rate, 2),
-      delta,
+      delta: exact === null ? null : round(exact, 2),
       change:
-        delta === null ? null : delta > 0 ? 'improved' : delta < 0 ? 'regressed' : 'unchanged',
+        exact === null ? null : exact > 0 ? 'improved' : exact < 0 ? 'regressed' : 'unchanged',
     };
   });
 
@@ -285,53 +306,33 @@ export function comparisonFixture(
     runs.filter((r) => r.config === config && (task === undefined || r.taskKey === task));
   const base = rate3(keyRate(seed, ofSide(seed.baseline), key));
   const cand = rate3(keyRate(seed, ofSide(candidate), key));
-  const observed = meanTaskDelta(
-    (task, config) => keyRate(seed, ofSide(config, task), key).rate,
-    seed.baseline,
-    candidate,
-  );
 
-  const total = runs.length;
-  // nothing_scored: no run of the two configurations counts yet (an execution error counts).
+  // The statistics module's gate, sentences and interval (./statistics.ts).
   const pair = runs.filter((r) => r.config === seed.baseline || r.config === candidate);
-  const nothingCounted = counted(pair).length === 0;
+  const { deltas, counts: taskCounts } = pairFigures(seed, runs, candidate, key);
+  const reason = gateOf(seed.repetitions, taskCounts);
   let statistics: ComparisonView['statistics'] = null;
   let statisticsUnavailable: ComparisonView['statisticsUnavailable'] = null;
-  const enough = TASK_KEYS.every((task) =>
-    [seed.baseline, candidate].every((config) => counted(ofSide(config, task)).length >= 2),
-  );
-  if (!multiRep) {
+  if (reason !== null) {
     statisticsUnavailable = {
-      reason: 'single_repetition',
-      message: `No interval with 1 repetition. Pass rates: ${seed.baseline} ${base.rate?.toFixed(2) ?? '—'}, ${candidate} ${cand.rate?.toFixed(2) ?? '—'} on ${TASK_KEYS.length} tasks. Run at least 2 repetitions for a verdict.`,
-    };
-  } else if (nothingCounted) {
-    statisticsUnavailable = {
-      reason: 'nothing_scored',
-      message: `0 of ${pair.length} runs scored. Rows fill in as runs are scored; the statistics panel appears once every task has at least 2 scored repetitions per configuration.`,
-    };
-  } else if (!enough) {
-    statisticsUnavailable = {
-      reason: 'not_enough_runs',
-      message:
-        'The statistics panel appears once every task has at least 2 scored repetitions per configuration.',
+      reason,
+      message: notComputableMessage(reason, {
+        provisional,
+        labels: { baseline: seed.baseline, candidate },
+        rates: { baseline: base.rate, candidate: cand.rate },
+        tasks: taskCounts,
+        total: pair.length,
+      }),
     };
   } else {
-    // The design shows the primary key's interval. Under another key the
-    // observed Δ is computed, but the interval is a stand-in (Δ ± 0.11): the
-    // fixtures have no bootstrap, and the API's differs (Skill vs no skill
-    // under any_failed: [+0.100, +0.350]).
-    const stats = seed.stats[candidate];
-    const delta = key === 'primary' && stats ? stats.delta : (observed ?? 0);
-    const lo = key === 'primary' && stats ? stats.lo : round(delta - 0.11, 3);
-    const hi = key === 'primary' && stats ? stats.hi : round(delta + 0.11, 3);
+    const { lo, hi } = intervalOf(seed.id, deltas);
     statistics = {
-      observedDelta: delta,
+      observedDelta: meanDelta(deltas) ?? 0,
       lo,
       hi,
       resamples: 10000,
       confidence: 0.95,
-      verdict: provisional ? 'provisional' : lo > 0 ? 'better' : hi < 0 ? 'worse' : 'inconclusive',
+      verdict: verdictOf(lo, hi, provisional),
       provisional,
     };
   }
@@ -366,17 +367,7 @@ export function comparisonFixture(
     candidate: configRef(seed, candidate),
     candidates: seed.candidates.map((c) => ({
       configuration: configRef(seed, c),
-      verdict:
-        seed.candidateChips[c] ??
-        (provisional
-          ? 'provisional'
-          : !multiRep
-            ? 'not_computable'
-            : (() => {
-                const s = seed.stats[c];
-                if (!s) return 'not_computable';
-                return s.lo > 0 ? 'better' : s.hi < 0 ? 'worse' : 'inconclusive';
-              })()),
+      verdict: seed.candidateChips[c] ?? chipVerdictOf(seed, runs, c),
     })),
     scoreKey: key,
     scoreKeyOptions: [
@@ -396,8 +387,11 @@ export function comparisonFixture(
     statisticsUnavailable,
     secondary,
     secondaryDifference,
+    // None beside single_repetition or nothing_scored: there is no main figure to set it beside.
     sensitivity:
-      multiRep && !nothingCounted ? sensitivityOf(seed, runs, candidate, key, statistics) : null,
-    progress: { scored: counts.scored, total },
+      reason === 'single_repetition' || reason === 'nothing_scored'
+        ? null
+        : sensitivityOf(seed, runs, candidate, key, statistics),
+    progress: { scored: counts.scored, total: runs.length },
   };
 }

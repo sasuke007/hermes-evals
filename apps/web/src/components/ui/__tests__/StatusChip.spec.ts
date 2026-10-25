@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import StatusChip from '@/components/ui/StatusChip.vue';
-import { STATUS_TONES, statusTone, type StatusKind } from '@/lib/statusTones';
+import { STATUS_TONES, TONE_CLASSES, statusTone, type StatusKind } from '@/lib/statusTones';
 
 function chip(props: Record<string, unknown>, slot?: string) {
   return mount(StatusChip, {
@@ -42,6 +42,18 @@ describe('status tone table', () => {
     ['provider', 'host_unreachable', 'ung', 'hollow'],
     ['provider', 'configured', 'pass', 'solid'],
     ['provider', 'missing', 'que', 'hollow'],
+    ['provider', 'unavailable', 'fail', 'solid'],
+    ['category', 'limit', 'err', 'solid'],
+    ['category', 'worker_lost', 'err', 'solid'],
+    ['evaluation', 'queued', 'que', 'hollow'],
+    ['evaluation', 'running', 'run', 'pulse'],
+    ['mcpTest', 'untested', 'que', 'hollow'],
+    ['mcpTest', 'passed', 'pass', 'solid'],
+    ['mcpTest', 'failed', 'fail', 'solid'],
+    ['secret', 'set', 'pass', 'solid'],
+    ['secret', 'not_set', 'ung', 'hollow'],
+    ['verdict', 'provisional', 'que', 'none'],
+    ['verdict', 'not_computable', 'que', 'none'],
     ['pauseReason', 'provider_disconnected', 'ung', 'solid'],
     ['pauseReason', 'spend_ceiling', 'que', 'none'],
     ['pauseReason', 'user', 'que', 'none'],
@@ -66,6 +78,7 @@ describe('status tone table', () => {
       'error',
       'this machine',
       'not running',
+      'unavailable',
       'configured',
       'missing',
     ]);
@@ -78,6 +91,25 @@ describe('status tone table', () => {
   it('keeps data-model words verbatim', () => {
     expect(statusTone('run', 'execution_error').label).toBe('execution_error');
     expect(statusTone('score', 'ungradable').label).toBe('ungradable');
+    expect(statusTone('category', 'limit').label).toBe('limit');
+    expect(statusTone('secret', 'not set').label).toBe('not set');
+  });
+
+  it('draws the verdict states that are not a verdict apart', () => {
+    expect(statusTone('verdict', 'provisional')).toMatchObject({ appearance: 'dashed' });
+    expect(statusTone('verdict', 'not_computable')).toMatchObject({
+      label: 'not computable',
+      appearance: 'muted',
+    });
+  });
+
+  it('has utilities for every tone', () => {
+    for (const tone of ['pass', 'fail', 'err', 'ung', 'run', 'que'] as const) {
+      expect(TONE_CLASSES[tone]).toMatchObject({
+        solid: `bg-${tone}`,
+        chip: `bg-${tone}-soft text-${tone}-text`,
+      });
+    }
   });
 
   it('separates groups that share a word', () => {
@@ -87,13 +119,17 @@ describe('status tone table', () => {
     expect(statusTone('provider', 'error').tone).toBe('fail');
   });
 
-  it('turns a provider-disconnected pause amber with a square dot', () => {
-    expect(statusTone('experiment', 'paused', { pauseReason: 'provider_disconnected' })).toEqual({
-      tone: 'ung',
-      dot: 'square',
+  it('draws a provider pause as two chips: paused, and the amber reason', () => {
+    expect(statusTone('experiment', 'paused')).toEqual({
+      tone: 'que',
+      dot: 'hollow',
       label: 'paused',
     });
-    expect(statusTone('experiment', 'paused', { pauseReason: 'spend_ceiling' }).tone).toBe('que');
+    expect(statusTone('pauseReason', 'provider_disconnected')).toEqual({
+      tone: 'ung',
+      dot: 'solid',
+      label: 'provider disconnected',
+    });
   });
 
   it('falls back to a neutral chip with the raw word', () => {
@@ -106,64 +142,74 @@ describe('status tone table', () => {
 });
 
 describe('StatusChip', () => {
-  it('renders the tone class, the dot and the exact word', () => {
+  it('renders the tone, the dot and the exact word', () => {
     const w = chip({ kind: 'run', status: 'running' });
     expect(w.classes()).toContain('chip');
-    expect(w.classes()).toContain('tone-run');
+    expect(w.classes()).toEqual(expect.arrayContaining(['bg-run-soft', 'text-run-text']));
     expect(w.attributes('data-tone')).toBe('run');
-    expect(w.find('.dot').classes()).toContain('pulse');
+    const dot = w.find('[data-dot]');
+    expect(dot.attributes('data-dot')).toBe('pulse');
+    expect(dot.classes()).toContain('animate-live');
     expect(w.text()).toBe('running');
   });
 
   it('draws hollow dots for not-started values', () => {
-    const dot = chip({ kind: 'run', status: 'queued' }).find('.dot');
-    expect(dot.classes()).toContain('hollow');
+    const dot = chip({ kind: 'run', status: 'queued' }).find('[data-dot]');
+    expect(dot.attributes('data-dot')).toBe('hollow');
+    expect(dot.classes()).toContain('border-que');
     expect(dot.attributes('aria-hidden')).toBe('true');
   });
 
   it('stops pulsing when not live', () => {
-    const dot = chip({ kind: 'run', status: 'scoring', live: false }).find('.dot');
-    expect(dot.classes()).not.toContain('pulse');
+    const dot = chip({ kind: 'run', status: 'scoring', live: false }).find('[data-dot]');
+    expect(dot.classes()).not.toContain('animate-live');
     expect(dot.attributes('data-dot')).toBe('solid');
   });
 
-  it('draws verdicts strong', () => {
+  it('draws verdicts strong, with a ring in the tone', () => {
     const w = chip({ kind: 'verdict', status: 'better' });
-    expect(w.classes()).toContain('strong');
-    expect(w.classes()).toContain('tone-pass');
-    expect(chip({ kind: 'verdict', status: 'inconclusive' }).classes()).toContain('tone-que');
+    expect(w.attributes('data-strong')).toBe('true');
+    expect(w.classes()).toEqual(
+      expect.arrayContaining(['font-semibold', 'inset-ring', 'inset-ring-pass']),
+    );
+    expect(chip({ kind: 'verdict', status: 'inconclusive' }).attributes('data-tone')).toBe('que');
+  });
+
+  it('draws a provisional verdict dashed and a missing one muted', () => {
+    const provisional = chip({ kind: 'verdict', status: 'provisional' });
+    expect(provisional.classes()).toEqual(
+      expect.arrayContaining(['border-dashed', 'bg-surface-2']),
+    );
+    expect(provisional.find('[data-dot]').exists()).toBe(false);
+    const none = chip({ kind: 'verdict', status: 'not_computable' });
+    expect(none.text()).toBe('not computable');
+    expect(none.classes()).toContain('text-text-3');
   });
 
   it('shows provider labels from the table', () => {
     const w = chip({ kind: 'provider', status: 'relogin_required' });
     expect(w.text()).toBe('reconnect');
-    expect(w.classes()).toContain('tone-ung');
+    expect(w.attributes('data-tone')).toBe('ung');
   });
 
   it('shows a count in mono, a small size, and can hide the dot', () => {
     const w = chip({ kind: 'score', status: 'failed', count: 3, size: 'sm', dot: false });
     expect(w.text()).toBe('failed3');
-    expect(w.find('.count').classes()).toContain('mono');
+    expect(w.find('[data-testid="chip-count"]').classes()).toContain('font-mono');
     expect(w.classes()).toContain('sm');
-    expect(w.find('.dot').exists()).toBe(false);
+    expect(w.find('[data-dot]').exists()).toBe(false);
   });
 
   it('draws no dot for pause reasons without one', () => {
-    expect(chip({ kind: 'pauseReason', status: 'spend_ceiling' }).find('.dot').exists()).toBe(
+    expect(chip({ kind: 'pauseReason', status: 'spend_ceiling' }).find('[data-dot]').exists()).toBe(
       false,
     );
     expect(chip({ kind: 'pauseReason', status: 'spend_ceiling' }).text()).toBe('spend ceiling');
   });
 
-  it('draws the amber square dot for a provider-disconnected pause', () => {
-    const w = chip({ kind: 'experiment', status: 'paused', pauseReason: 'provider_disconnected' });
-    expect(w.classes()).toContain('tone-ung');
-    expect(w.find('.dot').classes()).toContain('square');
-  });
-
   it('lets a slot replace the label, keeping the tone', () => {
     const w = chip({ kind: 'verdict', status: 'better' }, 'with-skill better');
     expect(w.text()).toBe('with-skill better');
-    expect(w.classes()).toContain('tone-pass');
+    expect(w.attributes('data-tone')).toBe('pass');
   });
 });

@@ -8,6 +8,11 @@
  *                                                                              subscription
  *                                                                              failed
  *
+ * When the stack cannot log Nous in from here (`host_unreachable`: the development host login
+ * is configured but its proxy is down; `unavailable`: the login service failed its startup
+ * check), connect() opens the dialog on the `manual` step with the terminal command instead of
+ * asking the API for a code it would refuse (409 in host mode, 503 when unavailable).
+ *
  * Closing the dialog while waiting keeps the login going (polling continues and the AppShell
  * shows ApprovalPill with the countdown). Polling pauses while the document is hidden and
  * polls at once when it is visible again. Nothing launches or resumes by itself: on Connected,
@@ -39,9 +44,14 @@ export type LoginPhase =
   | 'expired'
   | 'declined'
   | 'subscription'
-  | 'failed';
-/** The amber strip under the AppShell bar. */
-export type BannerKind = 'none' | 'not-connected' | 'renewal';
+  | 'failed'
+  /** Nous cannot be connected from the UI (host_unreachable, unavailable): the dialog shows the command. */
+  | 'manual';
+/**
+ * The amber strip under the AppShell bar: Nous not connected, its login needs renewing, or an
+ * API-key provider a configuration uses has no key (AppShell board, banner="no-key").
+ */
+export type BannerKind = 'none' | 'not-connected' | 'renewal' | 'no-key';
 
 /** Shown in the Connected step: "Skill vs no skill, invoices-v1 is still paused at 87 of 120." */
 export interface ConnectContext {
@@ -49,6 +59,16 @@ export interface ConnectContext {
   scored?: number | null;
   total?: number | null;
 }
+
+/**
+ * Above the experiment list: `connect` when no provider is connected at all (SetupCard), and
+ * `missing-key` when every provider the configurations use is an API-key provider without a
+ * key (ExperimentList board, "Add an OpenRouter API key to run experiments").
+ */
+export type SetupVariant = 'none' | 'connect' | 'missing-key';
+
+/** Nous statuses the UI cannot fix with a device login: the dialog shows the terminal route. */
+export const MANUAL_NOUS_STATUSES: readonly NousStatus[] = ['host_unreachable', 'unavailable'];
 
 export const POLL_INTERVAL_MS = 2_000;
 export const REFRESH_INTERVAL_MS = 30_000;
@@ -150,12 +170,41 @@ export const useProvidersStore = defineStore('providers', () => {
       nousBlocking.value ||
       keyProviders.value.some((p) => p.status === 'missing' && p.usedBy.length > 0),
   );
+  /** The first API-key provider that a configuration uses and that has no key. */
+  const missingKeyProvider = computed(
+    () => keyProviders.value.find((p) => p.status === 'missing' && p.usedBy.length > 0) ?? null,
+  );
   const bannerKind = computed<BannerKind>(() => {
-    if (!loaded.value || nous.value === null) return 'none';
-    if (nousStatus.value === 'relogin_required') return 'renewal';
-    return nousBlocking.value ? 'not-connected' : 'none';
+    if (!loaded.value) return 'none';
+    if (nous.value !== null) {
+      if (nousStatus.value === 'relogin_required') return 'renewal';
+      if (nousBlocking.value) return 'not-connected';
+    }
+    return missingKeyProvider.value ? 'no-key' : 'none';
   });
   const pausedCount = computed(() => nous.value?.pausedExperiments ?? 0);
+  /**
+   * Nous cannot be connected from the UI: the development host proxy is down, or the login
+   * service is unavailable. Connect then opens the dialog's manual step (no request is sent),
+   * and the banner links to System, where the row shows the command.
+   */
+  const nousManualOnly = computed(() =>
+    MANUAL_NOUS_STATUSES.includes((nous.value?.status ?? 'not_connected') as NousStatus),
+  );
+  /** Providers some configuration uses. */
+  const usedProviders = computed(() => providers.value.filter((p) => p.usedBy.length > 0));
+  /** The API-key provider the missing-key setup card names (the first one used). */
+  const setupKeyProvider = computed(() => {
+    const used = usedProviders.value;
+    const allMissingKeys =
+      used.length > 0 && used.every((p) => p.authMethod === 'env-key' && p.status === 'missing');
+    return allMissingKeys ? (used[0] ?? null) : null;
+  });
+  const setupVariant = computed<SetupVariant>(() => {
+    if (!loaded.value) return 'none';
+    if (setupKeyProvider.value) return 'missing-key';
+    return anyConnected.value ? 'none' : 'connect';
+  });
 
   const secondsLeft = computed(() => {
     if (!expiresAt.value) return 0;
@@ -305,12 +354,21 @@ export const useProvidersStore = defineStore('providers', () => {
       loginPhase.value = 'connected';
       return;
     }
+    if (nousManualOnly.value) {
+      // The API would refuse a code (409 host mode, 503 unavailable): show the terminal route.
+      loginPhase.value = 'manual';
+      return;
+    }
     await requestCode();
   }
 
   /** Get a new code / Try again: a fresh login with the same origin and follow-up. */
   async function retry(): Promise<void> {
     dialogOpen.value = true;
+    if (nousManualOnly.value) {
+      loginPhase.value = 'manual';
+      return;
+    }
     await requestCode();
   }
 
@@ -412,8 +470,13 @@ export const useProvidersStore = defineStore('providers', () => {
     anyConnected,
     nousInUse,
     needsAttention,
+    missingKeyProvider,
     bannerKind,
     pausedCount,
+    nousManualOnly,
+    usedProviders,
+    setupKeyProvider,
+    setupVariant,
     secondsLeft,
     countdown,
     approvalLeft,

@@ -6,7 +6,7 @@
  * last history entry per candidate. Also the live stream's run fields for a
  * re-score (T4 #3): a queued re-score and a dead-lettered one move the
  * stream's version, though no results revision moves. On PGlite with the
- * real triggers.
+ * real triggers, in a world of three tasks, the fewest a verdict needs.
  */
 import { eq } from 'drizzle-orm';
 import {
@@ -32,7 +32,7 @@ let views: ExperimentViewsService;
 
 beforeEach(async () => {
   t = await createTestDatabase();
-  w = await seedWorld(t.db);
+  w = await seedWorld(t.db, { tasks: 3 });
   views = new ExperimentViewsService(t.db);
 });
 
@@ -40,7 +40,10 @@ afterEach(async () => {
   await t.close();
 });
 
-/** a: baseline 1 of 2, candidate 2 of 2; b: baseline 0 of 2, candidate 1 of 2 (Δ +0.5 on both). */
+/**
+ * a and c: baseline 1 of 2, candidate 2 of 2; b: baseline 0 of 2, candidate
+ * 1 of 2 (Δ +0.5 on all three).
+ */
 const MATRIX: Record<string, ScoreStatus> = {
   'a/base/1': 'passed',
   'a/base/2': 'failed',
@@ -50,6 +53,10 @@ const MATRIX: Record<string, ScoreStatus> = {
   'b/base/2': 'failed',
   'b/cand/1': 'passed',
   'b/cand/2': 'failed',
+  'c/base/1': 'passed',
+  'c/base/2': 'failed',
+  'c/cand/1': 'passed',
+  'c/cand/2': 'passed',
 };
 
 async function settled() {
@@ -68,7 +75,7 @@ describe('a completed experiment', () => {
   it('shows its last entry everywhere, and the entries before it as the history', async () => {
     const { experiment, run } = await settled();
     await reconcile(experiment.id);
-    // A re-score moves task b's candidate from 1 of 2 to 2 of 2: Δ +0.75, still better.
+    // A re-score moves task b's candidate from 1 of 2 to 2 of 2: Δ +0.667, still better.
     await rescoreRun(t.db, run('b/cand/2'), 'passed');
     await reconcile(experiment.id);
     const [row] = await t.db.select().from(experiments).where(eq(experiments.id, experiment.id));
@@ -82,12 +89,12 @@ describe('a completed experiment', () => {
         candidate: expect.objectContaining({ versionId: w.candidateVersionId, name: 'with-mcp' }),
         verdict: 'better',
         scoreKey: 'primary',
-        delta: 0.75,
+        delta: 0.667,
         lo: 0.5,
         hi: 1,
-        passRates: { baseline: 0.25, candidate: 1 },
-        passCounts: { baseline: { passed: 1, counted: 4 }, candidate: { passed: 4, counted: 4 } },
-        taskCounts: { improved: 2, regressed: 0, unchanged: 0 },
+        passRates: { baseline: 0.333, candidate: 1 },
+        passCounts: { baseline: { passed: 2, counted: 6 }, candidate: { passed: 6, counted: 6 } },
+        taskCounts: { improved: 3, regressed: 0, unchanged: 0 },
         method: { name: 'paired_bootstrap', resamples: 10_000, confidence: 0.95 },
         reason: null,
         history: [
@@ -104,7 +111,7 @@ describe('a completed experiment', () => {
             at: rescore!.at,
             cause: 'rescore',
             note: '1 run re-scored',
-            delta: 0.75,
+            delta: 0.667,
             lo: 0.5,
             hi: 1,
             verdict: 'better',
@@ -119,9 +126,10 @@ describe('a completed experiment', () => {
         candidate: 'with-mcp',
         candidateVersionId: w.candidateVersionId,
         verdict: 'better',
-        delta: 0.75,
+        delta: 0.667,
         lo: 0.5,
         hi: 1,
+        reason: null,
       },
     ]);
 
@@ -170,6 +178,30 @@ describe('a completed experiment', () => {
     });
   });
 
+  it('names why there is no verdict on the list chip and in the usage', async () => {
+    const { experiment, run } = await launch(t.db, w, { tasks: [0, 1] });
+    for (const [key, status] of Object.entries(MATRIX).filter(([k]) => !k.startsWith('c/'))) {
+      await scored(t.db, w, run(key), { startedAt: at(0), durationS: 10, status });
+    }
+    await reconcile(experiment.id);
+    const listed = ExperimentListRowSchema.array().parse(await views.list());
+    expect(listed.find((r) => r.id === experiment.id)!.verdicts).toEqual([
+      {
+        candidate: 'with-mcp',
+        candidateVersionId: w.candidateVersionId,
+        verdict: 'not_computable',
+        delta: 0.5,
+        lo: null,
+        hi: null,
+        reason: 'too_few_tasks',
+      },
+    ]);
+    expect((await usageOf(w.candidateVersionId))[0]).toMatchObject({
+      verdict: 'not_computable',
+      verdictReason: 'too_few_tasks',
+    });
+  });
+
   it('completed before verdicts were recorded: its figures as they stand, as final', async () => {
     const { experiment } = await settled();
     await complete(t.db, experiment.id, at(100));
@@ -198,6 +230,17 @@ describe('an experiment that has not completed', () => {
     expect((await usageOf(w.candidateVersionId))[0]!.verdict).toBe('provisional');
   });
 
+  it('is provisional, with no reason, while some task still lacks counted runs', async () => {
+    const { experiment, run } = await launch(t.db, w);
+    for (const key of ['a/base/1', 'a/base/2', 'a/cand/1', 'a/cand/2', 'b/base/1']) {
+      await scored(t.db, w, run(key), { startedAt: at(0), durationS: 5, status: MATRIX[key]! });
+    }
+    const d = ExperimentDetailSchema.parse(await views.detail(experiment.id));
+    expect(d.verdicts.map((v) => [v.verdict, v.reason, v.delta, v.lo, v.hi])).toEqual([
+      ['provisional', null, 0.5, null, null],
+    ]);
+  });
+
   it('is not computable at once with one repetition', async () => {
     const { experiment, run } = await launch(t.db, w, { repetitions: 1 });
     await scored(t.db, w, run('a/base/1'), { startedAt: at(0), durationS: 5, status: 'passed' });
@@ -205,6 +248,20 @@ describe('an experiment that has not completed', () => {
     expect(d.verdicts.map((v) => [v.verdict, v.reason, v.delta])).toEqual([
       ['not_computable', 'single_repetition', null],
     ]);
+  });
+
+  it('is not computable at once with fewer than 3 tasks, nor in its usage', async () => {
+    const { experiment, run } = await launch(t.db, w, { tasks: [0, 1] });
+    await scored(t.db, w, run('a/base/1'), { startedAt: at(0), durationS: 5, status: 'passed' });
+    await scored(t.db, w, run('a/cand/1'), { startedAt: at(0), durationS: 5, status: 'failed' });
+    const d = ExperimentDetailSchema.parse(await views.detail(experiment.id));
+    expect(d.verdicts.map((v) => [v.verdict, v.reason, v.delta])).toEqual([
+      ['not_computable', 'too_few_tasks', -1],
+    ]);
+    expect((await usageOf(w.candidateVersionId))[0]).toMatchObject({
+      verdict: 'not_computable',
+      verdictReason: 'too_few_tasks',
+    });
   });
 });
 

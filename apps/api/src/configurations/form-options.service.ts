@@ -6,6 +6,9 @@
  * the resource library. Each MCP server is offered at its latest definition,
  * plus every older one a configuration still pins, so a draft of that
  * configuration (edit or duplicate) finds its pin among the options.
+ *
+ * GET /configurations/new-draft: the form's starting values for a new
+ * configuration, from the same options.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -13,7 +16,9 @@ import { asc, desc } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import {
   DEFAULT_TOOLSETS,
+  NEW_CONFIGURATION_DEFAULTS,
   PROVIDERS,
+  type ConfigurationDraft,
   type ConfigurationFormOptions,
   type Provider,
 } from '@hermes-evals/shared';
@@ -93,6 +98,37 @@ export class ConfigurationFormOptionsService {
           .orderBy(asc(documents.filename), desc(documents.uploadedAt), asc(documents.id))
       ).map((d) => ({ ...d, typeLabel: sizeLabel(d.sizeBytes) })),
       mcpServers: await this.mcpServers(),
+    };
+  }
+
+  /**
+   * A new configuration's draft: no name, the first model the form offers
+   * (the price table's first), the toolsets on by default that this runtime
+   * has, NEW_CONFIGURATION_DEFAULTS, and no skills, documents or MCP servers.
+   * Nothing is stored.
+   */
+  async newDraft(): Promise<ConfigurationDraft> {
+    const options = await this.formOptions();
+    return {
+      mode: 'new',
+      source: null,
+      values: {
+        name: '',
+        model: options.models[0]?.id ?? '',
+        provider: NEW_CONFIGURATION_DEFAULTS.provider,
+        baseUrl: null,
+        toolsets: options.toolsets.filter((t) => t.defaultOn).map((t) => t.name),
+        memoryEnabled: NEW_CONFIGURATION_DEFAULTS.memoryEnabled,
+        skillIds: [],
+        documentIds: [],
+        mcpServerVersionIds: [],
+        maxTurns: NEW_CONFIGURATION_DEFAULTS.maxTurns,
+        timeBudgetS: NEW_CONFIGURATION_DEFAULTS.timeBudgetS,
+        duplicatedFromVersionId: null,
+      },
+      createsNewVersion: false,
+      nextVersion: null,
+      experimentsKeepingVersion: [],
     };
   }
 

@@ -254,6 +254,37 @@ describe('task.yaml rules', () => {
     ]);
   });
 
+  it('refuses the key names the comparison reserves, saying why', async () => {
+    for (const key of ['primary', 'any_failed']) {
+      const task = await analyse(
+        base({
+          'task.yaml': withVerification(`  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { abs: 0.01 }
+  - key: ${key}
+    type: exact_match
+`),
+        }),
+      );
+      expect(task.issues).toEqual([
+        {
+          severity: 'error',
+          code: 'schema_invalid',
+          key,
+          path: 'task.yaml#verification[1].key',
+          message: `verification[1].key: ${key} is reserved: the comparison's key select uses it for ${
+            key === 'primary'
+              ? "each task's own primary key"
+              : 'a run with any key that did not pass'
+          }, so a check named ${key} could never be selected by name; give the check another key (line 9)`,
+        },
+      ]);
+      expect(task.verification.map((v) => v.key)).toEqual(['answer']);
+      expect(task.plan).toBeNull();
+    }
+  });
+
   it('checks params against the strict schema of their type, with the YAML path', async () => {
     const task = await analyse(
       base({

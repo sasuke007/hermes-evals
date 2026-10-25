@@ -2,10 +2,23 @@
  * Experiments: list, detail (header, snapshot, Overview), comparison, New
  * experiment options and estimate, launch, and the experiment controls.
  *
- * Fixtures by default (src/fixtures/experiments.ts and comparison.ts);
- * VITE_API_MODE=live calls the planned endpoints of plan section 11.
+ * Live mode calls the endpoints of plan section 11 through apiGet/apiSend and
+ * parses every answer with its shared schema; fixtures mode serves
+ * src/fixtures/experiments.ts and comparison.ts (src/api/README.md).
  * Components call these functions, never fetch.
  */
+import {
+  ComparisonViewSchema,
+  EXPERIMENT_EVENT_TYPES,
+  ExperimentActionResultSchema,
+  ExperimentDetailSchema,
+  ExperimentEstimateViewSchema,
+  ExperimentEventSchema,
+  ExperimentListRowSchema,
+  LaunchExperimentResultSchema,
+  NewExperimentDraftSchema,
+  NewExperimentOptionsSchema,
+} from '@hermes-evals/shared';
 import type {
   ComparisonQuery,
   ComparisonView,
@@ -15,16 +28,17 @@ import type {
   ExperimentEstimateView,
   ExperimentListRow,
   LaunchExperimentInput,
+  LaunchExperimentResult,
   NewExperimentDraft,
   NewExperimentOptions,
 } from './types/experiments';
+import { apiGet, apiSend } from './client';
 import {
   apiMode,
   fixture,
   fixtureFailure,
   hasScenario,
-  liveGet,
-  liveSend,
+  livePath,
   notFound,
   withQuery,
 } from './source';
@@ -50,7 +64,7 @@ function seedOrThrow(request: string, id: string): ExperimentSeed {
 
 /** GET /experiments: newest first. */
 export function listExperiments(): Promise<ExperimentListRow[]> {
-  if (apiMode === 'live') return liveGet('/experiments');
+  if (apiMode === 'live') return apiGet('/experiments', ExperimentListRowSchema.array());
   return fixture(() => experimentSeeds(hasScenario).map(experimentListRowFixture), {
     request: 'GET /api/experiments',
   });
@@ -58,7 +72,7 @@ export function listExperiments(): Promise<ExperimentListRow[]> {
 
 /** GET /experiments/:id: header, frozen snapshot, progress, feed, verdicts and aggregates. */
 export function getExperiment(id: string): Promise<ExperimentDetail> {
-  if (apiMode === 'live') return liveGet(`/experiments/${id}`);
+  if (apiMode === 'live') return apiGet(`/experiments/${id}`, ExperimentDetailSchema);
   const request = `GET /api/experiments/${id}`;
   return fixture(
     () => experimentDetailFixture(seedOrThrow(request, id), suiteStateFrom(hasScenario)),
@@ -66,32 +80,40 @@ export function getExperiment(id: string): Promise<ExperimentDetail> {
   );
 }
 
-/** GET /experiments/:id/comparison?candidate=&key=&filter=: one candidate against the baseline. */
+/**
+ * GET /experiments/:id/comparison?candidate=&key=&filter=: one candidate against the
+ * baseline, parsed with ComparisonViewSchema. 404 for an unknown experiment, 400 for a
+ * candidate it does not test or a key some selected task lacks.
+ */
 export function getComparison(id: string, query: ComparisonQuery = {}): Promise<ComparisonView> {
   const path = withQuery(`/experiments/${id}/comparison`, {
     candidate: query.candidate,
     key: query.key,
     filter: query.filter,
   });
-  if (apiMode === 'live') return liveGet(path);
+  if (apiMode === 'live') return apiGet(path, ComparisonViewSchema);
   const request = `GET /api/experiments/${id}/comparison`;
   return fixture(() => comparisonFixture(seedOrThrow(request, id), query), { request });
 }
 
 /**
- * Everything New experiment offers: suites with their tasks, configurations
- * with their per-run estimates, defaults, the concurrency limit and prices.
- * Live: GET /suites, /configurations and /system/summary, combined server-side
- * as GET /experiments/new-options until those endpoints exist.
+ * GET /experiments/new-options: everything New experiment offers before the
+ * user types anything: suites with their tasks, configurations (latest
+ * versions, config hashes and per-run estimates), the defaults, the
+ * concurrency limit of the live workers and the price table.
  */
 export function getNewExperimentOptions(): Promise<NewExperimentOptions> {
-  if (apiMode === 'live') return liveGet('/experiments/new-options');
+  if (apiMode === 'live') return apiGet('/experiments/new-options', NewExperimentOptionsSchema);
   return fixture(() => newExperimentOptionsFixture(hasScenario), {
     request: 'GET /api/experiments/new-options',
   });
 }
 
-/** GET /experiments/estimate: runs, waves, duration and cost for the summary panel. */
+/**
+ * GET /experiments/estimate: runs, waves, duration and cost for the summary
+ * panel. `budgetS` is the form's per-run time budget override, sent as
+ * `budget`: it replaces every configuration's own budget, as the runs do.
+ */
 export function estimateExperiment(query: EstimateQuery): Promise<ExperimentEstimateView> {
   const path = withQuery('/experiments/estimate', {
     suite: query.suiteId,
@@ -99,8 +121,9 @@ export function estimateExperiment(query: EstimateQuery): Promise<ExperimentEsti
     tasks: query.taskCount,
     repetitions: query.repetitions,
     concurrency: query.concurrency,
+    budget: query.budgetS,
   });
-  if (apiMode === 'live') return liveGet(path);
+  if (apiMode === 'live') return apiGet(path, ExperimentEstimateViewSchema);
   return fixture(() => estimateFixture(newExperimentOptionsFixture(hasScenario), query), {
     request: 'GET /api/experiments/estimate',
   });
@@ -108,12 +131,15 @@ export function estimateExperiment(query: EstimateQuery): Promise<ExperimentEsti
 
 /**
  * POST /experiments. Resolves with the new experiment's id; the page routes to
- * its Overview. Rejects with an ApiError (409) when a provider is not
- * connected or a configuration changed since the form loaded; the form keeps
+ * its Overview. Rejects with an ApiError: 409 when a provider or the LLM
+ * judge is not ready, no proven worker is connected, or a configuration
+ * changed since the form loaded; 400 with issues per field. The form keeps
  * its values. In fixtures a launch opens the running sample experiment.
  */
-export function launchExperiment(input: LaunchExperimentInput): Promise<{ id: string }> {
-  if (apiMode === 'live') return liveSend('POST', '/experiments', input);
+export function launchExperiment(input: LaunchExperimentInput): Promise<LaunchExperimentResult> {
+  if (apiMode === 'live') {
+    return apiSend('POST', '/experiments', input, LaunchExperimentResultSchema);
+  }
   const request = 'POST /api/experiments';
   if (hasScenario('launch-refused') || hasScenario('nous-not-connected')) {
     return fixtureFailure(request, 409, 'Nous Portal is not connected');
@@ -130,7 +156,9 @@ export function launchExperiment(input: LaunchExperimentInput): Promise<{ id: st
 
 /** POST /experiments/:id/pause: stops dispatching; in-flight runs finish. */
 export function pauseExperiment(id: string): Promise<ExperimentActionResult> {
-  if (apiMode === 'live') return liveSend('POST', `/experiments/${id}/pause`);
+  if (apiMode === 'live') {
+    return apiSend('POST', `/experiments/${id}/pause`, {}, ExperimentActionResultSchema);
+  }
   const request = `POST /api/experiments/${id}/pause`;
   return fixture(
     () => {
@@ -149,7 +177,9 @@ export function resumeExperiment(
   id: string,
   options: { spendCeilingUsd?: number } = {},
 ): Promise<ExperimentActionResult> {
-  if (apiMode === 'live') return liveSend('POST', `/experiments/${id}/resume`, options);
+  if (apiMode === 'live') {
+    return apiSend('POST', `/experiments/${id}/resume`, options, ExperimentActionResultSchema);
+  }
   const request = `POST /api/experiments/${id}/resume`;
   const seed = findSeed(hasScenario, id);
   if (seed?.pauseReason === 'spend_ceiling') {
@@ -176,7 +206,9 @@ export function resumeExperiment(
 
 /** POST /experiments/:id/cancel: queued runs will not start; scored runs are kept. */
 export function cancelExperiment(id: string): Promise<ExperimentActionResult> {
-  if (apiMode === 'live') return liveSend('POST', `/experiments/${id}/cancel`);
+  if (apiMode === 'live') {
+    return apiSend('POST', `/experiments/${id}/cancel`, {}, ExperimentActionResultSchema);
+  }
   const request = `POST /api/experiments/${id}/cancel`;
   return fixture(
     () => {
@@ -189,7 +221,9 @@ export function cancelExperiment(id: string): Promise<ExperimentActionResult> {
 
 /** POST /experiments/:id/retry-failed: re-queues the errored runs of a failed experiment. */
 export function retryFailedRuns(id: string): Promise<ExperimentActionResult> {
-  if (apiMode === 'live') return liveSend('POST', `/experiments/${id}/retry-failed`);
+  if (apiMode === 'live') {
+    return apiSend('POST', `/experiments/${id}/retry-failed`, {}, ExperimentActionResultSchema);
+  }
   const request = `POST /api/experiments/${id}/retry-failed`;
   return fixture(
     () => {
@@ -200,11 +234,29 @@ export function retryFailedRuns(id: string): Promise<ExperimentActionResult> {
   );
 }
 
-/** POST /experiments/:id/duplicate: a prefilled New experiment form on the suite's current version. */
+/**
+ * POST /experiments/:id/duplicate: a prefilled New experiment form on the
+ * suite's current version, with what changed since the original (changed,
+ * removed and now-invalid tasks, the last two left out). Nothing is stored.
+ */
 export function duplicateExperiment(id: string): Promise<NewExperimentDraft> {
-  if (apiMode === 'live') return liveSend('POST', `/experiments/${id}/duplicate`);
+  if (apiMode === 'live') {
+    return apiSend('POST', `/experiments/${id}/duplicate`, {}, NewExperimentDraftSchema);
+  }
   const request = `POST /api/experiments/${id}/duplicate`;
   return fixture(() => duplicateDraftFixture(hasScenario, seedOrThrow(request, id)), { request });
 }
+
+/**
+ * GET /experiments/:id/events (SSE): `run`, `counts`, `experiment` and `feed` events, each
+ * named on the wire (`event: <type>`), polled from Postgres every second. Null in fixtures
+ * mode, where nothing streams. Use with useSse, ExperimentEventSchema and
+ * EXPERIMENT_EVENT_NAMES; refetch getExperiment on reconnect (the API does not replay).
+ */
+export function experimentEventsPath(id: string): string | null {
+  return livePath(`/experiments/${id}/events`);
+}
+export const EXPERIMENT_EVENT_NAMES = EXPERIMENT_EVENT_TYPES;
+export { ExperimentEventSchema };
 
 export { EXPERIMENT_IDS };

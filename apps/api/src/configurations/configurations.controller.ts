@@ -111,6 +111,15 @@ export class ConfigurationsController {
     return ConfigurationFormOptionsSchema.parse(await this.options.formOptions());
   }
 
+  @Get('new-draft')
+  @ApiJsonResponse(ConfigurationDraftSchema, {
+    description:
+      'The form for a new configuration: the first model offered, the default toolsets, 20 turns and 300 s; nothing is stored',
+  })
+  async newDraft(): Promise<ConfigurationDraft> {
+    return ConfigurationDraftSchema.parse(await this.options.newDraft());
+  }
+
   @Get(':id')
   @ApiJsonResponse(ConfigurationDetailSchema, {
     description: 'A configuration at its latest version, with history and usage',

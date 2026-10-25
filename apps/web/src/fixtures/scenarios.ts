@@ -64,6 +64,13 @@ export const SCENARIOS: ScenarioEntry[] = [
       '/resources/mcp',
     ],
   },
+  {
+    name: 'stream-offline',
+    domain: 'global',
+    description: 'The summary stream has been down for 30 s: the AppShell shows Offline · Retry.',
+    route: '/experiments',
+    alsoAt: ['/system'],
+  },
 
   // Experiments ---------------------------------------------------------------
   {
@@ -134,7 +141,7 @@ export const SCENARIOS: ScenarioEntry[] = [
     name: 'verdict-updated',
     domain: 'experiments',
     description:
-      'MCP smoke test after Flow B: currency_mix · with-mcp · rep 2 retried and passed; the verdict is recomputed to +0.083 [−0.042, +0.208] with "previously +0.056 [−0.083, +0.194]".',
+      'MCP smoke test after Flow B: currency_mix · with-mcp · rep 2 retried and passed; the verdict is recomputed to +0.083 [−0.056, +0.278] with "previously +0.056 [−0.111, +0.250]".',
     route: exp('mcpSmoke'),
     alsoAt: [exp('mcpSmoke', '/comparison')],
   },
@@ -444,6 +451,21 @@ export const SCENARIOS: ScenarioEntry[] = [
     domain: 'system',
     description: 'OPENROUTER_API_KEY is set on the server.',
     route: '/system',
+  },
+  {
+    name: 'nous-unavailable',
+    domain: 'system',
+    description:
+      'The Nous login service failed its startup check: the row offers the terminal login, Connect opens the manual step and the banner opens System.',
+    route: '/system',
+  },
+  {
+    name: 'openrouter-in-use',
+    domain: 'system',
+    description:
+      "The configurations use only OpenRouter, which has no key: the missing-key SetupCard, the no-key banner, ProviderNotice's server step, and New experiment's tagged rows and .env blocker.",
+    route: '/experiments',
+    alsoAt: ['/system', '/configurations/new', '/experiments/new'],
   },
   {
     name: 'sandbox-failed',

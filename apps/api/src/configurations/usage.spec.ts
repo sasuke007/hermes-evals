@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { VerdictEntry } from '@hermes-evals/shared';
 import type { VerdictFigures } from '../experiments/comparison/verdicts.js';
 import type { StatsResult } from '../statistics/contracts.js';
-import { armPassRate, armVerdict } from './usage.js';
+import { armPassRate, armVerdict, armVerdictOf } from './usage.js';
 
 const arm = (
   scored: number,
@@ -43,7 +43,7 @@ describe('armPassRate', () => {
 });
 
 describe('armVerdict', () => {
-  const completed = { status: 'completed' as const, repetitions: 3 };
+  const completed = { status: 'completed' as const, repetitions: 3, taskIds: ['t1', 't2', 't3'] };
 
   it('is not computable with one repetition or nothing scored', () => {
     expect(armVerdict({ ...completed, repetitions: 1, verdictHistory: [] }, 'v2', 10)).toBe(
@@ -52,10 +52,43 @@ describe('armVerdict', () => {
     expect(armVerdict({ ...completed, verdictHistory: [] }, 'v2', 0)).toBe('not_computable');
   });
 
+  it('says why there is no verdict, for the row to name it', () => {
+    const running = { ...completed, status: 'running' as const, verdictHistory: [] };
+    expect(armVerdictOf({ ...running, repetitions: 1 }, 'v2', 5)).toEqual({
+      verdict: 'not_computable',
+      reason: 'single_repetition',
+    });
+    expect(armVerdictOf({ ...running, taskIds: ['t1'] }, 'v2', 5)).toEqual({
+      verdict: 'not_computable',
+      reason: 'too_few_tasks',
+    });
+    expect(armVerdictOf(running, 'v2', 0)).toEqual({
+      verdict: 'not_computable',
+      reason: 'nothing_scored',
+    });
+    expect(armVerdictOf(running, 'v2', 5)).toEqual({ verdict: 'provisional', reason: null });
+    const recorded = [{ ...entry('v2', 'not_computable'), reason: 'not_enough_runs' as const }];
+    expect(armVerdictOf({ ...completed, verdictHistory: recorded }, 'v2', 5)).toEqual({
+      verdict: 'not_computable',
+      reason: 'not_enough_runs',
+    });
+    expect(
+      armVerdictOf({ ...completed, verdictHistory: [entry('v2', 'better')] }, 'v2', 5),
+    ).toEqual({ verdict: 'better', reason: null });
+  });
+
+  it('is not computable at once with fewer than 3 tasks, as the comparison is', () => {
+    const twoTasks = { ...completed, status: 'running' as const, taskIds: ['t1', 't2'] };
+    expect(armVerdict({ ...twoTasks, verdictHistory: [] }, 'v2', 5)).toBe('not_computable');
+    expect(armVerdict({ ...twoTasks, status: 'paused', verdictHistory: [] }, 'v2', 5)).toBe(
+      'not_computable',
+    );
+  });
+
   it('is provisional until the experiment completes', () => {
     expect(
       armVerdict(
-        { status: 'running', repetitions: 3, verdictHistory: [entry('v2', 'better')] },
+        { ...completed, status: 'running', verdictHistory: [entry('v2', 'better')] },
         'v2',
         5,
       ),
@@ -98,7 +131,7 @@ describe('armVerdict', () => {
     expect(armVerdict({ ...completed, verdictHistory: [] }, 'v3', 5, figures)).toBe('provisional');
     // While it runs, figures never decide: provisional.
     expect(
-      armVerdict({ status: 'running', repetitions: 3, verdictHistory: [] }, 'v2', 5, figures),
+      armVerdict({ ...completed, status: 'running', verdictHistory: [] }, 'v2', 5, figures),
     ).toBe('provisional');
   });
 });

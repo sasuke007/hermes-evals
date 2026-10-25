@@ -2,9 +2,20 @@
  * Runs: the Runs tab table, bulk Re-score and Retry execution, and the run
  * inspector (detail, events, artifact previews, single-run actions).
  *
- * Fixtures by default (src/fixtures/runs.ts and inspector.ts);
- * VITE_API_MODE=live calls the planned endpoints of plan section 11.
+ * Live mode calls the endpoints of plan section 11 through apiGet/apiSend and
+ * parses every answer with its shared schema; fixtures mode serves
+ * src/fixtures/runs.ts and inspector.ts (src/api/README.md).
  */
+import {
+  BulkRescoreResultSchema,
+  BulkRunActionResultSchema,
+  RescoreRunResultSchema,
+  RunActionResultSchema,
+  RunDetailSchema,
+  RunEventsPageSchema,
+  RunListResultSchema,
+  TablePreviewSchema,
+} from '@hermes-evals/shared';
 import type {
   BulkRescoreResult,
   BulkRunActionResult,
@@ -16,16 +27,8 @@ import type {
   RunListResult,
 } from './types/runs';
 import type { TablePreview } from './types/suites';
-import {
-  apiMode,
-  fixture,
-  fixtureFailure,
-  hasScenario,
-  liveGet,
-  liveSend,
-  notFound,
-  withQuery,
-} from './source';
+import { API_BASE, apiGet, apiGetText, apiSend, type TextStart } from './client';
+import { apiMode, fixture, fixtureFailure, hasScenario, notFound, withQuery } from './source';
 import { findSeed } from '@/fixtures/experiments';
 import {
   artifactPreviewFixture,
@@ -53,7 +56,7 @@ export function listRuns(experimentId: string, filters: RunFilters = {}): Promis
     sort: filters.sort,
     dir: filters.dir,
   });
-  if (apiMode === 'live') return liveGet(path);
+  if (apiMode === 'live') return apiGet(path, RunListResultSchema);
   const request = `GET /api/experiments/${experimentId}/runs`;
   return fixture(
     () => {
@@ -67,7 +70,7 @@ export function listRuns(experimentId: string, filters: RunFilters = {}): Promis
 
 /** GET /runs/:id: header, attempts, outcome, timeline, final response, artifacts, launch record. */
 export function getRun(runId: string): Promise<RunDetail> {
-  if (apiMode === 'live') return liveGet(`/runs/${runId}`);
+  if (apiMode === 'live') return apiGet(`/runs/${runId}`, RunDetailSchema);
   const request = `GET /api/runs/${runId}`;
   return fixture(
     () => {
@@ -79,9 +82,15 @@ export function getRun(runId: string): Promise<RunDetail> {
   );
 }
 
-/** GET /runs/:id/events?after=: events after a sequence number (live timeline). */
+/**
+ * GET /runs/:id/events?after=: the timeline rows touched after a sequence number (live
+ * timeline). A row already sent comes again, with the same seq, when a later event completed
+ * it (a tool result): the caller replaces rows by seq and asks next with `lastSeq`.
+ */
 export function listRunEvents(runId: string, after = 0): Promise<RunEventsPage> {
-  if (apiMode === 'live') return liveGet(withQuery(`/runs/${runId}/events`, { after }));
+  if (apiMode === 'live') {
+    return apiGet(withQuery(`/runs/${runId}/events`, { after }), RunEventsPageSchema);
+  }
   const request = `GET /api/runs/${runId}/events`;
   return fixture(
     () => {
@@ -93,20 +102,53 @@ export function listRunEvents(runId: string, after = 0): Promise<RunEventsPage> 
   );
 }
 
-/** GET /runs/:id/artifacts/:artifactId/content as a table preview (CSV), or null. */
+/** GET /runs/:id/artifacts/:artifactId/preview: the first rows of a CSV or TSV, or null. */
 export function getArtifactPreview(
   runId: string,
   artifactId: string,
 ): Promise<TablePreview | null> {
-  if (apiMode === 'live') return liveGet(`/runs/${runId}/artifacts/${artifactId}/preview`);
+  const path = `/runs/${runId}/artifacts/${artifactId}/preview`;
+  if (apiMode === 'live') return apiGet(path, TablePreviewSchema.nullable());
   return fixture(() => artifactPreviewFixture(hasScenario, runId, artifactId), {
-    request: `GET /api/runs/${runId}/artifacts/${artifactId}/content`,
+    request: `GET ${API_BASE}${path}`,
   });
 }
 
 /** URL to download an artifact's bytes (a plain link, not a fetch). */
 export function artifactDownloadUrl(runId: string, artifactId: string): string {
-  return `/api/runs/${runId}/artifacts/${artifactId}/content`;
+  return `${API_BASE}/runs/${runId}/artifacts/${artifactId}/content`;
+}
+
+/** The start of a text artifact, for its plain-text preview. */
+export type ArtifactText = TextStart;
+
+/** How much of a text artifact the preview reads. */
+export const TEXT_PREVIEW_BYTES = 64 * 1024;
+
+/**
+ * GET /runs/:id/artifacts/:artifactId/content, read as text for the inline preview (the
+ * Artifacts section's "plain text" pane): at most TEXT_PREVIEW_BYTES, shown as written and
+ * never rendered. The endpoint answers the file's bytes, not JSON, so it goes through
+ * apiGetText rather than apiGet; failures are ApiErrors all the same.
+ */
+export function getArtifactText(
+  runId: string,
+  artifactId: string,
+  maxBytes = TEXT_PREVIEW_BYTES,
+): Promise<ArtifactText> {
+  const path = `/runs/${runId}/artifacts/${artifactId}/content`;
+  if (apiMode === 'live') return apiGetText(path, maxBytes);
+  const request = `GET ${API_BASE}${path}`;
+  return fixture(
+    () => {
+      // The fixtures store tables, not bytes: a CSV artifact reads back as its rows.
+      const preview = artifactPreviewFixture(hasScenario, runId, artifactId);
+      if (!preview) throw notFound(request, `content of artifact ${artifactId}`);
+      const text = [preview.columns, ...preview.rows].map((row) => row.join(',')).join('\n');
+      return { text, truncated: preview.totalRows > preview.rows.length };
+    },
+    { request },
+  );
 }
 
 /** Reasons a model-needing action is refused while Nous Portal is not connected. */
@@ -128,7 +170,9 @@ function providerRefusal(runId: string, action: 'rescore' | 'retry'): string | n
  * until the new generation publishes; a re-score already pending is joined.
  */
 export function rescoreRun(runId: string): Promise<RescoreRunResult> {
-  if (apiMode === 'live') return liveSend('POST', `/runs/${runId}/rescore`);
+  if (apiMode === 'live') {
+    return apiSend('POST', `/runs/${runId}/rescore`, {}, RescoreRunResultSchema);
+  }
   const request = `POST /api/runs/${runId}/rescore`;
   const refusal = providerRefusal(runId, 'rescore');
   if (refusal) return fixtureFailure(request, 409, refusal);
@@ -144,7 +188,7 @@ export function rescoreRun(runId: string): Promise<RescoreRunResult> {
 
 /** POST /runs/:id/retry: re-executes an execution_error run in a fresh trial container. */
 export function retryRun(runId: string): Promise<RunActionResult> {
-  if (apiMode === 'live') return liveSend('POST', `/runs/${runId}/retry`);
+  if (apiMode === 'live') return apiSend('POST', `/runs/${runId}/retry`, {}, RunActionResultSchema);
   const request = `POST /api/runs/${runId}/retry`;
   const refusal = providerRefusal(runId, 'retry');
   if (refusal) return fixtureFailure(request, 409, refusal);
@@ -163,7 +207,8 @@ export function retryRun(runId: string): Promise<RunActionResult> {
 
 /** POST /runs/:id/cancel: stops a queued or running run. */
 export function cancelRun(runId: string): Promise<RunActionResult> {
-  if (apiMode === 'live') return liveSend('POST', `/runs/${runId}/cancel`);
+  if (apiMode === 'live')
+    return apiSend('POST', `/runs/${runId}/cancel`, {}, RunActionResultSchema);
   const request = `POST /api/runs/${runId}/cancel`;
   return fixture(
     () => {
@@ -177,7 +222,8 @@ export function cancelRun(runId: string): Promise<RunActionResult> {
 /** POST /experiments/:id/runs/rescore (bulk bar). `refused` names runs that could not be enqueued. */
 export function rescoreRuns(experimentId: string, runIds: string[]): Promise<BulkRescoreResult> {
   if (apiMode === 'live') {
-    return liveSend('POST', `/experiments/${experimentId}/runs/rescore`, { runIds });
+    const path = `/experiments/${experimentId}/runs/rescore`;
+    return apiSend('POST', path, { runIds }, BulkRescoreResultSchema);
   }
   const request = `POST /api/experiments/${experimentId}/runs/rescore`;
   return fixture(
@@ -193,7 +239,8 @@ export function rescoreRuns(experimentId: string, runIds: string[]): Promise<Bul
 /** POST /experiments/:id/runs/retry (bulk bar): only execution_error runs are re-queued. */
 export function retryRuns(experimentId: string, runIds: string[]): Promise<BulkRunActionResult> {
   if (apiMode === 'live') {
-    return liveSend('POST', `/experiments/${experimentId}/runs/retry`, { runIds });
+    const path = `/experiments/${experimentId}/runs/retry`;
+    return apiSend('POST', path, { runIds }, BulkRunActionResultSchema);
   }
   const request = `POST /api/experiments/${experimentId}/runs/retry`;
   return fixture(

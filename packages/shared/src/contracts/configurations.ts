@@ -3,7 +3,7 @@
  * See ./common.ts for the conventions every contract file follows.
  */
 import { z } from 'zod';
-import { EXPERIMENT_STATUSES } from '../status.js';
+import { EXPERIMENT_STATUSES, NOT_COMPUTABLE_REASONS } from '../status.js';
 import { MCP_TRANSPORTS, PROVIDERS } from '../vocab.js';
 import {
   countView,
@@ -120,6 +120,11 @@ export const ConfigurationUsageSchema = z.object({
    * completed, `provisional` while running); null for the baseline role.
    */
   verdict: z.enum(['better', 'worse', 'inconclusive', 'provisional', 'not_computable']).nullable(),
+  /**
+   * Why there is no verdict, when `verdict` is not_computable, so the row
+   * can say it ("No interval (1 rep)"); null otherwise.
+   */
+  verdictReason: z.enum(NOT_COMPUTABLE_REASONS).nullable(),
   /** Pass rate of the baseline in the same experiment, for "vs baseline 0.633". */
   baselinePassRate: rate.nullable(),
 });
@@ -259,6 +264,18 @@ function checkConfiguration(c: z.infer<typeof ConfigurationFieldsSchema>, ctx: z
 /** Body of POST /configurations and PUT /configurations/:id. */
 export const ConfigurationInputSchema = ConfigurationFieldsSchema.superRefine(checkConfiguration);
 export type ConfigurationInput = z.infer<typeof ConfigurationInputSchema>;
+
+/**
+ * What a new configuration starts with besides its model and toolsets
+ * (GET /configurations/new-draft): the ConfigForm artboard's limits, the
+ * Nous Portal route, and no resources.
+ */
+export const NEW_CONFIGURATION_DEFAULTS = {
+  provider: 'nous',
+  maxTurns: 20,
+  timeBudgetS: 300,
+  memoryEnabled: false,
+} as const;
 
 /** What the form opens with: new, edit or duplicate. */
 export const ConfigurationDraftSchema = z.object({

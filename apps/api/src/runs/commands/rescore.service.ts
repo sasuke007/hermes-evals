@@ -49,9 +49,14 @@ import {
   notFound,
 } from '../../experiments/commands/command-support.js';
 import { PROVIDER_NAMES, ProviderGate } from '../../experiments/commands/provider-gate.js';
-import { JUDGE_MODEL_FIX, namedKeys } from '../../providers/judge-readiness.js';
 import { QueueService } from '../../queue/queue.service.js';
-import { judgeNeedsOf, judgeSettingsFrom, type JudgeNeeds } from '../judge-needs.js';
+import {
+  judgeNeedsOf,
+  judgeSettingsFrom,
+  noJudgeModelRefusal,
+  unjudgedKeys,
+  type JudgeNeeds,
+} from '../judge-needs.js';
 import { pendingEvaluationView } from '../views/evaluation-view.js';
 import { lockRuns } from './run-commands.service.js';
 
@@ -73,13 +78,7 @@ export function rescoreRefusal(run: Pick<RunRow, 'status' | 'currentAttemptId'>)
 export const judgeRefusal = (provider: Provider, keys: readonly string[], reason: string): string =>
   `Re-score needs ${PROVIDER_NAMES[provider]} for the ${keys.join(' and ')} judge: ${reason}`;
 
-/**
- * "Re-score needs a judge model for the method judge: set JUDGE_MODEL …".
- * Only the settings can fix it: a re-score grades the experiment's frozen
- * task, so a `model:` added to task.yaml now never reaches it.
- */
-export const noJudgeModelRefusal = (keys: readonly string[]): string =>
-  `Re-score needs a judge model for the ${namedKeys(keys)} judge: ${JUDGE_MODEL_FIX}.`;
+export { noJudgeModelRefusal };
 
 /** A run as read before the transaction: where it is and what its judge needs. */
 interface RescoreTarget {
@@ -241,8 +240,8 @@ async function decide(
     if (!joined) return `run ${run.id} is still being scored for the first time`;
     return { answer: { evaluation: joined, joinedPending: true } };
   }
-  const { provider, judged, keys } = target.judge;
-  const unjudged = keys.filter((key) => !judged.includes(key));
+  const { provider, judged } = target.judge;
+  const unjudged = unjudgedKeys(target.judge);
   if (unjudged.length > 0) return noJudgeModelRefusal(unjudged);
   const blocked = provider ? blocks.get(provider) : undefined;
   if (provider && blocked !== undefined) return judgeRefusal(provider, judged, blocked);

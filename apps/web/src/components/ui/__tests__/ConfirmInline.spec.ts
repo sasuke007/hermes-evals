@@ -83,20 +83,72 @@ describe('ConfirmInline', () => {
     expect(buttons(w)).toEqual(['Cancel experiment']);
   });
 
-  it('shows a failure under the returned trigger, verbatim', async () => {
-    const w = make();
+  it('stays open on a failure with the server message verbatim, and offers Try again', async () => {
+    const w = make({ errorTitle: 'Could not cancel. Nothing was stopped.' });
     await w.find('button').trigger('click');
     await w.setProps({ busy: true });
     await w.setProps({
       busy: false,
       error: 'POST /api/experiments/e1/cancel → 502 · upstream api:8080 connection refused',
     });
+    expect(w.find('[role="group"]').exists()).toBe(true);
     const alert = w.find('[role="alert"]');
-    expect(alert.exists()).toBe(true);
+    expect(alert.find('b').text()).toBe('Could not cancel. Nothing was stopped.');
     expect(alert.find('code').text()).toBe(
       'POST /api/experiments/e1/cancel → 502 · upstream api:8080 connection refused',
     );
-    expect(buttons(w)[0]).toBe('Cancel experiment');
+    // The message takes the consequence's place.
+    expect(w.text()).not.toContain('28 queued runs will not start.');
+    expect(buttons(w)).toEqual(['Try again', 'Keep running']);
+    await w.findAll('button')[0]!.trigger('click');
+    expect(w.emitted('confirm')).toHaveLength(1);
+    // Keep running closes it and the trigger returns.
+    await w.findAll('button')[1]!.trigger('click');
+    expect(buttons(w)).toEqual(['Cancel experiment']);
+  });
+
+  it('shows a spinner while busy', async () => {
+    const w = make();
+    await w.find('button').trigger('click');
+    await w.setProps({ busy: true });
+    expect(w.find('[role="group"]').attributes('aria-busy')).toBe('true');
+    expect(w.findAll('button')[0]!.find('.animate-spin').exists()).toBe(true);
+  });
+
+  it('columns: the title on its own line over the consequence, buttons beside (OverviewRunning)', async () => {
+    const w = make({ layout: 'columns' });
+    await w.get('button').trigger('click');
+    const group = w.get('[role="group"]');
+    expect(group.classes()).toEqual(
+      expect.arrayContaining(['px-16', 'py-14', 'gap-x-24', 'gap-y-12', 'justify-between']),
+    );
+    const text = w.get('[data-testid="confirm-text"]');
+    expect(text.classes()).toEqual(expect.arrayContaining(['flex-col', 'max-w-820', 'gap-2']));
+    // Two lines: the title, then the consequence (no space joins them into one run).
+    expect(text.element.children).toHaveLength(2);
+    expect(text.element.children[0]!.textContent).toBe('Cancel 32 unfinished runs?');
+    expect(text.get('[data-testid="confirm-consequence"]').text()).toContain('28 queued runs');
+  });
+
+  it('row: one run of text, as the System provider row draws it', async () => {
+    const w = make({ layout: 'row' });
+    await w.get('button').trigger('click');
+    expect(w.get('[role="group"]').classes()).toEqual(
+      expect.arrayContaining(['px-16', 'py-10', 'gap-x-20']),
+    );
+    expect(w.get('[data-testid="confirm-text"]').text()).toMatch(
+      /^Cancel 32 unfinished runs\? 28 queued runs/,
+    );
+  });
+
+  it('takes a #consequence slot for rich text', async () => {
+    wrapper = mount(ConfirmInline, {
+      props: base,
+      slots: { consequence: 'marked <span class="font-mono">cancelled</span>.' },
+      attachTo: document.body,
+    });
+    await wrapper.get('button').trigger('click');
+    expect(wrapper.get('[data-testid="confirm-consequence"] .font-mono').text()).toBe('cancelled');
   });
 
   it('can be opened by the parent without a trigger (row layout)', async () => {
@@ -111,7 +163,7 @@ describe('ConfirmInline', () => {
     });
     expect(w.findAll('button')).toHaveLength(0);
     await w.setProps({ open: true });
-    expect(w.find('.layout-row').exists()).toBe(true);
+    expect(w.find('[data-layout="row"]').exists()).toBe(true);
     expect(buttons(w)).toEqual(['Disconnect', 'Keep connected']);
     await w.findAll('button')[1]!.trigger('click');
     const opens = w.emitted('update:open') ?? [];

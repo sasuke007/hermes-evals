@@ -30,6 +30,7 @@ import {
   ApiErrorBodySchema,
   ComparisonViewSchema,
   ConfigurationDetailSchema,
+  ExperimentDetailSchema,
   ExperimentEventSchema,
   ExperimentListRowSchema,
   NewExperimentOptionsSchema,
@@ -612,12 +613,18 @@ describe.skipIf(!SERVER_URL)('Phase 4 on Postgres 17: the comparison and the ver
       statistics: { observedDelta: 0.667, lo: 0, hi: 1, verdict: 'inconclusive' },
       sensitivity: null,
     });
-    // The cancelled run's two attempts are not counted; count_rows' retried run's two are.
+    // The cancelled run's two attempts are not counted, but they were paid for: the
+    // cost prices every attempt of the arm, as the Overview does (Phase 4 question 2),
+    // count_rows' retried run's two included.
     expect(after.secondary[0]).toMatchObject({
       executionErrors: 0,
       executionErrorCategories: [],
-      costUsd: usd(12 * ATTEMPT_COST_USD['mock/weak']),
+      costUsd: usd(14 * ATTEMPT_COST_USD['mock/weak']),
     });
+    const overview = await world.read(`/experiments/${main}`, ExperimentDetailSchema);
+    expect(after.secondary.map((r) => r.costUsd)).toEqual(
+      overview.aggregates.map((a) => a.costUsd),
+    );
     expect(fourth).toMatchObject({ cause: 'retry', note: '1 retry', verdict: 'inconclusive' });
 
     // Every entry parses, once per results revision, oldest first.
@@ -728,6 +735,7 @@ describe.skipIf(!SERVER_URL)('Phase 4 on Postgres 17: the comparison and the ver
           delta: 0.667,
           lo: 0,
           hi: 1,
+          reason: null,
         },
       ],
       'Good against twin': [
@@ -738,6 +746,7 @@ describe.skipIf(!SERVER_URL)('Phase 4 on Postgres 17: the comparison and the ver
           delta: 0,
           lo: 0,
           hi: 0,
+          reason: null,
         },
       ],
       'One repetition': [
@@ -748,6 +757,7 @@ describe.skipIf(!SERVER_URL)('Phase 4 on Postgres 17: the comparison and the ver
           delta: null,
           lo: null,
           hi: null,
+          reason: 'single_repetition',
         },
       ],
     });
@@ -756,12 +766,12 @@ describe.skipIf(!SERVER_URL)('Phase 4 on Postgres 17: the comparison and the ver
       ConfigurationDetailSchema,
     );
     const usage = Object.fromEntries(
-      good.usedIn.map((u) => [u.experimentName, [u.role, u.verdict]]),
+      good.usedIn.map((u) => [u.experimentName, [u.role, u.verdict, u.verdictReason]]),
     );
     expect(usage).toEqual({
-      'Weak against good': ['candidate', 'inconclusive'],
-      'Good against twin': ['baseline', null],
-      'One repetition': ['candidate', 'not_computable'],
+      'Weak against good': ['candidate', 'inconclusive', null],
+      'Good against twin': ['baseline', null, null],
+      'One repetition': ['candidate', 'not_computable', 'single_repetition'],
     });
     // The judge graded sum_amounts once per run and once for the re-score, all through egress.
     expect(judge.calls).toBe(6 + 1 + 4 + 2);

@@ -86,6 +86,7 @@ const DETAIL: ExperimentDetail = {
   pausedAt: null,
   createdAt: ROW.createdAt,
   finishedAt: null,
+  cancelledAt: null,
   elapsedS: 1872,
   remainingEstimateS: 600,
   lastEventAt: '2026-10-23T15:23:42',
@@ -228,6 +229,16 @@ describe('experiment view models', () => {
     expect(issuePaths(ExperimentDetailSchema.safeParse(failed))).toEqual(['failure']);
     const pausedAt = { ...DETAIL, pausedAt: '2026-10-23T15:08:00' };
     expect(issuePaths(ExperimentDetailSchema.safeParse(pausedAt))).toEqual(['pausedAt']);
+    // Cancel leaves an experiment running while in-flight runs finish, then completed.
+    const cancelling = { ...DETAIL, cancelledAt: '2026-10-23T15:20:00' };
+    expect(ExperimentDetailSchema.safeParse(cancelling).success).toBe(true);
+    const pausedCancel = {
+      ...cancelling,
+      status: 'paused',
+      pauseReason: 'user',
+      pausedAt: '2026-10-23T15:08:00',
+    };
+    expect(issuePaths(ExperimentDetailSchema.safeParse(pausedCancel))).toEqual(['cancelledAt']);
   });
 
   it('list final verdicts only once completed', () => {
@@ -238,9 +249,29 @@ describe('experiment view models', () => {
       delta: 0.217,
       lo: 0.117,
       hi: 0.333,
+      reason: null,
     };
     const completed = { ...ROW, status: 'completed' as const, verdicts: [chip] };
     expect(ExperimentListRowSchema.parse(completed)).toEqual(completed);
+    // A chip with no verdict says why, for "No interval (1 rep)".
+    const why = {
+      ...chip,
+      verdict: 'not_computable' as const,
+      lo: null,
+      hi: null,
+      reason: 'single_repetition' as const,
+    };
+    expect(ExperimentListRowSchema.parse({ ...completed, verdicts: [why] }).verdicts).toEqual([
+      why,
+    ]);
+    expect(
+      issuePaths(
+        ExperimentListRowSchema.safeParse({
+          ...completed,
+          verdicts: [{ ...chip, reason: 'unknown' }],
+        }),
+      ),
+    ).toEqual(['verdicts.0.reason']);
     expect(ExperimentListRowSchema.safeParse({ ...completed, verdicts: [] }).success).toBe(true);
     for (const status of ['running', 'failed'] as const) {
       expect(issuePaths(ExperimentListRowSchema.safeParse({ ...completed, status }))).toEqual([

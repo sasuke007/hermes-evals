@@ -2,15 +2,22 @@
  * The model gateway's per-attempt token cap (Phase 2 question 2, Phase 3
  * S9 #2): egress's default (MODEL_TOKEN_CAP_PER_ATTEMPT) when the
  * registration names no maxTokens, the registration's own otherwise; past
- * it a 429 that names the cap, and a connection-log entry whose reason the
- * runner turns into a `network` event.
+ * it a 402 that Hermes does not retry (Phase 4 question 8), naming the cap,
+ * and a connection-log entry whose reason the runner turns into a `network`
+ * event and the platform classifies the run `limit` from.
  */
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createGatewayServer } from '../src/gateway.js';
 import { Registry } from '../src/registry.js';
-import { DEFAULT_TOKEN_CAP_PER_ATTEMPT, TOKEN_CAP_CODE, tokenCapRefusal } from '../src/upstream.js';
+import {
+  DEFAULT_TOKEN_CAP_PER_ATTEMPT,
+  TOKEN_CAP_CODE,
+  TOKEN_CAP_REASON_PREFIX,
+  TOKEN_CAP_STATUS,
+  tokenCapRefusal,
+} from '../src/upstream.js';
 
 const ATTEMPT = '01K8ZQ7M3V5X9C2B4N6P8R0C01';
 const TOKEN = 't'.repeat(64);
@@ -63,7 +70,11 @@ const chat = async () => {
     headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
     body: JSON.stringify({ model: 'mock/scripted', messages: [] }),
   });
-  return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+  return {
+    status: res.status,
+    shouldRetry: res.headers.get('x-should-retry'),
+    json: (await res.json()) as Record<string, unknown>,
+  };
 };
 
 describe('token cap per attempt', () => {
@@ -71,28 +82,37 @@ describe('token cap per attempt', () => {
     expect(DEFAULT_TOKEN_CAP_PER_ATTEMPT).toBe(2_000_000);
   });
 
-  it('applies egress’s cap when the registration names none, and answers 429 naming it', async () => {
+  it('applies egress’s cap when the registration names none, and answers 402 naming it', async () => {
     register();
     for (let i = 0; i < 3; i += 1) expect((await chat()).status).toBe(200);
     const refused = await chat();
-    expect(refused.status).toBe(429);
+    // A status Hermes does not retry, and the header that tells the OpenAI SDK not to either.
+    expect(TOKEN_CAP_STATUS).toBe(402);
+    expect(refused.status).toBe(402);
+    expect(refused.shouldRetry).toBe('false');
     expect(refused.json).toEqual({
       error: {
         message:
           'This attempt reached its token cap of 100 tokens (120 used; MODEL_TOKEN_CAP_PER_ATTEMPT)',
-        type: 'rate_limit_exceeded',
+        type: TOKEN_CAP_CODE,
         code: TOKEN_CAP_CODE,
         cap: 100,
         used: 120,
       },
     });
+    // What Hermes's classifier reads in a 402 to call it a retryable usage window: none of it.
+    const message = JSON.stringify(refused.json).toLowerCase();
+    for (const word of ['usage limit', 'quota', 'limit exceeded', 'try again', 'retry', 'wait']) {
+      expect(message).not.toContain(word);
+    }
     const log = registry.get(ATTEMPT)!.log;
     expect(log.at(-1)).toMatchObject({
       kind: 'model',
       decision: 'denied',
-      status: 429,
+      status: 402,
       reason: 'token cap reached: 120 of 100 tokens used',
     });
+    expect(log.at(-1)!.reason!.startsWith(TOKEN_CAP_REASON_PREFIX)).toBe(true);
     // The refused call was not forwarded and is not metered.
     expect(registry.usage(ATTEMPT)).toMatchObject({ calls: 3, totalTokens: 120 });
   });
@@ -104,7 +124,7 @@ describe('token cap per attempt', () => {
     registry.remove(ATTEMPT);
     register(200);
     for (let i = 0; i < 5; i += 1) expect((await chat()).status).toBe(200);
-    expect((await chat()).status).toBe(429);
+    expect((await chat()).status).toBe(402);
   });
 
   it('names the subject in its message', () => {

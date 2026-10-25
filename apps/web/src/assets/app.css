@@ -1,0 +1,480 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* The one stylesheet of the web app: Tailwind CSS v4 over the design tokens.
+   tokens.css holds the tokens as CSS variables, switched by data-theme on <html>; the theme
+   below maps them into Tailwind, so bg-surface, text-text-2, border-border or text-fail-text
+   follow both themes without a dark: variant. Components style themselves with utilities;
+   the small components layer at the end holds only the patterns every page repeats, under
+   the class names the design canvas uses (btn, chip, tag, tbl, dt), so board markup ports
+   as written. apps/web/CONTRIBUTING.md says how to use all of it. */
+
+/* dark: follows data-theme (stamped before first paint by index.html, kept by the theme
+   store), never prefers-color-scheme alone. Tokens already switch, so it is rarely needed. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  /* One spacing step is 1px, so utilities read like the boards: p-12 is 12px, gap-6 is 6px,
+     h-32 is 32px, max-w-1440 is 1440px. */
+  --spacing: 1px;
+
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* The type scale the boards use (Main › Type scale): text-13 is body, text-12 small,
+     text-11 micro, text-15 heading, text-17 component title, text-20 page title, text-28
+     display (text-14 is the brand and the inspector's sub-headings, text-24 a large figure).
+     Each sets its line height; override with leading-18 and the like. Careful: where a board
+     sets only font-size:12px on a block, it inherits 20px, so write text-12 leading-20. */
+  --text-*: initial;
+  --text-11: 11px;
+  --text-11--line-height: 16px;
+  --text-12: 12px;
+  --text-12--line-height: 16px;
+  --text-13: 13px;
+  --text-13--line-height: 20px;
+  --text-14: 14px;
+  --text-14--line-height: 20px;
+  --text-15: 15px;
+  --text-15--line-height: 22px;
+  --text-17: 17px;
+  --text-17--line-height: 24px;
+  --text-20: 20px;
+  --text-20--line-height: 28px;
+  --text-24: 24px;
+  --text-24--line-height: 32px;
+  --text-28: 28px;
+  --text-28--line-height: 36px;
+
+  /* Radii (Main › Spacing): 2 cells, 3 chips, 4 controls, 6 panels, 8 drawers and dialogs. */
+  --radius-*: initial;
+  --radius-1: 1px;
+  --radius-2: 2px;
+  --radius-3: 3px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+
+  /* Motion means live (Main › Motion): only running and scoring pulse. */
+  --animate-*: initial;
+  --animate-live: he-pulse 1.4s infinite;
+  --animate-spin: he-spin 0.9s linear infinite;
+  --animate-shimmer: he-shimmer 1.6s ease-in-out infinite;
+  /* A row that just arrived in a live feed (OverviewRunning), and one an upload just added
+     (ResourcesSkills). */
+  --animate-arrive: he-in 2s ease-out;
+  --animate-flash: he-flash 2s ease-out;
+
+  @keyframes he-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @keyframes he-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes he-shimmer {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes he-in {
+    from {
+      background: var(--accent-soft);
+    }
+    to {
+      background: transparent;
+    }
+  }
+  @keyframes he-flash {
+    from {
+      background: var(--pass-soft);
+    }
+    to {
+      background: transparent;
+    }
+  }
+}
+
+/* The tokens, by reference: utilities use var(--surface) and so on, which data-theme
+   switches. No other colour exists, so a raw hex value cannot sneak in. */
+@theme inline {
+  --color-*: initial;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-focus: var(--focus);
+  --color-scrim: var(--scrim);
+  --color-pass: var(--pass);
+  --color-pass-soft: var(--pass-soft);
+  --color-pass-text: var(--pass-text);
+  --color-fail: var(--fail);
+  --color-fail-soft: var(--fail-soft);
+  --color-fail-text: var(--fail-text);
+  --color-err: var(--err);
+  --color-err-soft: var(--err-soft);
+  --color-err-text: var(--err-text);
+  --color-ung: var(--ung);
+  --color-ung-soft: var(--ung-soft);
+  --color-ung-text: var(--ung-text);
+  --color-run: var(--run);
+  --color-run-soft: var(--run-soft);
+  --color-run-text: var(--run-text);
+  --color-que: var(--que);
+  --color-que-soft: var(--que-soft);
+  --color-que-text: var(--que-text);
+
+  /* Shadows are only for things that float: drawer, dialogs, tooltips, menus. */
+  --shadow-*: initial;
+  --shadow-float: var(--shadow);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after,
+  ::backdrop,
+  ::file-selector-button {
+    /* A bare `border` draws the design's 1px --border line. */
+    border-color: var(--border);
+  }
+  html,
+  body {
+    min-height: 100%;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+  }
+  code {
+    font-size: 12px;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  summary {
+    cursor: pointer;
+  }
+  details > summary {
+    color: var(--text-2);
+    font-size: 12px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+  }
+  /* Reduced motion stops the pulse and keeps the dot. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
+
+/* Patterns every page repeats, named as on the canvas. Utilities on the same element win
+   (they are a later layer), so `class="btn primary h-28"` works. Everything else is a
+   component in src/components/ui. */
+@layer components {
+  /* ── Buttons ─────────────────────────────────────────────────────────────
+     .btn 32px (Components 1) · .btn.mid 28px / 12px (System, Components 3, the inspector
+     header) · .btn.sm 26px / 12px (toolbars and rows) · .btn.lg 32px / 13px.
+     Variants: .primary (one per view) · .ghost · .danger. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 500;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .btn:hover {
+    background: var(--surface-2);
+    color: var(--text);
+    text-decoration: none;
+  }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+  }
+  .btn.primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: var(--on-accent);
+  }
+  .btn.danger {
+    background: var(--fail-soft);
+    border-color: var(--fail);
+    color: var(--fail-text);
+  }
+  .btn.danger:hover {
+    color: var(--fail-text);
+  }
+  .btn.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-2);
+  }
+  .btn.ghost:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .btn.sm {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+  .btn.mid {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .btn.lg {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  .btn:disabled,
+  .btn[aria-disabled='true'] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn.primary:disabled:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .btn:disabled:hover:not(.primary, .danger, .ghost),
+  .btn[aria-disabled='true']:hover:not(.primary, .danger, .ghost) {
+    background: var(--surface);
+  }
+
+  /* A button that reads as a link (Cancel login, the fix in BlockedReason, Retry). */
+  .linkbtn {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .linkbtn:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+  }
+
+  /* ── Chips and tags ──────────────────────────────────────────────────────
+     .chip 20px (.sm 18px inside 28px rows); colour from tone utilities, e.g.
+     bg-pass-soft text-pass-text (StatusChip does this from src/lib/statusTones.ts).
+     .tag: a neutral mono label for versions, hashes and names. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+  .chip.sm {
+    height: 18px;
+    line-height: 18px;
+    padding: 0 6px;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  /* ── Text inputs ─────────────────────────────────────────────────────────
+     32px (.sm 30px); aria-invalid="true" draws the error border, .warn the warning one.
+     BaseInput, TextArea and Select use it; a page's own search box can too. */
+  .input {
+    height: 32px;
+    min-width: 0;
+    padding: 0 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .input.sm {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+  textarea.input {
+    height: auto;
+    padding: 6px 10px;
+    resize: vertical;
+  }
+  .input:disabled {
+    background: var(--surface-2);
+    color: var(--text-2);
+    cursor: not-allowed;
+  }
+  .input[aria-invalid='true'] {
+    border-color: var(--fail);
+  }
+  .input.warn {
+    border-color: var(--ung);
+  }
+
+  /* ── Data tables ─────────────────────────────────────────────────────────
+     <div class="tbl"><table class="dt">: the scroll box holds the sticky header. Rows are
+     32px (Main › Density). Modifiers on table.dt, by board:
+     .compact 28 (density toggle) · .h30 Runs (10px padding, 14px first cell) · .h36
+     Comparison, OverviewComplete · .h38 ConfigDetail, SuiteDetail · .h40 experiment and
+     configuration lists · .h44 Suites and Resources lists · .th30 a 30px header (TaskDetail,
+     inspector tables) · .inset14 a 14px first cell · .loose wrapping cells, 44px minimum,
+     centred (System) · .wrap wrapping cells, top-aligned (inspector) · .static no row hover
+     · .clickable rows open something. */
+  .tbl {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+  table.dt {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .dt th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 32px;
+    padding: 0 12px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .dt td {
+    height: 32px;
+    padding: 0 12px;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .dt tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .dt tbody tr:hover td {
+    background: var(--surface-2);
+  }
+  .dt th:first-child,
+  .dt td:first-child {
+    padding-left: 16px;
+  }
+  .dt.compact td {
+    height: 28px;
+  }
+  .dt.h30 th,
+  .dt.h30 td {
+    height: 30px;
+    padding: 0 10px;
+  }
+  .dt.h30 th:first-child,
+  .dt.h30 td:first-child,
+  .dt.inset14 th:first-child,
+  .dt.inset14 td:first-child {
+    padding-left: 14px;
+  }
+  .dt.h36 td {
+    height: 36px;
+  }
+  .dt.h38 td {
+    height: 38px;
+  }
+  .dt.h40 td {
+    height: 40px;
+  }
+  .dt.h44 td {
+    height: 44px;
+  }
+  .dt.th30 th {
+    height: 30px;
+  }
+  .dt.loose td {
+    height: 44px;
+    padding: 8px 12px;
+    white-space: normal;
+    vertical-align: middle;
+  }
+  .dt.wrap td {
+    height: auto;
+    padding: 8px 12px;
+    white-space: normal;
+    vertical-align: top;
+  }
+  .dt.loose td:first-child,
+  .dt.wrap td:first-child {
+    padding-left: 16px;
+  }
+  .dt.static tbody tr:hover td {
+    background: transparent;
+  }
+  .dt.clickable tbody tr {
+    cursor: pointer;
+  }
+}

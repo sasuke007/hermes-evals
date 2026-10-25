@@ -284,7 +284,7 @@ export function executionErrorView(input: ExecutionErrorInput): ExecutionErrorVi
         reason: message ?? 'The model gateway stopped the run at its token cap.',
         meta: ranS === null ? null : `after ${ranS} s`,
         explanation:
-          'The model gateway answers 429 once an attempt has used its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT, 2,000,000 tokens unless set). A limit is never retried automatically, since a retry would stop at the same cap after spending as much again: the timeline shows what used the tokens, and Retry starts a new attempt with a fresh cap.',
+          'The model gateway refuses every model call (402, which Hermes does not retry) once an attempt has used its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT, 2,000,000 tokens unless set). A limit is never retried automatically, since a retry would stop at the same cap after spending as much again: the timeline shows what used the tokens, and Retry starts a new attempt with a fresh cap.',
       };
     case 'other':
       return {

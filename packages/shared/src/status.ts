@@ -93,14 +93,18 @@ export type VerdictCause = (typeof VERDICT_CAUSES)[number];
 
 /**
  * Why the statistics, and so the verdict, are not computable (plan 10.2's
- * gate: every selected task needs at least 2 counted runs per
- * configuration). `single_repetition`: the experiment runs each task once.
- * `nothing_scored`: no run of the two configurations counts yet.
+ * gate: at least 3 selected tasks, and every one needs at least 2 counted
+ * runs per configuration). `single_repetition`: the experiment runs each
+ * task once. `nothing_scored`: no run of the two configurations counts yet.
  * `not_enough_runs`: some task has fewer than 2 counted runs on one side.
+ * `too_few_tasks`: the experiment selected 1 or 2 tasks; the interval
+ * resamples tasks, so with fewer than 3 it means nothing (Phase 4
+ * question 3).
  */
 export const NOT_COMPUTABLE_REASONS = [
   'single_repetition',
   'not_enough_runs',
   'nothing_scored',
+  'too_few_tasks',
 ] as const;
 export type NotComputableReason = (typeof NOT_COMPUTABLE_REASONS)[number];

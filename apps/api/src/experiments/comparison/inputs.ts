@@ -185,11 +185,16 @@ function statsRun(run: RunResult, input: ComparisonRunInput): StatsRun | null {
     executionError: input.executionError,
     durationS: run.durationS,
     tokens: run.tokens,
-    costUsd: run.costUsd,
   };
 }
 
-const isLive = (status: ExperimentStatus): boolean => status === 'running' || status === 'paused';
+/**
+ * Running, paused or failed: more runs may still count, so a verdict is
+ * provisional. Retry failed runs can resume a failed experiment, as its
+ * Overview says (Phase 4 question 5).
+ */
+export const isProvisional = (status: ExperimentStatus): boolean =>
+  status === 'running' || status === 'paused' || status === 'failed';
 
 /**
  * One candidate against the baseline, graded by `key`. Throws
@@ -271,9 +276,13 @@ export function comparisonInputsOf(
     stats: {
       tasks: statsTasks,
       repetitions: results.repetitions,
-      provisional: isLive(results.status),
+      provisional: isProvisional(results.status),
       labels: { baseline: name(results.baselineVersionId), candidate: name(candidate) },
       progress: progressOf(pair),
+      costUsd: {
+        baseline: results.costUsd.get(results.baselineVersionId) ?? null,
+        candidate: results.costUsd.get(candidate) ?? null,
+      },
     },
   };
 }

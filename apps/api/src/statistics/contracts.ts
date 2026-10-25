@@ -79,8 +79,6 @@ export interface StatsRun {
   durationS: number | null;
   /** The current attempt's total tokens; null when they were not metered. */
   tokens: number | null;
-  /** What the run's attempts cost, priced attempts only; null when none of them is priced. */
-  costUsd: number | null;
 }
 
 /** One selected task: its counted runs under the baseline and under the candidate. */
@@ -99,7 +97,11 @@ export interface StatsInput {
   tasks: readonly StatsTask[];
   /** The experiment's repetitions. 1 gives not_computable · single_repetition, whatever has run. */
   repetitions: number;
-  /** True while the experiment is running or paused: a computed verdict is `provisional`. */
+  /**
+   * True while the experiment is running, paused or failed (Retry failed
+   * runs can resume a failed one): a computed verdict is `provisional`, and
+   * the not-computable sentences say what will fill in.
+   */
   provisional: boolean;
   /** Configuration names, for the not-computable sentence ("Pass rates: baseline 0.58, …"). */
   labels: { baseline: string; candidate: string };
@@ -109,6 +111,14 @@ export interface StatsInput {
    * experiment's: another candidate's runs say nothing about this pair.
    */
   progress: { scored: number; total: number };
+  /**
+   * What each configuration spent (Phase 4 question 2): every attempt of
+   * the arm, cancelled runs and runs not counted yet included, priced as
+   * the Overview prices them (experiments/views/money.ts knownCost), so the
+   * two show the same figure. Null when it is unknown. The one secondary
+   * metric that is not over the counted runs.
+   */
+  costUsd: { baseline: number | null; candidate: number | null };
 }
 
 /** The resample count the design shows: "paired bootstrap, 10,000 resamples". */
@@ -170,7 +180,7 @@ export interface SensitivityResult {
   candidate: PassTally;
   /** Mean over tasks of the kept runs' per-task differences; null when no task has kept runs on both sides. */
   delta: number | null;
-  /** The bootstrap interval over the kept runs; null when they fail the 2-runs gate. */
+  /** The bootstrap interval over the kept runs; null when they fail the gate. */
   lo: number | null;
   hi: number | null;
   /** better, worse or inconclusive; `provisional` while running; `not_computable` when the kept runs fail the gate. */
@@ -179,11 +189,11 @@ export interface SensitivityResult {
   verdictChanges: boolean;
 }
 
-/** The secondary metrics of one configuration, over its counted runs. */
+/** The secondary metrics of one configuration: over its counted runs, but the cost. */
 export interface SecondaryMetrics {
   medianDurationS: number | null;
   meanTokens: number | null;
-  /** Summed over the runs whose cost is known; null when none is priced. */
+  /** StatsInput.costUsd: every attempt of the arm; null when unknown. */
   costUsd: number | null;
   executionErrors: number;
   /** The categories seen, in EXECUTION_ERROR_CATEGORIES order. */
@@ -220,7 +230,7 @@ export interface StatsBase {
   };
 }
 
-/** Every task has at least 2 counted runs per configuration: the interval and the verdict. */
+/** At least 3 tasks, each with at least 2 counted runs per configuration: the interval and the verdict. */
 export interface ComputedStats extends StatsBase {
   computable: true;
   observedDelta: number;
@@ -228,7 +238,7 @@ export interface ComputedStats extends StatsBase {
   hi: number;
   resamples: number;
   confidence: number;
-  /** better if lo > 0, worse if hi < 0, else inconclusive; `provisional` while running or paused. */
+  /** better if lo > 0, worse if hi < 0, else inconclusive; `provisional` while running, paused or failed. */
   verdict: Verdict | 'provisional';
   provisional: boolean;
 }

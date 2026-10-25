@@ -375,6 +375,41 @@ describe('setup failures', () => {
     expect(outcome.errorMessage).toContain('credentials or agent init failed');
   });
 
+  it("a run egress stopped at its token cap is limit, from egress's log rather than the status", async () => {
+    // Hermes 4d04303's terminal copy for egress's 402: billing words, not the cap's.
+    const { outcome } = await runWith(
+      {
+        steps: [
+          { stdout: streamJson.init() },
+          { stdout: streamJson.result({ exitCode: 1, error: 'HTTP 402: Payment required' }) },
+        ],
+        exitCode: 1,
+      },
+      {},
+      {
+        egress: {
+          report: () => ({
+            usage: { calls: 3, totalTokens: 1043 },
+            log: [
+              { at: new Date().toISOString(), kind: 'model', decision: 'allowed', status: 200 },
+              {
+                at: new Date().toISOString(),
+                kind: 'model',
+                decision: 'denied',
+                status: 402,
+                reason: 'token cap reached: 1043 of 1000 tokens used',
+              },
+            ],
+          }),
+        },
+      },
+    );
+    expect(outcome).toMatchObject({ status: 'execution_error', category: 'limit' });
+    expect(outcome.errorMessage).toBe(
+      'The model gateway stopped the run at its token cap: 1043 of 1000 tokens used.',
+    );
+  });
+
   it('an MCP server that failed to start, with no result, is setup', async () => {
     const { outcome } = await runWith({
       steps: [

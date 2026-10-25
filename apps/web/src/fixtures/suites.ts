@@ -563,10 +563,6 @@ export function taskSeed(key: string): TaskSeed {
   return seed;
 }
 
-export function taskSummary(key: string): string {
-  return taskSeed(key).summary;
-}
-
 /** The primary verification key of a task (`answer` for every task in invoices-v1). */
 export function primaryKey(key: string): string {
   return taskSeed(key).verification.find((v) => v.primary)?.key ?? 'answer';
@@ -628,7 +624,7 @@ const LATE_FEES_FAILURE: SelfCheckFailureView = {
   previousRun: { at: V1_LAST_LOAD_AT, status: 'passed' },
   transcript: `$ python3 verify/check_late_fees.py --answer reference.json --workspace fixtures/
 Traceback (most recent call last):
-  File "verify/check_late_fees.py", line 31, in <module>
+  File "verify/check_late_fees.py", line 11, in <module>
     rate = policy["late_fee_rate"]
 KeyError: 'late_fee_rate'
 expected on stdout: one JSON line {"key": "check", "score": …, "comment": "…"}
@@ -840,11 +836,6 @@ function lastLoad(state: SuiteState): SuiteListRow['lastLoad'] {
 
 function taskVersion(seed: SuiteVersionSeed, key: string): number {
   return seed.changedTasks.includes(key) ? 2 : 1;
-}
-
-/** Task version of `key` in the current suite version of the given state. */
-export function currentTaskVersion(state: SuiteState, key: string): number {
-  return taskVersion(currentSeed(state), key);
 }
 
 function versionOptions(state: SuiteState): SuiteVersionOption[] {

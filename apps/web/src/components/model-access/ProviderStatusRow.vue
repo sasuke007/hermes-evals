@@ -6,6 +6,7 @@ import CopyCommand from '@/components/ui/CopyCommand.vue';
 import StatusChip from '@/components/ui/StatusChip.vue';
 import type { ProviderInfo, ProviderStatus } from '@/api/types/system';
 import { useProvidersStore } from '@/stores/providers';
+import { NOUS_TERMINAL_LOGIN_COMMAND } from './nousCommands';
 
 /**
  * One provider on System › Model access. It never contains an input for a key or a token.
@@ -22,7 +23,7 @@ const props = withDefaults(
   { layout: 'grid' },
 );
 
-type ActionKind = 'connect' | 'open' | 'cancel' | 'disconnect' | 'billing';
+type ActionKind = 'connect' | 'open' | 'cancel' | 'disconnect' | 'billing' | 'reveal' | 'hide';
 interface RowAction {
   label: string;
   kind: ActionKind;
@@ -46,10 +47,16 @@ const NOUS_DETAIL: Partial<Record<ProviderStatus, string>> = {
   expired: 'The code expired before it was approved.',
   denied: 'The login was declined in Nous Portal.',
   needs_subscription: 'This Nous account has no active subscription.',
-  host: "Using this machine's Hermes login (development). Set by NOUS_HOST_PROXY in .env.",
+  host: "Using this machine's Hermes login (development). Set by `NOUS_HOST_PROXY` in `.env`.",
   host_unreachable:
     "This stack uses this machine's Hermes login, but its proxy is not running. Start it in a terminal:",
+  unavailable:
+    'The login service failed its startup check: this Hermes version does not offer the device login the platform uses.',
 };
+
+const revealed = ref(false);
+/** A long command wraps inside the cell instead of widening the table (ModelAccessStates). */
+const WRAP_COMMAND = '[&_code]:whitespace-normal [&_code]:wrap-anywhere';
 
 const detail = computed(() => {
   switch (status.value) {
@@ -89,12 +96,32 @@ const actions = computed<RowAction[]>(() => {
       return [{ label: 'Try again', kind: 'connect', variant: 'default' }];
     case 'needs_subscription':
       return [{ label: 'Open Nous Portal billing ↗', kind: 'billing', variant: 'default' }];
+    case 'unavailable':
+      // ModelAccessStates: once shown, the command can be hidden again.
+      return revealed.value
+        ? [{ label: 'Hide command', kind: 'hide', variant: 'ghost' }]
+        : [{ label: 'Show how to connect from a terminal', kind: 'reveal', variant: 'default' }];
     default:
       return [];
   }
 });
 const noActionNote = computed(() =>
-  status.value === 'host_unreachable' ? 'copy the command' : 'none',
+  status.value === 'host_unreachable' || status.value === 'unavailable'
+    ? 'copy the command'
+    : 'none',
+);
+/** The command shown under the detail: the host proxy's, or the terminal login once revealed. */
+const command = computed(() => {
+  if (status.value === 'host_unreachable') return props.provider.hostCommand;
+  if (status.value === 'unavailable' && revealed.value) return NOUS_TERMINAL_LOGIN_COMMAND;
+  return null;
+});
+/** The detail with `backticked` words set in code, as the System board draws them. */
+const detailParts = computed(() =>
+  detail.value
+    .split('`')
+    .map((text, i) => ({ text, code: i % 2 === 1 }))
+    .filter((part) => part.text !== ''),
 );
 
 const billingHref = computed(
@@ -128,6 +155,12 @@ async function run(action: RowAction): Promise<void> {
       disconnectError.value = null;
       confirmOpen.value = true;
       break;
+    case 'reveal':
+      revealed.value = true;
+      break;
+    case 'hide':
+      revealed.value = false;
+      break;
     default:
       break;
   }
@@ -158,31 +191,38 @@ function btnClass(action: RowAction): string[] {
 <template>
   <!-- System › Model access table -->
   <template v-if="layout === 'table'">
-    <tr class="psr-row" :data-provider="provider.id" :data-status="status">
-      <td class="psr-name">{{ provider.name }}</td>
-      <td class="t2">
-        {{ authText }}<template v-if="!isNous"> <code>.env</code></template>
+    <tr :data-provider="provider.id" :data-status="status">
+      <td class="font-semibold">{{ provider.name }}</td>
+      <td class="text-text-2">
+        {{ authText }}<template v-if="!isNous">{{ ' ' }}<code>.env</code></template>
       </td>
       <td><StatusChip kind="provider" :status="status" /></td>
       <td>
         <template v-if="isNous">
-          <span class="t2">{{ detail }}</span>
-          <div v-if="status === 'host_unreachable' && provider.hostCommand" class="psr-cmd">
-            <CopyCommand :command="provider.hostCommand" />
+          <span class="text-text-2"
+            ><template v-for="(part, i) in detailParts" :key="i"
+              ><code v-if="part.code" class="text-text">{{ part.text }}</code
+              ><template v-else>{{ part.text }}</template></template
+            ></span
+          >
+          <div v-if="command" class="mt-6">
+            <CopyCommand :class="WRAP_COMMAND" :command="command" />
           </div>
         </template>
-        <div v-else-if="provider.status === 'missing'" class="psr-key">
-          <span class="t2"
+        <div v-else-if="provider.status === 'missing'" class="flex flex-col items-start gap-6">
+          <span class="text-text-2"
             >Add <code>{{ provider.envVar }}=…</code> to <code>.env</code> at the repository root,
             then run <code>{{ provider.applyCommand }}</code
             >.</span
           >
           <CopyCommand v-if="provider.applyCommand" :command="provider.applyCommand" />
         </div>
-        <span v-else class="t2">Key found in the egress environment · value not shown</span>
+        <span v-else class="text-text-2"
+          >Key found in the egress environment · value not shown</span
+        >
       </td>
       <td v-if="isNous">
-        <div class="psr-actions">
+        <div class="flex flex-wrap items-center gap-6" data-testid="psr-actions">
           <template v-for="action in actions" :key="action.label">
             <a
               v-if="action.kind === 'billing'"
@@ -209,10 +249,12 @@ function btnClass(action: RowAction): string[] {
           </template>
         </div>
       </td>
-      <td v-else class="cap">No input here: keys are never accepted or stored in the UI.</td>
+      <td v-else class="text-12 text-text-3">
+        No input here: keys are never accepted or stored in the UI.
+      </td>
     </tr>
-    <tr v-if="confirmOpen || disconnectError" class="psr-confirm-row">
-      <td colspan="5">
+    <tr v-if="confirmOpen || disconnectError" data-testid="psr-confirm-row">
+      <td colspan="5" class="bg-fail-soft">
         <ConfirmInline
           v-model:open="confirmOpen"
           title="Disconnect Nous Portal?"
@@ -235,29 +277,34 @@ function btnClass(action: RowAction): string[] {
   </template>
 
   <!-- Standalone row (ModelAccessStates, Components 3) -->
-  <div v-else class="psr-wrap" :data-provider="provider.id" :data-status="status">
-    <div class="psr">
-      <span class="psr-name">{{ provider.name }}</span>
-      <span class="t2"
-        >{{ authText }}<template v-if="!isNous"> <code>.env</code></template></span
+  <div v-else class="flex flex-col gap-6" :data-provider="provider.id" :data-status="status">
+    <div
+      class="grid min-h-52 grid-cols-[150px_200px_130px_minmax(0,1fr)_280px] items-center gap-12 rounded-6 border border-border bg-surface px-16 py-10"
+    >
+      <span class="font-semibold">{{ provider.name }}</span>
+      <span class="text-text-2"
+        >{{ authText }}<template v-if="!isNous">{{ ' ' }}<code>.env</code></template></span
       >
       <span><StatusChip kind="provider" :status="status" /></span>
-      <span class="psr-detail">
+      <span class="flex min-w-0 flex-col gap-6" data-testid="psr-detail">
         <template v-if="isNous">
-          <span class="t2">{{ detail }}</span>
-          <CopyCommand
-            v-if="status === 'host_unreachable' && provider.hostCommand"
-            class="psr-cmd-inline"
-            :command="provider.hostCommand"
-          />
+          <span class="text-text-2"
+            ><template v-for="(part, i) in detailParts" :key="i"
+              ><code v-if="part.code" class="text-text">{{ part.text }}</code
+              ><template v-else>{{ part.text }}</template></template
+            ></span
+          >
+          <CopyCommand v-if="command" :class="['self-start', WRAP_COMMAND]" :command="command" />
         </template>
-        <span v-else-if="provider.status === 'missing'" class="t2 psr-small"
+        <span v-else-if="provider.status === 'missing'" class="text-12 leading-20 text-text-2"
           >Add <code>{{ provider.envVar }}=…</code> to <code>.env</code>, then
           <code>{{ provider.applyCommand }}</code></span
         >
-        <span v-else class="t2">Key found in the egress environment · value not shown</span>
+        <span v-else class="text-text-2"
+          >Key found in the egress environment · value not shown</span
+        >
       </span>
-      <span class="psr-actions">
+      <span class="flex flex-wrap items-center gap-6" data-testid="psr-actions">
         <template v-for="action in actions" :key="action.label">
           <a
             v-if="action.kind === 'billing'"
@@ -289,7 +336,9 @@ function btnClass(action: RowAction): string[] {
           label="Copy command"
           button-text="Copy command"
         />
-        <span v-if="isNous && actions.length === 0" class="cap">{{ noActionNote }}</span>
+        <span v-if="isNous && actions.length === 0" class="text-12 text-text-3">{{
+          noActionNote
+        }}</span>
       </span>
     </div>
     <ConfirmInline
@@ -310,47 +359,3 @@ function btnClass(action: RowAction): string[] {
     />
   </div>
 </template>
-
-<style scoped>
-.psr-name {
-  font-weight: 600;
-}
-.psr-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.psr-cmd {
-  margin-top: 6px;
-}
-.psr-key {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
-}
-.psr-confirm-row td {
-  background: var(--fail-soft);
-}
-.psr-confirm-row:hover td {
-  background: var(--fail-soft);
-}
-.psr-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.psr-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.psr-cmd-inline {
-  align-self: flex-start;
-}
-.psr-small {
-  font-size: 12px;
-}
-</style>

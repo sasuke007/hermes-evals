@@ -11,7 +11,8 @@
  *   CUSTOM_API_KEY   optional key sent to a custom attempt's base URL
  *   MODEL_TOKEN_CAP_PER_ATTEMPT  total tokens an attempt (or a judge registration)
  *                    is served when its registration names no maxTokens
- *                    (default 2000000); past it the gateway answers 429
+ *                    (default 2000000); past it the model gateway answers
+ *                    402 and the judge path 429
  *   NOUS_HOST_PROXY  development: host:port of `hermes proxy start` on the host
  *   and the values of http MCP headers, under the names the definitions give.
  */

@@ -55,7 +55,7 @@ const props = withDefaults(
     label?: string | null;
     selectAllLabel?: string;
     rowLabel?: ((row: Row) => string) | null;
-    /** Extra class on the table: h40, h44, static… (see main.css). */
+    /** Extra class on the table: h40, h44, static… (the .dt modifiers in assets/app.css). */
     tableClass?: string | null;
   }>(),
   {
@@ -222,10 +222,17 @@ const widthOf = (w: number | string | undefined): string | undefined =>
   w === undefined ? undefined : typeof w === 'number' ? `${w}px` : w;
 
 const skeletonColumns = computed<SkeletonColumn[]>(() => {
-  const cols: SkeletonColumn[] = props.columns.map((c) => ({
-    width: c.skeleton ?? (typeof c.width === 'number' ? Math.round(c.width * 0.6) : '60%'),
-    align: c.align === 'right' ? 'right' : 'left',
-  }));
+  const cols: SkeletonColumn[] = props.columns.map((c) => {
+    const align = c.align === 'right' ? 'right' : 'left';
+    const bar = c.skeleton;
+    if (bar !== undefined && typeof bar === 'object' && !Array.isArray(bar)) {
+      return { ...bar, align };
+    }
+    return {
+      width: bar ?? (typeof c.width === 'number' ? Math.round(c.width * 0.6) : '60%'),
+      align,
+    };
+  });
   return props.selectable ? [{ width: 14, height: 14 }, ...cols] : cols;
 });
 
@@ -236,7 +243,7 @@ const showToolbar = computed(
 </script>
 
 <template>
-  <div class="data-table">
+  <div class="flex min-w-0 flex-col gap-10">
     <ErrorBanner
       v-if="error"
       tone="error"
@@ -246,17 +253,22 @@ const showToolbar = computed(
       :retry-label="retryLabel"
       @retry="emit('retry')"
     />
-    <div v-if="showToolbar" class="dtt">
-      <div v-if="showBulk" class="bulk" role="region" aria-label="Bulk actions">
-        <span class="bulk-count">{{ selected.length }} selected</span>
+    <div v-if="showToolbar" class="flex flex-wrap items-center justify-between gap-12">
+      <div
+        v-if="showBulk"
+        class="flex h-36 items-center gap-8 rounded-4 bg-accent-soft px-12 text-text"
+        role="region"
+        aria-label="Bulk actions"
+      >
+        <span class="font-medium">{{ selected.length }} selected</span>
         <slot name="bulk" :selected="selected" :clear="clearSelection" />
         <button type="button" class="btn sm ghost" @click="clearSelection">Clear</button>
       </div>
-      <div v-else class="dtt-left"><slot name="toolbar" /></div>
-      <div class="dtt-right">
-        <span v-if="liveSort" class="cap">Sort is paused while live</span>
+      <div v-else class="flex items-center gap-8"><slot name="toolbar" /></div>
+      <div class="ml-auto flex items-center gap-8">
+        <span v-if="liveSort" class="text-12 text-text-3">Sort is paused while live</span>
         <template v-if="showDensity">
-          <span class="cap">Density</span>
+          <span class="text-12 text-text-3">Density</span>
           <SegmentedControl v-model="density" :options="densityOptions" label="Row density" />
         </template>
       </div>
@@ -270,7 +282,7 @@ const showToolbar = computed(
       >
         <thead>
           <tr>
-            <th v-if="selectable" class="sel-col">
+            <th v-if="selectable" class="w-36">
               <input
                 type="checkbox"
                 :checked="allSelected"
@@ -283,7 +295,10 @@ const showToolbar = computed(
             <th
               v-for="column in columns"
               :key="column.key"
-              :class="{ r: column.align === 'right', 'sticky-col': column.sticky }"
+              :class="{
+                'text-right': column.align === 'right',
+                'sticky left-0 z-2 bg-surface-2': column.sticky,
+              }"
               :style="{ width: widthOf(column.width) }"
               :aria-sort="ariaSort(column)"
               scope="col"
@@ -292,12 +307,27 @@ const showToolbar = computed(
                 <button
                   v-if="column.sortable"
                   type="button"
-                  class="sortbtn"
-                  :class="{ sorted: sort?.key === column.key }"
+                  class="group/sort inline-flex items-center gap-4 border-0 bg-transparent p-0 text-12"
+                  :class="
+                    sort?.key === column.key
+                      ? 'font-semibold text-text'
+                      : 'font-medium text-inherit'
+                  "
+                  :data-sorted="sort?.key === column.key ? sort.dir : undefined"
                   @click="toggleSort(column)"
                 >
                   {{ column.label }}
-                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    aria-hidden="true"
+                    :class="
+                      sort?.key === column.key
+                        ? 'opacity-100'
+                        : 'opacity-0 group-hover/sort:opacity-100 group-focus-visible/sort:opacity-100'
+                    "
+                  >
                     <path
                       v-if="sort?.key === column.key && sort.dir === 'asc'"
                       d="M5 8V2M2.5 4.5L5 2l2.5 2.5"
@@ -323,24 +353,25 @@ const showToolbar = computed(
           <SkeletonRows :columns="skeletonColumns" :rows="skeletonRows" />
         </tbody>
         <tbody v-else-if="rows.length === 0">
-          <tr class="empty-row">
-            <td :colspan="colCount">
+          <tr class="hover:[&>td]:bg-transparent">
+            <td :colspan="colCount" class="h-192 whitespace-normal">
               <slot name="empty">
                 <EmptyState :title="emptyTitle" :body="emptyBody" :panel="false" />
               </slot>
             </td>
           </tr>
         </tbody>
-        <tbody v-else :class="{ dimmed: !!error }">
+        <tbody v-else :class="{ 'opacity-55': !!error }" :data-dimmed="error ? 'true' : undefined">
           <tr
             v-for="row in displayRows"
             :key="keyOf(row)"
-            :class="[{ selected: selectedSet.has(keyOf(row)) }, rowClass?.(row)]"
+            :class="[{ '[&>td]:bg-accent-soft': selectedSet.has(keyOf(row)) }, rowClass?.(row)]"
+            :data-selected="selectedSet.has(keyOf(row)) ? 'true' : undefined"
             :tabindex="isClickable ? 0 : undefined"
             @click="onRowActivate(row, $event)"
             @keydown.enter="onRowActivate(row, $event)"
           >
-            <td v-if="selectable" class="sel-col">
+            <td v-if="selectable" class="w-36">
               <input
                 type="checkbox"
                 :checked="selectedSet.has(keyOf(row))"
@@ -352,11 +383,12 @@ const showToolbar = computed(
               v-for="column in columns"
               :key="column.key"
               :class="{
-                r: column.align === 'right',
-                mono: column.mono,
-                'sticky-col': column.sticky,
-                t3: isMissing(row, column),
+                'text-right': column.align === 'right',
+                'font-mono text-12': column.mono,
+                'sticky left-0 bg-surface': column.sticky,
+                'text-text-3': isMissing(row, column),
               }"
+              :data-mono="column.mono ? 'true' : undefined"
             >
               <slot
                 :name="`cell-${column.key}`"
@@ -372,81 +404,3 @@ const showToolbar = computed(
     </div>
   </div>
 </template>
-
-<style scoped>
-.data-table {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.dtt {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.dtt-left,
-.dtt-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.dtt-right {
-  margin-left: auto;
-}
-.bulk {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 12px;
-  border-radius: 4px;
-  background: var(--accent-soft);
-  color: var(--text);
-}
-.bulk-count {
-  font-weight: 500;
-}
-.sel-col {
-  width: 36px;
-}
-td.mono {
-  font-size: 12px;
-}
-.sortbtn svg {
-  opacity: 0;
-}
-.sortbtn:hover svg,
-.sortbtn:focus-visible svg,
-.sortbtn.sorted svg {
-  opacity: 1;
-}
-.sortbtn.sorted {
-  color: var(--text);
-  font-weight: 600;
-}
-.sticky-col {
-  position: sticky;
-  left: 0;
-  background: var(--surface);
-}
-th.sticky-col {
-  z-index: 2;
-  background: var(--surface-2);
-}
-tr.selected td {
-  background: var(--accent-soft);
-}
-.dimmed {
-  opacity: 0.55;
-}
-.empty-row td {
-  height: 192px;
-  white-space: normal;
-}
-.empty-row:hover td {
-  background: transparent;
-}
-</style>

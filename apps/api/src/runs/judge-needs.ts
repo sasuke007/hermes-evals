@@ -13,6 +13,7 @@
 import type { ConfigService } from '@nestjs/config';
 import type { Provider, VerificationEntry } from '@hermes-evals/shared';
 import type { Env } from '../config/env.js';
+import { JUDGE_MODEL_FIX, namedKeys } from '../providers/judge-readiness.js';
 import {
   judgeSettingsOf,
   resolveJudgeModel,
@@ -27,6 +28,20 @@ export interface JudgeNeeds {
   /** The provider of those calls; null when no key calls the judge. */
   provider: Provider | null;
 }
+
+/** The llm_judge keys no judge model can grade: Re-score refuses them (noJudgeModelRefusal). */
+export const unjudgedKeys = (needs: JudgeNeeds): string[] =>
+  needs.keys.filter((key) => !needs.judged.includes(key));
+
+/**
+ * "Re-score needs a judge model for the method judge: set JUDGE_MODEL …":
+ * Re-score's 409, and the run views' `needs.noJudgeModelReason`, so the
+ * button says what the endpoint would. Only the settings can fix it: a
+ * re-score grades the experiment's frozen task, so a `model:` added to
+ * task.yaml now never reaches it.
+ */
+export const noJudgeModelRefusal = (keys: readonly string[]): string =>
+  `Re-score needs a judge model for the ${namedKeys(keys)} judge: ${JUDGE_MODEL_FIX}.`;
 
 /** The judge settings of the process (JUDGE_PROVIDER, JUDGE_MODEL, JUDGE_BASE_URL). */
 export function judgeSettingsFrom(config: Pick<ConfigService<Env, true>, 'get'>): JudgeSettings {

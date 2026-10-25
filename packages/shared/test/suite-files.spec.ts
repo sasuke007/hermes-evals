@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { reservedScoreKeyMessage, VerificationKeySchema } from '../src/records.js';
 import {
   SCORER_PARAM_SCHEMAS,
   SuiteYamlSchema,
   TaskYamlSchema,
   type ScorerParams,
 } from '../src/suite-files.js';
-import { SCORER_TYPES, type ScorerType } from '../src/vocab.js';
+import { RESERVED_SCORE_KEYS, SCORER_TYPES, type ScorerType } from '../src/vocab.js';
 
 /**
  * suites/invoices-v1/total_due/task.yaml as the YAML parser returns it. The
@@ -110,6 +111,25 @@ describe('task.yaml', () => {
       { ...TOTAL_DUE_TASK, self_check: { negative_control: true } },
     ];
     for (const value of bad) expect(TaskYamlSchema.safeParse(value).success).toBe(false);
+  });
+
+  it('refuses the key names the comparison reserves, and says why', () => {
+    for (const key of RESERVED_SCORE_KEYS) {
+      const result = TaskYamlSchema.safeParse({
+        ...TOTAL_DUE_TASK,
+        verification: [{ ...TOTAL_DUE_TASK.verification[0], key }],
+      });
+      expect(issuePaths(result)).toEqual(['verification.0.key']);
+      expect(result.error!.issues[0]!.message).toBe(reservedScoreKeyMessage(key));
+      expect(VerificationKeySchema.safeParse(key).success).toBe(false);
+    }
+    expect(reservedScoreKeyMessage('primary')).toBe(
+      "primary is reserved: the comparison's key select uses it for each task's own primary key, so a check named primary could never be selected by name; give the check another key",
+    );
+    // Only the exact names: a key that merely contains one is fine.
+    for (const key of ['primary_answer', 'any_failed_2', 'answer']) {
+      expect(VerificationKeySchema.parse(key)).toBe(key);
+    }
   });
 });
 

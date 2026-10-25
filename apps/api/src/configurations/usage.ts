@@ -6,7 +6,12 @@
  * which the analysis appends to (plan section 10).
  */
 import { and, arrayOverlaps, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import type { ConfigurationUsage, ExperimentStatus, VerdictEntry } from '@hermes-evals/shared';
+import type {
+  ConfigurationUsage,
+  ExperimentStatus,
+  NotComputableReason,
+  VerdictEntry,
+} from '@hermes-evals/shared';
 import { evaluations, experiments, runs, scores } from '../database/schema/index.js';
 import type { AppDb } from '../database/types.js';
 import {
@@ -14,6 +19,7 @@ import {
   readVerdictFigures,
   type VerdictFigures,
 } from '../experiments/comparison/verdicts.js';
+import { MIN_TASKS } from '../statistics/compute.js';
 
 export type ExperimentRow = Pick<
   typeof experiments.$inferSelect,
@@ -21,6 +27,7 @@ export type ExperimentRow = Pick<
   | 'name'
   | 'status'
   | 'repetitions'
+  | 'taskIds'
   | 'baselineVersionId'
   | 'candidateVersionIds'
   | 'verdictHistory'
@@ -40,6 +47,7 @@ export async function experimentsUsing(
       name: experiments.name,
       status: experiments.status,
       repetitions: experiments.repetitions,
+      taskIds: experiments.taskIds,
       baselineVersionId: experiments.baselineVersionId,
       candidateVersionIds: experiments.candidateVersionIds,
       verdictHistory: experiments.verdictHistory,
@@ -130,25 +138,49 @@ const lastEntryOf = (
 /**
  * The candidate's verdict as the usage list shows it: once the experiment
  * has completed, its last verdict history entry (the Overview's and the
- * list's verdict); before that not computable with a single repetition or
- * nothing scored, else provisional. A completed experiment whose history
+ * list's verdict); before that not computable with a single repetition,
+ * fewer than 3 tasks or nothing scored, else provisional. A completed experiment whose history
  * lacks the candidate (it completed before verdict entries were recorded)
  * takes the verdict its current figures give, when the caller has them.
  */
 export function armVerdict(
-  experiment: Pick<ExperimentRow, 'status' | 'repetitions' | 'verdictHistory'>,
+  experiment: Pick<ExperimentRow, 'status' | 'repetitions' | 'taskIds' | 'verdictHistory'>,
   candidateVersionId: string,
   scoredInExperiment: number,
   figures: VerdictFigures | null = null,
 ): NonNullable<ConfigurationUsage['verdict']> {
+  return armVerdictOf(experiment, candidateVersionId, scoredInExperiment, figures).verdict;
+}
+
+/** armVerdict, with why there is none when it is not_computable (ConfigurationUsage.verdictReason). */
+export function armVerdictOf(
+  experiment: Pick<ExperimentRow, 'status' | 'repetitions' | 'taskIds' | 'verdictHistory'>,
+  candidateVersionId: string,
+  scoredInExperiment: number,
+  figures: VerdictFigures | null = null,
+): { verdict: NonNullable<ConfigurationUsage['verdict']>; reason: NotComputableReason | null } {
   if (experiment.status === 'completed') {
     const last = lastEntryOf(experiment.verdictHistory, candidateVersionId);
-    if (last) return last.verdict;
+    if (last) {
+      return {
+        verdict: last.verdict,
+        reason: last.verdict === 'not_computable' ? (last.reason ?? null) : null,
+      };
+    }
     const stats = figures?.byCandidate.get(candidateVersionId);
-    if (stats) return chipVerdict(stats, 'completed');
+    if (stats) {
+      return {
+        verdict: chipVerdict(stats, 'completed'),
+        reason: stats.computable ? null : stats.reason,
+      };
+    }
   }
-  if (experiment.repetitions < 2 || scoredInExperiment === 0) return 'not_computable';
-  return 'provisional';
+  if (experiment.repetitions < 2) return { verdict: 'not_computable', reason: 'single_repetition' };
+  if (experiment.taskIds.length < MIN_TASKS) {
+    return { verdict: 'not_computable', reason: 'too_few_tasks' };
+  }
+  if (scoredInExperiment === 0) return { verdict: 'not_computable', reason: 'nothing_scored' };
+  return { verdict: 'provisional', reason: null };
 }
 
 /** Completed experiments whose history lacks one of their candidates. */
@@ -184,6 +216,9 @@ export async function configurationUsage(
       if (version === undefined) return [];
       const isBaseline = versionId === e.baselineVersionId;
       const mine = arm(e.id, versionId);
+      const verdict = isBaseline
+        ? null
+        : armVerdictOf(e, versionId, scoredInExperiment, figures.get(e.id) ?? null);
       return [
         {
           experimentId: e.id,
@@ -195,9 +230,8 @@ export async function configurationUsage(
           passRate: armPassRate(e.status, mine),
           scored: mine.scored,
           total: mine.total,
-          verdict: isBaseline
-            ? null
-            : armVerdict(e, versionId, scoredInExperiment, figures.get(e.id) ?? null),
+          verdict: verdict?.verdict ?? null,
+          verdictReason: verdict?.reason ?? null,
           baselinePassRate: isBaseline ? null : baselineRate,
         },
       ];

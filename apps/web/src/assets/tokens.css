@@ -1,6 +1,8 @@
 /* Design tokens from the Hermes Evals visual direction ("bench instrument").
    Switched by data-theme on <html> (stamped before first paint by index.html, then kept by
-   src/stores/theme.ts); components never use raw hex values.
+   src/stores/theme.ts); components never use raw hex values. app.css maps every token into
+   Tailwind (@theme inline), so bg-surface, text-text-2 or border-fail are these variables;
+   the IBM Plex families live in its @theme block, as --font-sans and --font-mono.
    Verified against the .he and .he[data-theme="dark"] variables on every artboard of the
    design canvas (23 Oct 2026): all 34 tokens match in both themes; the canvas defines no others.
    Neutrals: --bg --surface --surface-2 --surface-3 --border --border-strong --text --text-2
@@ -43,8 +45,6 @@
   --que-soft: #eef0f3;
   --que-text: #475061;
   --shadow: 0 8px 24px rgba(18, 21, 26, 0.12), 0 1px 2px rgba(18, 21, 26, 0.08);
-  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   color-scheme: light;
 }
 

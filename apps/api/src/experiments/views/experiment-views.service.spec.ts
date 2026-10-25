@@ -83,13 +83,13 @@ describe('the hand-checked matrix', () => {
       totalRuns: 8,
       failure: null,
     });
-    // Provisional while it runs: task a is 1 of 2 on both sides (Δ 0), task b has
-    // no counted candidate run yet, so the gate waits for runs (no reason).
+    // Two tasks: not computable at once, though it runs (a verdict needs 3 tasks).
+    // Task a is 1 of 2 on both sides (Δ 0), task b has no counted candidate run yet.
     expect(d.verdicts).toEqual([
       {
         baseline: expect.objectContaining({ versionId: w.baselineVersionId, role: 'baseline' }),
         candidate: expect.objectContaining({ versionId: w.candidateVersionId, role: 'candidate' }),
-        verdict: 'provisional',
+        verdict: 'not_computable',
         scoreKey: 'primary',
         delta: 0,
         lo: null,
@@ -98,7 +98,7 @@ describe('the hand-checked matrix', () => {
         passCounts: { baseline: { passed: 1, counted: 3 }, candidate: { passed: 1, counted: 2 } },
         taskCounts: { improved: 0, regressed: 0, unchanged: 1 },
         method: { name: 'paired_bootstrap', resamples: 10_000, confidence: 0.95 },
-        reason: null,
+        reason: 'too_few_tasks',
         history: [],
       },
     ]);

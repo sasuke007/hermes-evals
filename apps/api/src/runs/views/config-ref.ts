@@ -5,7 +5,7 @@
  */
 import type { ExperimentConfigRef, RunModelNeeds, VerificationEntry } from '@hermes-evals/shared';
 import type { JudgeSettings } from '../../scoring/judge/contracts.js';
-import { judgeNeedsOf } from '../judge-needs.js';
+import { judgeNeedsOf, noJudgeModelRefusal, unjudgedKeys } from '../judge-needs.js';
 import type { ConfigVersionRecord, ExperimentRecord } from './rows.js';
 
 /** The experiment's configuration versions in display order: the baseline, then the candidates. */
@@ -32,7 +32,9 @@ export function experimentConfigRef(
  * What Retry and Re-score need from model access. Retry runs Hermes on the
  * configuration's provider; Re-score calls the platform's judge for the
  * task's llm_judge keys, on the judge's provider (judge-needs.ts), which is
- * null when no key has a judge model (those keys are scored `error`).
+ * null when no key has a judge model. A key with no judge model makes
+ * Re-score answer 409, so its keys and that 409 are named here (Phase 4
+ * question 10) for the button to be disabled with the fix.
  */
 export function runNeeds(
   config: Pick<ConfigVersionRecord, 'provider'>,
@@ -40,10 +42,13 @@ export function runNeeds(
   judge: JudgeSettings,
 ): RunModelNeeds {
   const needs = judgeNeedsOf(verification, judge);
+  const withoutModel = unjudgedKeys(needs);
   return {
     provider: config.provider,
     judgeKeys: needs.keys,
     judgeProvider: needs.provider,
+    judgeKeysWithoutModel: withoutModel,
+    noJudgeModelReason: withoutModel.length > 0 ? noJudgeModelRefusal(withoutModel) : null,
   };
 }
 

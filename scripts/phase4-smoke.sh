@@ -22,13 +22,15 @@
 #   [-0.50, +1.00]) are `inconclusive`; the refusals (400, 404); the verdict
 #   entry the completion appended (cause initial) on the Overview, the list
 #   and the configuration's usage;
-# - experiment B, north and west x baseline and twin x 3, one run at a time
-#   (so its last run leaves time to look): while that run runs, the
-#   comparison has statistics marked provisional and the Overview, the list
-#   and the twin's usage read provisional; then both answer the same, Δ 0
-#   [0, 0], `inconclusive`;
+# - experiment B, north, south and west x baseline and twin x 3, one run at a
+#   time (so its last run leaves time to look; three tasks, because fewer
+#   than 3 can never give a verdict): while that run runs, the comparison has
+#   statistics marked provisional and the Overview, the list and the twin's
+#   usage read provisional; then both answer the same, Δ 0 [0, 0],
+#   `inconclusive`;
 # - experiment C, north and west x baseline and with-skill x 1 repetition:
-#   no statistics, `not_computable` (single_repetition);
+#   no statistics, `not_computable` (single_repetition, whose sentence also
+#   asks for 3 tasks);
 # - a re-score of one run of A: generation 2 publishes, the results revision
 #   moves, a second verdict entry (cause rescore, "1 run re-scored") is
 #   appended once, the comparison answers at the new revision, and the live
@@ -437,7 +439,7 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-section 'Launch: A (4 x 2 x 3), B (2 x 2 x 3, the twin, one at a time), C (2 x 2 x 1)'
+section 'Launch: A (4 x 2 x 3), B (3 x 2 x 3, the twin, one at a time), C (2 x 2 x 1)'
 # ---------------------------------------------------------------------------
 
 A_EXP=''
@@ -447,8 +449,8 @@ if need 'POST /experiments A, B and C' "$SUITE_ID" "$BASELINE_VERSION" "$SKILLED
   launch "$PREFIX-a-better" north,south,east,west "$SKILLED_VERSION" 3
   check 'POST /experiments A: 4 tasks x baseline, with-skill x 3' 201 'bool(d["id"])' '"experiment " + d["id"]'
   A_EXP="$EXP"
-  launch "$PREFIX-b-same" north,west "$TWIN_VERSION" 3 1
-  check 'POST /experiments B: north, west x baseline, twin x 3, concurrency 1' 201 'bool(d["id"])' '"experiment " + d["id"]'
+  launch "$PREFIX-b-same" north,south,west "$TWIN_VERSION" 3 1
+  check 'POST /experiments B: north, south, west x baseline, twin x 3, concurrency 1' 201 'bool(d["id"])' '"experiment " + d["id"]'
   B_EXP="$EXP"
   launch "$PREFIX-c-single" north,west "$SKILLED_VERSION" 1
   check 'POST /experiments C: north, west x baseline, with-skill x 1' 201 'bool(d["id"])' '"experiment " + d["id"]'
@@ -478,7 +480,7 @@ if need 'comparison while B runs: provisional statistics' "$B_EXP"; then
   if wait_for "/experiments/$B_EXP/comparison" 'd["statistics"] is not None or d["experimentStatus"] != "running"' "$(left)" &&
     [ "$(jv 'd["experimentStatus"]' 2>/dev/null)" = running ]; then
     check 'comparison while B runs: provisional statistics' 200 \
-      'd["provisional"] and d["statistics"]["provisional"] and d["statistics"]["verdict"] == "provisional" and d["statisticsUnavailable"] is None and [c["verdict"] for c in d["candidates"]] == ["provisional"] and d["progress"]["scored"] < d["progress"]["total"] == 12' \
+      'd["provisional"] and d["statistics"]["provisional"] and d["statistics"]["verdict"] == "provisional" and d["statisticsUnavailable"] is None and [c["verdict"] for c in d["candidates"]] == ["provisional"] and d["progress"]["scored"] < d["progress"]["total"] == 18' \
       '"progress {scored}/{total} · ".format_map(d["progress"]) + "Δ {observedDelta} [{lo}, {hi}] {verdict}".format_map(d["statistics"])'
     request GET "/experiments/$B_EXP"
     if [ "$(jv 'd["status"]' 2>/dev/null)" = running ]; then
@@ -608,10 +610,10 @@ section 'Experiment B: both configurations answer the same -> inconclusive'
 # ---------------------------------------------------------------------------
 
 if need 'experiment B' "$B_EXP"; then
-  settles 'B' "$B_EXP" 12
+  settles 'B' "$B_EXP" 18
   compare "$B_EXP"
-  check 'comparison: inconclusive, Δ 0 [0, 0], 2 tasks unchanged' 200 \
-    'stats(d) == ("inconclusive", 0, 0, 0) and d["filterCounts"] == {"all": 2, "improved": 0, "regressed": 0, "unchanged": 2} and d["passRates"] == {"baseline": 0.5, "candidate": 0.5} and [(r["taskKey"], r["passBaseline"], r["passCandidate"], r["delta"], r["change"]) for r in d["rows"]] == [("north", 0, 0, 0, "unchanged"), ("west", 1, 1, 0, "unchanged")] and d["candidate"]["versionId"] == env["TWIN_VERSION"]' \
+  check 'comparison: inconclusive, Δ 0 [0, 0], 3 tasks unchanged' 200 \
+    'stats(d) == ("inconclusive", 0, 0, 0) and d["filterCounts"] == {"all": 3, "improved": 0, "regressed": 0, "unchanged": 3} and d["passRates"] == {"baseline": 0.333, "candidate": 0.333} and sorted((r["taskKey"], r["passBaseline"], r["passCandidate"], r["delta"], r["change"]) for r in d["rows"]) == [("north", 0, 0, 0, "unchanged"), ("south", 0, 0, 0, "unchanged"), ("west", 1, 1, 0, "unchanged")] and d["candidate"]["versionId"] == env["TWIN_VERSION"]' \
     '"Δ {observedDelta} [{lo}, {hi}] {verdict}".format_map(d["statistics"])'
   request GET "/experiments/$B_EXP"
   check 'Overview: inconclusive, one entry (cause initial)' 200 \
@@ -629,8 +631,8 @@ section 'Experiment C: one repetition -> not computable'
 if need 'experiment C' "$C_EXP"; then
   settles 'C' "$C_EXP" 4
   compare "$C_EXP"
-  check 'comparison: no statistics, single_repetition, with the sentence' 200 \
-    'd["statistics"] is None and d["statisticsUnavailable"]["reason"] == "single_repetition" and d["statisticsUnavailable"]["message"].startswith("No interval with 1 repetition") and "2 tasks" in d["statisticsUnavailable"]["message"] and d["repetitions"] == 1 and all(r["delta"] is None and len(r["baseline"]) == len(r["candidate"]) == 1 for r in d["rows"]) and d["passRates"] == {"baseline": 0.5, "candidate": 1}' \
+  check 'comparison: no statistics, single_repetition, with the sentence (2 fixes)' 200 \
+    'd["statistics"] is None and d["statisticsUnavailable"]["reason"] == "single_repetition" and d["statisticsUnavailable"]["message"].startswith("No interval with 1 repetition") and "2 tasks" in d["statisticsUnavailable"]["message"] and d["statisticsUnavailable"]["message"].endswith("Run at least 2 repetitions of at least 3 tasks for a verdict.") and d["repetitions"] == 1 and all(r["delta"] is None and len(r["baseline"]) == len(r["candidate"]) == 1 for r in d["rows"]) and d["passRates"] == {"baseline": 0.5, "candidate": 1}' \
     'd["statisticsUnavailable"]["message"]'
   request GET "/experiments/$C_EXP"
   check 'Overview: not_computable (single_repetition), one entry (cause initial)' 200 \

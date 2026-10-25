@@ -59,7 +59,6 @@ import {
   TaskDetailSchema,
   TaskDiffSchema,
   TaskVersionEntrySchema,
-  WorkerSchema,
   type ExperimentDetail,
   type ExperimentEvent,
   type ExperimentListRow,
@@ -138,7 +137,7 @@ import {
   listSuites,
   reloadSuites,
 } from '@/api/suites';
-import { getSandboxStatus, getSystemSummary, listWorkers } from '@/api/system';
+import { getSandboxStatus, getSystemSummary } from '@/api/system';
 import {
   MCP_INVOICE_DB_INPUT,
   MCP_VENDOR_API_INPUT,
@@ -305,7 +304,6 @@ describe('fixtures conform to the shared contracts', { timeout: 120_000 }, () =>
       use(name);
       const at = (call: string) => `${call} in scenario ${name ?? 'default'}`;
       conforms(SystemSummarySchema, await getSystemSummary(), at('GET /system/summary'));
-      conforms(WorkerSchema.array(), await listWorkers(), at('GET /system/workers'));
       conforms(SandboxStatusSchema, await getSandboxStatus(), at('GET /system/sandbox'));
       const summary = await getSystemSummary();
       const event = { type: 'summary', at: '2026-10-23T15:23:42Z', summary };

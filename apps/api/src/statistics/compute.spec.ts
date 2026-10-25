@@ -2,12 +2,14 @@
  * The statistics on the design's own datasets (plan 10.4), read from the web
  * fixtures (./design-data.support-spec.ts): Skill vs no skill reproduces the
  * VerdictCard's numbers, Flow B stays inconclusive, and across every fixture
- * scenario the module agrees with what the web draws.
+ * scenario the module agrees with what the web draws: the web's figures are
+ * the module's (Phase 4 question 4), its intervals taken from the table in
+ * apps/web/src/fixtures/statistics.ts, which a failure here says how to fill.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { bootstrapMeans } from './bootstrap.js';
 import { computeComparisonStats, seedFromExperimentId } from './compute.js';
-import type { ComputedStats, StatsInput, StatsResult } from './contracts.js';
+import type { ComputedStats, StatsInput, StatsResult, StatsRun } from './contracts.js';
 import { DesignData, type DesignSeed } from './design-data.support-spec.js';
 
 let data: DesignData;
@@ -23,6 +25,39 @@ const statsOf = (seed: DesignSeed, candidate?: string, key?: string): StatsResul
 function computed(result: StatsResult): ComputedStats {
   if (!result.computable) throw new Error(`not computable: ${result.reason}`);
   return result;
+}
+
+/** A figure as the API answers it: three decimals, within [−1, 1]. */
+const r3 = (x: number | null): number | null =>
+  x === null ? null : Math.min(1, Math.max(-1, Math.round(x * 1000) / 1000)) || 0;
+
+const answered = (r: StatsRun): boolean =>
+  r.executionError === null && r.keyStatus !== 'error' && r.keyStatus !== 'ungradable';
+const rateOf = (runs: readonly StatsRun[]): number =>
+  runs.filter((r) => r.passed).length / runs.length;
+
+/**
+ * The entries of the web's interval table a comparison needs, as the module
+ * computes them: the interval of the per-task differences, and the one
+ * without broken runs. What a failure tells you to add.
+ */
+function tableEntries(seed: DesignSeed, input: StatsInput, stats: StatsResult): string[] {
+  const entries: string[] = [];
+  if (stats.computable) {
+    const key = data.intervalKey(
+      seed.id,
+      stats.tasks.map((t) => t.delta!),
+    );
+    entries.push(`'${key}': [${r3(stats.lo)}, ${r3(stats.hi)}],`);
+  }
+  const s = stats.sensitivity;
+  if (s && s.lo !== null && s.hi !== null) {
+    const kept = input.tasks.map(
+      (t) => rateOf(t.candidate.filter(answered)) - rateOf(t.baseline.filter(answered)),
+    );
+    entries.push(`'${data.intervalKey(seed.id, kept)}': [${r3(s.lo)}, ${r3(s.hi)}],`);
+  }
+  return entries;
 }
 
 describe('plan 10.4: Skill vs no skill, 12 tasks × 5 repetitions × 2 configurations', () => {
@@ -116,6 +151,14 @@ describe('plan 10.4: Flow B, the MCP smoke test (3 repetitions)', () => {
     expect(stats.hi).toBeGreaterThan(0);
     expect(stats.verdict).toBe('inconclusive');
     expect(stats.taskCounts).toEqual({ improved: 2, regressed: 2, unchanged: 8 });
+    // The web shows the module's interval, not the design's [−0.083, +0.194].
+    expect([r3(stats.lo), r3(stats.hi)]).toEqual([-0.111, 0.25]);
+    expect(data.comparisonView(data.seed('mcpSmoke'), 'with-mcp').statistics).toMatchObject({
+      observedDelta: 0.056,
+      lo: -0.111,
+      hi: 0.25,
+      verdict: 'inconclusive',
+    });
   });
 
   it('stays inconclusive after the retry of its execution error (verdict-updated)', () => {
@@ -124,6 +167,19 @@ describe('plan 10.4: Flow B, the MCP smoke test (3 repetitions)', () => {
     expect(stats.verdict).toBe('inconclusive');
     // Nothing is left to exclude once the error was retried into a pass.
     expect(stats.sensitivity).toBeNull();
+    // The VerdictCard: the module's figures now, and "previously" Flow B's.
+    const before = computed(statsOf(data.seed('mcpSmoke')));
+    const [card] = data.verdicts(data.seed('mcpSmoke', 'verdict-updated'), 'verdict-updated');
+    expect([card!.delta, card!.lo, card!.hi, card!.verdict]).toEqual([
+      0.083,
+      -0.056,
+      0.278,
+      'inconclusive',
+    ]);
+    expect(card!.history.map((h) => [h.cause, h.delta, h.lo, h.hi, h.verdict])).toEqual([
+      ['initial', r3(before.observedDelta), r3(before.lo), r3(before.hi), before.verdict],
+      ['retry', r3(stats.observedDelta), r3(stats.lo), r3(stats.hi), stats.verdict],
+    ]);
   });
 
   it('lists every execution-error category it saw, in vocabulary order (token-cap)', () => {
@@ -147,29 +203,32 @@ describe('every fixture scenario', () => {
         )) {
           const where = `${scenario ?? 'default'} · ${seed.key} · ${candidate} · ${key}`;
           const input: StatsInput = data.statsInput(seed, candidate, key);
-          // Another key's interval is not compared (the fixtures' is a stand-in): fewer resamples do.
-          const stats = computeComparisonStats(input, {
-            seed: seedFromExperimentId(seed.id),
-            ...(key === 'primary' ? {} : { resamples: 200 }),
-          });
-          const view = data.comparisonView(seed, candidate, key);
+          const stats = computeComparisonStats(input, { seed: seedFromExperimentId(seed.id) });
+          const entries = tableEntries(seed, input, stats);
+          const hint = `${where}; apps/web/src/fixtures/statistics.ts INTERVALS needs:\n${entries.join('\n')}`;
+          let view: ReturnType<DesignData['comparisonView']>;
+          try {
+            view = data.comparisonView(seed, candidate, key);
+          } catch (err) {
+            throw new Error(`${(err as Error).message}\n${hint}`);
+          }
           compared += 1;
 
           expect(stats.computable, where).toBe(view.statistics !== null);
           if (stats.computable) {
-            // On the primary key the fixtures state the design's figures; on another
-            // they compute Δ and set a stand-in interval around it.
-            if (key === 'primary') expect(stats.verdict, where).toBe(view.statistics!.verdict);
-            else
-              expect(close(stats.observedDelta, view.statistics!.observedDelta, 3), where).toBe(
-                true,
-              );
+            // The module's figures, on every key.
+            const s = view.statistics!;
+            expect([s.observedDelta, s.lo, s.hi, s.verdict, s.provisional], hint).toEqual([
+              r3(stats.observedDelta),
+              r3(stats.lo),
+              r3(stats.hi),
+              stats.verdict,
+              stats.provisional,
+            ]);
           } else {
             expect(stats.reason, where).toBe(view.statisticsUnavailable!.reason);
-            // Settled experiments get a sentence of their own (compute.ts, messageOf).
-            if (input.provisional || stats.reason === 'single_repetition') {
-              expect(stats.message, where).toBe(view.statisticsUnavailable!.message);
-            }
+            // The module's sentence, running or settled (compute.ts, messageOf).
+            expect(stats.message, where).toBe(view.statisticsUnavailable!.message);
           }
           expect(close(stats.baseline.rate, view.passRates.baseline, 3), where).toBe(true);
           expect(close(stats.candidate.rate, view.passRates.candidate, 3), where).toBe(true);
@@ -208,14 +267,66 @@ describe('every fixture scenario', () => {
             expect(stats.sensitivity.candidate.passed, where).toBe(
               view.sensitivity.candidate.passed,
             );
-            if (key === 'primary') {
-              expect(stats.sensitivity.verdict, where).toBe(view.sensitivity.verdict);
-            }
+            const v = view.sensitivity;
+            expect([v.lo, v.hi, v.verdict, v.verdictChanges], hint).toEqual([
+              r3(stats.sensitivity.lo),
+              r3(stats.sensitivity.hi),
+              stats.sensitivity.verdict,
+              stats.sensitivity.verdictChanges,
+            ]);
           }
         }
       }
     }
     expect(compared).toBeGreaterThan(200);
+  });
+
+  it("gives the Overview's VerdictCards the experiment views' figures", () => {
+    let compared = 0;
+    for (const scenario of [null, ...data.scenarios]) {
+      for (const seed of data.seeds(scenario)) {
+        const cards = data.verdicts(seed, scenario);
+        for (const candidate of seed.candidates) {
+          const where = `${scenario ?? 'default'} · ${seed.key} · ${candidate}`;
+          const stats = statsOf(seed, candidate);
+          const card = cards.find((c) => c.candidate.name === candidate)!;
+          // views/verdicts.ts: final once completed, else provisional; refused at once
+          // unless more runs may fill the gate.
+          const final = seed.status === 'completed';
+          const verdict = stats.computable
+            ? final
+              ? stats.verdict
+              : 'provisional'
+            : final || stats.reason !== 'not_enough_runs'
+              ? 'not_computable'
+              : 'provisional';
+          expect(
+            [card.verdict, card.reason, card.delta, card.lo, card.hi],
+            `${where}; ${tableEntries(seed, data.statsInput(seed, candidate), stats).join(' ')}`,
+          ).toEqual([
+            verdict,
+            verdict === 'not_computable' && !stats.computable ? stats.reason : null,
+            !stats.computable && stats.reason === 'single_repetition'
+              ? null
+              : r3(stats.observedDelta),
+            stats.computable ? r3(stats.lo) : null,
+            stats.computable ? r3(stats.hi) : null,
+          ]);
+          // A completed experiment's last entry is the figures it shows.
+          if (final) {
+            const last = card.history.at(-1)!;
+            expect([last.delta, last.lo, last.hi, last.verdict], where).toEqual([
+              card.delta,
+              card.lo,
+              card.hi,
+              card.verdict,
+            ]);
+          }
+          compared += 1;
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(50);
   });
 });
 

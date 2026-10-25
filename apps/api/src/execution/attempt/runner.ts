@@ -45,7 +45,7 @@ import {
   type AttemptSink,
 } from '../contracts.js';
 import { ATTEMPT_TOKEN_ENV, egressModelAccess } from '../providers-map.js';
-import { classifyAttempt } from './classify.js';
+import { classifyAttempt, tokenCapRefusalOf } from './classify.js';
 import { collectWorkspace, type Collection } from './collect.js';
 import { AttemptSetupError } from './errors.js';
 import { EventBatcher } from './event-batcher.js';
@@ -268,6 +268,7 @@ export class TrialAttemptRunner implements AttemptRunner {
       sawInit: session?.sawInit ?? false,
       stderrTail,
       mcpStartFailures: failedServers,
+      tokenCapRefusal: tokenCapRefusalOf(ran.report?.log ?? []),
       runBudgetS: plan.limits.runBudgetS,
       deadlineGraceS: this.settings.deadlineGraceS,
       memoryMiB: this.settings.limits.memoryMiB,

@@ -150,11 +150,12 @@ describe('ComparisonViewSchema', () => {
     expect(ComparisonViewSchema.parse(running)).toEqual(running);
   });
 
-  it('replaces the statistics with one of the three reasons, and its sentence', () => {
+  it('replaces the statistics with one of the four reasons, and its sentence', () => {
     expect(NOT_COMPUTABLE_REASONS).toEqual([
       'single_repetition',
       'not_enough_runs',
       'nothing_scored',
+      'too_few_tasks',
     ]);
     for (const reason of NOT_COMPUTABLE_REASONS) {
       const view = {
@@ -167,7 +168,7 @@ describe('ComparisonViewSchema', () => {
     const unknown = {
       ...VIEW,
       statistics: null,
-      statisticsUnavailable: { reason: 'too_few_tasks', message: 'x' },
+      statisticsUnavailable: { reason: 'too_few_repetitions', message: 'x' },
     };
     expect(issuePaths(ComparisonViewSchema.safeParse(unknown))).toEqual([
       'statisticsUnavailable.reason',

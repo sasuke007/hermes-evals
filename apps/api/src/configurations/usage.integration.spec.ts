@@ -96,6 +96,7 @@ describe('usage', () => {
         scored: 2,
         total: 2,
         verdict: null,
+        verdictReason: null,
         baselinePassRate: null,
       },
     ]);
@@ -109,7 +110,9 @@ describe('usage', () => {
         passRate: 1,
         scored: 1,
         total: 2,
-        verdict: 'provisional',
+        // One task: no verdict, even once it completes (a verdict needs 3 tasks).
+        verdict: 'not_computable',
+        verdictReason: 'too_few_tasks',
         baselinePassRate: 0.5,
       }),
     ]);

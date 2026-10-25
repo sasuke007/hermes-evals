@@ -56,6 +56,7 @@ import {
   MODEL,
   PRICE_TABLE,
 } from './configurations';
+import { gateOf, intervalOf, type TaskCounts, verdictOf } from './statistics';
 import {
   addSeconds,
   at,
@@ -94,7 +95,12 @@ export type ExperimentKey = keyof typeof EXPERIMENT_IDS;
 /** The run the inspector board shows: dup_invoices · baseline · rep 3 of Skill vs no skill. */
 export const SAMPLE_RUN_ID = 'run_01JB7X4K2M';
 
-export const HERMES = { package: 'hermes-agent', version: 'v0.22.4', revision: '4d04303' };
+/** The full commit, as the API sends it; the pages show its first 7 characters. */
+export const HERMES = {
+  package: 'hermes-agent',
+  version: 'v0.22.4',
+  revision: '4d04303a1b2c3d4e5f60718293a4b5c6d7e8f901',
+};
 
 // ---------------------------------------------------------------------------
 // Cells and runs
@@ -190,6 +196,8 @@ export interface ExperimentSeed {
   statusReason: string | null;
   createdAt: string;
   finishedAt: string | null;
+  /** When Cancel was pressed (the cancelled scenario); absent or null otherwise. */
+  cancelledAt?: string | null;
   elapsedS: number;
   remainingEstimateS: number | null;
   lastEventAt: string | null;
@@ -208,8 +216,6 @@ export interface ExperimentSeed {
   spentUsd: number;
   projectedTotalUsd: number | null;
   remainingCostUsd: number | null;
-  /** Statistics per candidate (bootstrap results as the design shows them). */
-  stats: Partial<Record<ConfigName, { delta: number; lo: number; hi: number }>>;
   /** The verdict chip in the Comparison candidate select while running (multi-candidate board). */
   candidateChips: Partial<Record<ConfigName, VerdictState>>;
   history: Partial<Record<ConfigName, VerdictHistoryEntry[]>>;
@@ -515,7 +521,6 @@ const SKILL_VS_NO_SKILL: ExperimentSeed = {
   spentUsd: 1.69,
   projectedTotalUsd: null,
   remainingCostUsd: null,
-  stats: { 'with-skill': { delta: 0.217, lo: 0.117, hi: 0.333 } },
   candidateChips: {},
   history: {},
   aggregateOverrides: {
@@ -590,7 +595,6 @@ const MCP_VS_BASELINE: ExperimentSeed = {
   spentUsd: 1.21,
   projectedTotalUsd: 1.66,
   remainingCostUsd: 0.45,
-  stats: { 'with-mcp': { delta: 0.068, lo: -0.061, hi: 0.197 } },
   candidateChips: {},
   history: {},
   aggregateOverrides: {},
@@ -669,7 +673,6 @@ const MCP_SMOKE: ExperimentSeed = {
   spentUsd: 1.01,
   projectedTotalUsd: null,
   remainingCostUsd: null,
-  stats: { 'with-mcp': { delta: 0.056, lo: -0.083, hi: 0.194 } },
   candidateChips: {},
   history: {},
   aggregateOverrides: {},
@@ -721,7 +724,6 @@ const MCP_FIRST_TRY: ExperimentSeed = {
   spentUsd: 0.02,
   projectedTotalUsd: null,
   remainingCostUsd: null,
-  stats: {},
   candidateChips: {},
   history: {},
   aggregateOverrides: {},
@@ -811,10 +813,6 @@ const SKILL_MCP: ExperimentSeed = {
   spentUsd: 0.59,
   projectedTotalUsd: 2.56,
   remainingCostUsd: 1.97,
-  stats: {
-    'with-skill': { delta: 0.25, lo: 0.083, hi: 0.417 },
-    'with-mcp': { delta: 0.0, lo: -0.167, hi: 0.167 },
-  },
   candidateChips: { 'with-skill': 'better', 'with-mcp': 'provisional' },
   history: {},
   aggregateOverrides: {},
@@ -845,7 +843,8 @@ const QUICK_CHECK: ExperimentSeed = {
   status: 'paused',
   pauseReason: 'user',
   pausedAt: at(22, '10:06:31'),
-  statusReason: null,
+  // As the API words a pause (experiments/views/failure.ts statusReason).
+  statusReason: 'Paused by the user',
   createdAt: at(22, '09:58:10'),
   finishedAt: null,
   elapsedS: 8 * 60 + 21,
@@ -893,7 +892,6 @@ const QUICK_CHECK: ExperimentSeed = {
   spentUsd: 0.12,
   projectedTotalUsd: 0.31,
   remainingCostUsd: 0.19,
-  stats: {},
   candidateChips: {},
   history: {},
   aggregateOverrides: {},
@@ -1015,6 +1013,7 @@ function mcpVsBaselineVariant(
       status: 'paused',
       pauseReason: 'spend_ceiling',
       pausedAt: at(23, '15:08:00'),
+      statusReason: 'Paused at the $2.00 spend ceiling',
       lastEventAt: at(23, '15:08:00'),
       matrix: mapMatrix(seed, (c) => (c === 'R' || c === 'S' ? 'Q' : c)),
       spentUsd: 2,
@@ -1029,6 +1028,8 @@ function mcpVsBaselineVariant(
       status: 'paused',
       pauseReason: 'provider_disconnected',
       pausedAt: at(23, '15:08:00'),
+      // Both configurations run on Nous Portal.
+      statusReason: 'Paused: Nous Portal is not connected',
       lastEventAt: at(23, '15:08:00'),
       matrix: mapMatrix(seed, (c) => (c === 'R' || c === 'S' || c === 'E' ? 'Q' : c)),
     };
@@ -1082,6 +1083,7 @@ function mcpVsBaselineVariant(
     return {
       ...seed,
       status: 'completed',
+      cancelledAt: at(23, '15:30:12'),
       finishedAt: at(23, '15:31:04'),
       elapsedS: 38 * 60 + 34,
       remainingEstimateS: null,
@@ -1099,7 +1101,6 @@ function mcpVsBaselineVariant(
           finishedAt: at(23, '15:31:04'),
         },
       },
-      stats: {},
     };
   }
   return seed;
@@ -1208,11 +1209,12 @@ function smokeAfterRetry(seed: ExperimentSeed): ExperimentSeed {
       ...seed.runOverrides,
       [runKey('currency_mix', 'with-mcp', 2)]: { attempts: 2, finishedAt: at(23, '14:20:05') },
     },
-    stats: { 'with-mcp': { delta: 0.083, lo: -0.042, hi: 0.208 } },
     history: {
       'with-mcp': [
-        verdictEntry(at(22, '18:02:12'), 'initial', null, 0.056, -0.083, 0.194, 'inconclusive'),
-        verdictEntry(at(23, '14:20:05'), 'retry', '1 retry', 0.083, -0.042, 0.208, 'inconclusive'),
+        // The statistics module's figures for Flow B, then for the matrix after the retry
+        // (apps/api compute.spec.ts checks both against the module).
+        verdictEntry(at(22, '18:02:12'), 'initial', null, 0.056, -0.111, 0.25, 'inconclusive'),
+        verdictEntry(at(23, '14:20:05'), 'retry', '1 retry', 0.083, -0.056, 0.278, 'inconclusive'),
       ],
     },
   };
@@ -1222,9 +1224,9 @@ function verdictEntry(
   when: string,
   cause: VerdictHistoryEntry['cause'],
   note: string | null,
-  delta: number,
-  lo: number,
-  hi: number,
+  delta: number | null,
+  lo: number | null,
+  hi: number | null,
   verdict: VerdictState,
 ): VerdictHistoryEntry {
   return { at: when, cause, note, delta, lo, hi, verdict };
@@ -1313,41 +1315,62 @@ function inFlight(counts: RunCounts): number {
   return counts.queued + counts.running + counts.executed + counts.scoring;
 }
 
+/** Each task's primary-key difference (unrounded, task order) and counted runs, for statistics.ts. */
+function primaryFigures(
+  seed: ExperimentSeed,
+  runs: RunSeed[],
+  candidate: ConfigName,
+): { deltas: (number | null)[]; counts: TaskCounts[] } {
+  const deltas: (number | null)[] = [];
+  const counts: TaskCounts[] = [];
+  for (const taskKey of TASK_KEYS) {
+    const side = (config: ConfigName) =>
+      passRate(runs.filter((r) => r.taskKey === taskKey && r.config === config));
+    const b = side(seed.baseline);
+    const c = side(candidate);
+    deltas.push(b.counted && c.counted ? c.passed / c.counted - b.passed / b.counted : null);
+    counts.push({ taskKey, baseline: b.counted, candidate: c.counted });
+  }
+  return { deltas, counts };
+}
+
+/**
+ * A candidate's VerdictCard, as the API's experiment views give it
+ * (views/verdicts.ts): once completed, the statistics module's verdict on
+ * the primary key; while running, paused or failed, the figures so far as
+ * `provisional`. One repetition, fewer than 3 tasks or nothing counted is
+ * not computable at once; too few runs so far is provisional, and not
+ * computable once completed.
+ */
 function verdictFor(seed: ExperimentSeed, runs: RunSeed[], candidate: ConfigName): VerdictSummary {
   const base = passRate(runs.filter((r) => r.config === seed.baseline));
   const cand = passRate(runs.filter((r) => r.config === candidate));
   const changes = taskChanges(seed, runs, candidate);
-  const stats = seed.stats[candidate];
-  // No run of the two configurations counts yet (an execution error counts).
-  const nothingCounted =
-    counted(runs.filter((r) => r.config === seed.baseline || r.config === candidate)).length === 0;
+  const { deltas, counts } = primaryFigures(seed, runs, candidate);
+  const gate = gateOf(seed.repetitions, counts);
+  const interval = gate === null ? intervalOf(seed.id, deltas) : null;
+  const final = seed.status === 'completed';
   let verdict: VerdictState;
-  let reason: NotComputableReason | null = null;
-  if (seed.repetitions < 2) {
-    verdict = 'not_computable';
-    reason = 'single_repetition';
-  } else if (nothingCounted) {
-    verdict = 'not_computable';
-    reason = 'nothing_scored';
-  } else if (seed.status === 'completed' && stats) {
-    verdict = stats.lo > 0 ? 'better' : stats.hi < 0 ? 'worse' : 'inconclusive';
-  } else {
-    verdict = 'provisional';
-  }
-  const final = verdict === 'better' || verdict === 'worse' || verdict === 'inconclusive';
+  if (interval) verdict = verdictOf(interval.lo, interval.hi, !final);
+  else verdict = final || gate !== 'not_enough_runs' ? 'not_computable' : 'provisional';
+  const reason: NotComputableReason | null = verdict === 'not_computable' ? gate : null;
+  const delta = gate === 'single_repetition' ? null : changes.delta;
+  const lo = interval?.lo ?? null;
+  const hi = interval?.hi ?? null;
+  // A completed experiment has the entry reconcile appended when it completed.
   const history =
     seed.history[candidate] ??
-    (final && stats && seed.finishedAt
-      ? [verdictEntry(seed.finishedAt, 'initial', null, stats.delta, stats.lo, stats.hi, verdict)]
+    (final && seed.finishedAt
+      ? [verdictEntry(seed.finishedAt, 'initial', null, delta, lo, hi, verdict)]
       : []);
   return {
     baseline: configRef(seed, seed.baseline),
     candidate: configRef(seed, candidate),
     verdict,
     scoreKey: 'primary',
-    delta: stats?.delta ?? (seed.repetitions < 2 ? null : changes.delta),
-    lo: stats?.lo ?? null,
-    hi: stats?.hi ?? null,
+    delta,
+    lo,
+    hi,
     passRates: { baseline: base.rate, candidate: cand.rate },
     passCounts: {
       baseline: { passed: base.passed, counted: base.counted },
@@ -1489,6 +1512,7 @@ export function experimentDetailFixture(
     pausedAt: seed.pausedAt,
     createdAt: seed.createdAt,
     finishedAt: seed.finishedAt,
+    cancelledAt: seed.cancelledAt ?? null,
     elapsedS: seed.elapsedS,
     remainingEstimateS: seed.remainingEstimateS,
     lastEventAt: seed.lastEventAt,
@@ -1549,6 +1573,7 @@ export function experimentListRowFixture(seed: ExperimentSeed): ExperimentListRo
             delta: v.delta,
             lo: v.lo,
             hi: v.hi,
+            reason: v.reason,
           };
         })
       : [];
@@ -1595,7 +1620,7 @@ export function configurationUsageFixture(
         : null
       : passRate(mine).rate;
     const isBaseline = config === seed.baseline;
-    const verdict = isBaseline ? null : verdictFor(seed, runs, config).verdict;
+    const summary = isBaseline ? null : verdictFor(seed, runs, config);
     return [
       {
         experimentId: seed.id,
@@ -1607,7 +1632,8 @@ export function configurationUsageFixture(
         passRate: rate,
         scored: scored.length,
         total: mine.length,
-        verdict,
+        verdict: summary?.verdict ?? null,
+        verdictReason: summary?.reason ?? null,
         baselinePassRate: isBaseline
           ? null
           : passRate(runs.filter((r) => r.config === seed.baseline)).rate,
@@ -1675,6 +1701,9 @@ export function newExperimentOptionsFixture(
   const noConfigs = active('empty') || active('first-launch');
   const noHistory = active('no-history');
   const configs = noConfigs ? [] : CONFIG_NAMES;
+  // openrouter-in-use: every configuration runs on OpenRouter, which has no key (the
+  // NewExperimentStates "OpenRouter key missing" frame: tagged rows and the .env blocker).
+  const onOpenRouter = active('openrouter-in-use');
   const suites = active('empty') ? [] : [suiteDetailFixture(state, currentSuiteId(state))];
   return {
     suites: suites.flatMap((s) =>
@@ -1720,7 +1749,7 @@ export function newExperimentOptionsFixture(
         version: c.version,
         configHash: c.configHash,
         model: c.model,
-        provider: c.provider,
+        provider: onOpenRouter ? ('openrouter' as const) : c.provider,
         memoryEnabled: c.memoryEnabled,
         skills: c.skills.map((s) => `${s.name}@${s.version}`),
         mcpServers: c.mcpServers.map((m) => `${m.name} (${m.transport})`),
@@ -1744,8 +1773,12 @@ export function estimateFixture(
   const runs = query.taskCount * chosen.length * query.repetitions;
   const concurrency = Math.max(1, query.concurrency);
   const waves = Math.ceil(runs / concurrency);
+  // Without history a run is assumed to take a quarter of its budget (plan 7.2), and the
+  // form's per-run budget replaces each configuration's own, as the API's estimate does.
+  const secondsOf = (e: (typeof estimates)[number]['e']): number =>
+    e?.basis === 'budget' && query.budgetS ? query.budgetS / 4 : (e?.seconds ?? 75);
   const perRunSeconds = estimates.length
-    ? estimates.reduce((a, x) => a + (x.e?.seconds ?? 75), 0) / estimates.length
+    ? estimates.reduce((a, x) => a + secondsOf(x.e), 0) / estimates.length
     : 0;
   const perConfiguration = estimates.map(({ c, e }) => ({
     versionId: c.versionId,

@@ -60,6 +60,7 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['post', '/api/configurations'],
   ['get', '/api/configurations/diff'],
   ['get', '/api/configurations/form-options'],
+  ['get', '/api/configurations/new-draft'],
   ['get', '/api/configurations/{id}'],
   ['put', '/api/configurations/{id}'],
   ['get', '/api/configurations/{id}/versions/{version}'],

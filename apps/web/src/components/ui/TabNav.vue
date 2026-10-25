@@ -7,7 +7,7 @@ defineProps<{ tabs: TabItem[]; label: string }>();
 </script>
 
 <template>
-  <nav class="tabs" :aria-label="label">
+  <nav class="flex items-center gap-4 border-b border-border" :aria-label="label">
     <RouterLink
       v-for="tab in tabs"
       :key="tab.key ?? tab.label"
@@ -16,16 +16,15 @@ defineProps<{ tabs: TabItem[]; label: string }>();
       custom
     >
       <a
-        class="tab"
+        class="-mb-1 inline-flex h-38 items-center gap-6 border-b-2 border-transparent px-12 font-medium text-text-2 no-underline hover:text-text hover:no-underline aria-[current=page]:border-accent aria-[current=page]:text-text"
         :href="href"
-        :aria-current="(tab.exact ? isExactActive : isActive) ? 'page' : undefined"
+        :aria-current="(tab.active ?? (tab.exact ? isExactActive : isActive)) ? 'page' : undefined"
         @click="navigate"
       >
         {{ tab.label }}
         <span
           v-if="tab.count !== null && tab.count !== undefined"
-          class="t3 mono"
-          style="font-size: 12px"
+          class="font-mono text-12 text-text-3"
           >{{ tab.count }}</span
         >
         <slot name="extra" :tab="tab" />

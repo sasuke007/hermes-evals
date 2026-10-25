@@ -11,6 +11,7 @@ import {
   RunEventsQuerySchema,
   RunListQuerySchema,
   RunListResultSchema,
+  RunModelNeedsSchema,
   ScoreRowViewSchema,
   TimelineEventSchema,
   type RunDetail,
@@ -30,7 +31,13 @@ const CONFIG = {
   provider: 'nous' as const,
 };
 
-const NEEDS = { provider: 'nous' as const, judgeKeys: ['method'], judgeProvider: 'nous' as const };
+const NEEDS = {
+  provider: 'nous' as const,
+  judgeKeys: ['method'],
+  judgeProvider: 'nous' as const,
+  judgeKeysWithoutModel: [],
+  noJudgeModelReason: null,
+};
 
 /** Shapes as the web fixtures build them (apps/web/src/fixtures/runs.ts and inspector.ts). */
 const ROW: RunRow = {
@@ -287,6 +294,30 @@ describe('run view models', () => {
     expect(issuePaths(RunDetailSchema.safeParse(tail))).toEqual([
       'executionError.stderrTail.lines',
     ]);
+  });
+});
+
+describe('what Re-score needs (Phase 4 question 10)', () => {
+  const reason =
+    'Re-score needs a judge model for the method judge: set JUDGE_MODEL (and JUDGE_PROVIDER, nous when unset) in .env, then docker compose up -d api worker.';
+
+  it('names the judge keys with no model and the 409 for them, together', () => {
+    const blocked = {
+      ...NEEDS,
+      judgeProvider: null,
+      judgeKeysWithoutModel: ['method'],
+      noJudgeModelReason: reason,
+    };
+    expect(RunModelNeedsSchema.parse(blocked)).toEqual(blocked);
+    expect(
+      issuePaths(RunModelNeedsSchema.safeParse({ ...blocked, noJudgeModelReason: null })),
+    ).toEqual(['noJudgeModelReason']);
+    expect(
+      issuePaths(RunModelNeedsSchema.safeParse({ ...NEEDS, noJudgeModelReason: reason })),
+    ).toEqual(['noJudgeModelReason']);
+    expect(
+      issuePaths(RunModelNeedsSchema.safeParse({ ...blocked, judgeKeysWithoutModel: ['tone'] })),
+    ).toEqual(['judgeKeysWithoutModel']);
   });
 });
 

@@ -80,47 +80,29 @@ function fix(): void {
 </script>
 
 <template>
-  <span class="blocked" :class="[`layout-${layout}`, `align-${align}`]">
+  <span
+    class="inline-flex min-w-0"
+    :class="
+      layout === 'inline'
+        ? 'flex-wrap items-center gap-8'
+        : ['flex-col gap-6', { 'items-end text-right': align === 'end' }]
+    "
+    :data-layout="layout"
+  >
     <slot :attrs="attrs" :blocked="blocked" />
-    <span v-if="blocked" :id="reasonId" class="blocked-reason" :class="`tone-${tone}`">
+    <span
+      v-if="blocked"
+      :id="reasonId"
+      class="text-12"
+      :class="tone === 'warning' ? 'text-ung-text' : 'text-text-3'"
+      data-testid="blocked-reason"
+      :data-tone="tone"
+    >
       <slot name="reason">{{ reason }}</slot>
       <template v-if="fixLabel">
         {{ ' ' }}<RouterLink v-if="fixTo" :to="fixTo">{{ fixLabel }}</RouterLink
-        ><button v-else type="button" class="linkbtn" @click="fix">{{ fixLabel }}</button>
+        ><button v-else type="button" class="linkbtn text-12" @click="fix">{{ fixLabel }}</button>
       </template>
     </span>
   </span>
 </template>
-
-<style scoped>
-.blocked {
-  display: inline-flex;
-  min-width: 0;
-}
-.layout-stacked {
-  flex-direction: column;
-  gap: 6px;
-}
-.layout-stacked.align-end {
-  align-items: flex-end;
-  text-align: right;
-}
-.layout-inline {
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.blocked-reason {
-  font-size: 12px;
-  line-height: 16px;
-}
-.blocked-reason.tone-warning {
-  color: var(--ung-text);
-}
-.blocked-reason.tone-neutral {
-  color: var(--text-3);
-}
-.blocked-reason .linkbtn {
-  font-size: 12px;
-}
-</style>

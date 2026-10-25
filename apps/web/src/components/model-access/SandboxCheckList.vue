@@ -3,11 +3,13 @@ import { computed, useId } from 'vue';
 import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import StatusChip from '@/components/ui/StatusChip.vue';
 import type { SandboxStatus } from '@/api/types/system';
+import { shortRevision } from '@/lib/format';
 
 /**
  * The 15 isolation checks the worker runs before it executes anything. Collapsed to its
- * summary when all pass; failing checks are always listed with their detail, and an alert
- * above says execution is disabled and how to re-run the self-test.
+ * summary by default; failing checks are always listed with their detail ("Show all 15
+ * checks" opens the rest, as the System board draws it), and an alert above says execution is
+ * disabled and how to re-run the self-test.
  */
 const props = withDefaults(
   defineProps<{
@@ -17,14 +19,20 @@ const props = withDefaults(
   }>(),
   { alert: true },
 );
-/** Expanded state; defaults to expanded when a check fails. */
+/** Expanded state; collapsed by default (failing checks show either way). */
 const expanded = defineModel<boolean | null>('expanded', { default: null });
 
 const listId = `checks-${useId()}`;
 const total = computed(() => props.status.checks.length);
 const passed = computed(() => props.status.checks.filter((c) => c.passed).length);
 const failed = computed(() => total.value - passed.value);
-const isOpen = computed(() => expanded.value ?? failed.value > 0);
+const isOpen = computed(() => expanded.value ?? false);
+/** The Hermes revision as its first 7 characters; the full one is in the tooltip. */
+const revision = computed(() => shortRevision(props.status.revision));
+/** "sha256:7a6920…", as the System board draws it; the full digest is in the tooltip. */
+const digest = computed(() =>
+  props.status.digest.replace(/^(sha256:[0-9a-f]{6})[0-9a-f]{7,}$/, '$1…'),
+);
 
 function ago(iso: string): string {
   const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
@@ -57,7 +65,7 @@ function toggle(): void {
 </script>
 
 <template>
-  <div class="scl">
+  <div class="flex flex-col gap-8">
     <ErrorBanner v-if="alert && failed > 0" tone="error">
       <template #title
         >Execution is disabled: {{ failed }} of {{ total }} isolation checks failed. No run will
@@ -69,10 +77,10 @@ function toggle(): void {
       >
     </ErrorBanner>
     <div class="tbl">
-      <div class="scl-head">
+      <div class="flex flex-wrap items-center gap-x-16 gap-y-8 border-b border-border px-16 py-12">
         <StatusChip kind="sandbox" :status="status.proven ? 'proven' : 'not_proven'" />
-        <span class="scl-summary">{{ summary }}</span>
-        <div class="scl-spacer" />
+        <span class="font-medium" data-testid="sandbox-summary">{{ summary }}</span>
+        <div class="flex-1" />
         <button
           type="button"
           class="btn ghost mid"
@@ -85,8 +93,8 @@ function toggle(): void {
             height="12"
             viewBox="0 0 12 12"
             aria-hidden="true"
-            :class="{ open: isOpen }"
-            class="chev"
+            class="transition-transform duration-[120ms]"
+            :class="{ 'rotate-90': isOpen }"
           >
             <path
               d="M4 2.5L7.5 6 4 9.5"
@@ -99,134 +107,59 @@ function toggle(): void {
           {{ toggleLabel }}
         </button>
       </div>
-      <div class="t2 scl-meta">
+      <div
+        class="flex flex-wrap gap-x-18 gap-y-4 border-b border-border px-16 py-8 text-12 leading-20 text-text-2"
+      >
         <span
-          >Hermes <code class="scl-strong">{{ status.revision }}</code></span
+          >Hermes <code class="text-text" :title="status.revision">{{ revision }}</code></span
         >
         <span
-          >image <code class="scl-strong">{{ status.image }}</code></span
+          >image <code class="text-text">{{ status.image }}</code></span
         >
         <span
-          ><code class="scl-strong">{{ status.digest }}</code></span
+          ><code class="text-text" :title="status.digest">{{ digest }}</code></span
         >
       </div>
-      <ul :id="listId" class="scl-list" aria-label="Isolation checks">
+      <ul :id="listId" class="flex flex-col" aria-label="Isolation checks">
         <template v-for="row in rows" :key="row.id">
-          <li v-if="row.visible" class="chk" :class="{ bad: !row.passed }" :data-check="row.id">
+          <li
+            v-if="row.visible"
+            class="grid grid-cols-[20px_minmax(0,1fr)] gap-8 border-b border-border px-16 py-8 last:border-b-0"
+            :class="{ 'bg-fail-soft': !row.passed }"
+            :data-check="row.id"
+            :data-passed="row.passed ? 'true' : 'false'"
+          >
             <span
-              class="mark"
-              :class="row.passed ? 'mark-pass' : 'mark-fail'"
+              class="inline-flex size-18 items-center justify-center rounded-full text-11 font-bold"
+              :class="
+                row.passed
+                  ? 'bg-pass-soft text-pass-text'
+                  : 'bg-fail-soft text-fail-text inset-ring inset-ring-fail'
+              "
               role="img"
               :aria-label="row.passed ? 'passed' : 'failed'"
               >{{ row.passed ? '✓' : '✕' }}</span
             >
-            <div class="chk-body">
-              <span class="chk-name"
-                ><span class="mono t3 chk-n">{{ row.n }}</span
+            <div class="flex min-w-0 flex-col gap-2">
+              <span :class="{ 'font-semibold text-fail-text': !row.passed }"
+                ><span class="mr-3 font-mono text-11 text-text-3">{{ row.n }}</span
                 >{{ ` ${row.name}` }}</span
               >
-              <code class="t2 chk-detail">{{ row.detail }}</code>
+              <code
+                class="text-12 wrap-anywhere"
+                :class="row.passed ? 'text-text-2' : 'text-fail-text'"
+                >{{ row.detail }}</code
+              >
             </div>
           </li>
         </template>
       </ul>
-      <div v-if="!alert && failed > 0" class="t2 scl-hint">
+      <div
+        v-if="!alert && failed > 0"
+        class="border-t border-border px-16 py-8 text-12 leading-20 text-text-2"
+      >
         Hint: <code>{{ status.selftestCommand }}</code>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.scl {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.scl-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.scl-summary {
-  font-weight: 500;
-}
-.scl-spacer {
-  flex: 1;
-}
-.chev {
-  transition: transform 0.12s;
-}
-.chev.open {
-  transform: rotate(90deg);
-}
-.scl-meta {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 18px;
-  font-size: 12px;
-}
-.scl-strong {
-  color: var(--text);
-}
-.scl-list {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-.chk.bad {
-  background: var(--fail-soft);
-}
-.mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  font-size: 11px;
-  font-weight: 700;
-}
-.mark-pass {
-  background: var(--pass-soft);
-  color: var(--pass-text);
-}
-.mark-fail {
-  background: var(--fail-soft);
-  color: var(--fail-text);
-  box-shadow: inset 0 0 0 1px var(--fail);
-}
-.chk-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.chk-n {
-  font-size: 11px;
-  /* 6px in the design, made of a word space plus this margin. */
-  margin-right: 3px;
-}
-.chk-detail {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.bad .chk-name {
-  font-weight: 600;
-  color: var(--fail-text);
-}
-.bad .chk-detail {
-  color: var(--fail-text);
-}
-.scl-hint {
-  padding: 8px 16px;
-  font-size: 12px;
-  border-top: 1px solid var(--border);
-}
-</style>

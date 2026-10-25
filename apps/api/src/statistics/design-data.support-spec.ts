@@ -16,12 +16,14 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   ComparisonViewSchema,
+  ExperimentDetailSchema,
   type ComparisonQuery,
   type ComparisonView,
   type ExecutionErrorCategory,
   type ExperimentStatus,
   type RunStatus,
   type ScoreStatus,
+  type VerdictSummary,
 } from '@hermes-evals/shared';
 import type { StatsInput, StatsRun, StatsTask } from './contracts.js';
 
@@ -45,8 +47,6 @@ export interface DesignSeed {
   baseline: string;
   candidates: string[];
   repetitions: number;
-  /** The bootstrap results the design shows, per candidate. */
-  stats: Partial<Record<string, { delta: number; lo: number; hi: number }>>;
 }
 
 interface ExperimentsModule {
@@ -54,6 +54,7 @@ interface ExperimentsModule {
   experimentSeeds(active: (name: string) => boolean): DesignSeed[];
   runsOf(seed: DesignSeed): DesignRun[];
   selectedKeyStatus(seed: DesignSeed, run: DesignRun, key: string): ScoreStatus | null;
+  experimentDetailFixture(seed: DesignSeed, suiteState: unknown): unknown;
 }
 
 interface ComparisonModule {
@@ -66,6 +67,12 @@ interface ScenariosModule {
 
 interface SuitesModule {
   TASK_KEYS: string[];
+  suiteStateFrom(active: (name: string) => boolean): unknown;
+}
+
+/** The web's table of the module's intervals (apps/web/src/fixtures/statistics.ts). */
+interface StatisticsModule {
+  intervalKey(experimentId: string, deltas: readonly number[]): string;
 }
 
 const FIXTURES = resolve(fileURLToPath(new URL('.', import.meta.url)), '../../../web/src/fixtures');
@@ -79,20 +86,35 @@ export class DesignData {
   private constructor(
     private readonly experiments: ExperimentsModule,
     private readonly comparison: ComparisonModule,
+    private readonly suites: SuitesModule,
+    private readonly statistics: StatisticsModule,
     /** The names of the scenarios that change experiments. */
     readonly scenarios: string[],
     readonly taskKeys: string[],
   ) {}
 
   static async load(): Promise<DesignData> {
-    const [experiments, comparison, scenarios, suites] = await Promise.all([
+    const [experiments, comparison, scenarios, suites, statistics] = await Promise.all([
       load<ExperimentsModule>('experiments.ts'),
       load<ComparisonModule>('comparison.ts'),
       load<ScenariosModule>('scenarios.ts'),
       load<SuitesModule>('suites.ts'),
+      load<StatisticsModule>('statistics.ts'),
     ]);
     const names = scenarios.SCENARIOS.map((s) => s.name);
-    return new DesignData(experiments, comparison, names, suites.TASK_KEYS);
+    return new DesignData(experiments, comparison, suites, statistics, names, suites.TASK_KEYS);
+  }
+
+  /** How the web's interval table names the interval of these per-task differences. */
+  intervalKey(experimentId: string, deltas: readonly number[]): string {
+    return this.statistics.intervalKey(experimentId, deltas);
+  }
+
+  /** The Overview's VerdictCards of an experiment as a scenario shows it, parsed with the shared schema. */
+  verdicts(seed: DesignSeed, scenario: string | null = null): VerdictSummary[] {
+    const state = this.suites.suiteStateFrom((name) => name === scenario);
+    return ExperimentDetailSchema.parse(this.experiments.experimentDetailFixture(seed, state))
+      .verdicts;
   }
 
   /** Every experiment seed as a scenario (null: the default fixtures) shows it. */
@@ -139,7 +161,6 @@ export class DesignData {
             executionError: r.status === 'execution_error' ? (r.category ?? 'other') : null,
             durationS: r.durationS,
             tokens: r.tokens?.total ?? null,
-            costUsd: r.costUsd,
           };
         });
     // The two configurations' runs only, as the comparison counts them.
@@ -149,15 +170,24 @@ export class DesignData {
       baseline: counted(taskKey, seed.baseline),
       candidate: counted(taskKey, candidate),
     }));
+    // Every run of the arm that has a cost, cancelled ones included, as the Overview prices it.
+    const spent = (config: string): number | null => {
+      const costs = runs.flatMap((r) =>
+        r.config === config && r.costUsd !== null ? [r.costUsd] : [],
+      );
+      return costs.length === 0 ? null : costs.reduce((sum, c) => sum + c, 0);
+    };
     return {
       tasks,
       repetitions: seed.repetitions,
-      provisional: seed.status === 'running' || seed.status === 'paused',
+      provisional:
+        seed.status === 'running' || seed.status === 'paused' || seed.status === 'failed',
       labels: { baseline: seed.baseline, candidate },
       progress: {
         scored: pair.filter((r) => r.status === 'scored').length,
         total: pair.length,
       },
+      costUsd: { baseline: spent(seed.baseline), candidate: spent(candidate) },
     };
   }
 }

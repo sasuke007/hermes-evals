@@ -16,6 +16,8 @@ const props = withDefaults(
 );
 
 const css = (w: SkeletonWidth): string => (typeof w === 'number' ? `${w}px` : w);
+/** One shimmering bar, 10px high unless the column says otherwise. */
+const BAR = 'block h-10 animate-shimmer rounded-3 bg-surface-3';
 
 function bar(column: SkeletonColumn, row: number): Record<string, string | undefined> {
   if (typeof column === 'number' || typeof column === 'string') return { width: css(column) };
@@ -35,24 +37,19 @@ const rowIndexes = (): number[] => Array.from({ length: props.rows }, (_, i) => 
 
 <template>
   <template v-if="layout === 'table'">
-    <tr v-for="i in rowIndexes()" :key="i" class="sk-row" aria-hidden="true">
-      <td v-for="(column, c) in columns" :key="c" :class="{ r: alignRight(column) }">
-        <span class="sk" :style="bar(column, i)" />
+    <tr
+      v-for="i in rowIndexes()"
+      :key="i"
+      class="hover:[&>td]:bg-transparent"
+      data-testid="skeleton-row"
+      aria-hidden="true"
+    >
+      <td v-for="(column, c) in columns" :key="c" :class="{ 'text-right': alignRight(column) }">
+        <span :class="BAR" :style="bar(column, i)" />
       </td>
     </tr>
   </template>
-  <div v-else class="sk-lines" aria-hidden="true">
-    <span v-for="i in rowIndexes()" :key="i" class="sk" :style="bar(columns[0] ?? '100%', i)" />
+  <div v-else class="flex flex-col gap-10" aria-hidden="true">
+    <span v-for="i in rowIndexes()" :key="i" :class="BAR" :style="bar(columns[0] ?? '100%', i)" />
   </div>
 </template>
-
-<style scoped>
-.sk-row:hover td {
-  background: transparent;
-}
-.sk-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-</style>

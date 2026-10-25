@@ -73,6 +73,8 @@ describe('listRuns', () => {
       provider: 'nous',
       judgeKeys: ['method'],
       judgeProvider: 'nous',
+      judgeKeysWithoutModel: [],
+      noJudgeModelReason: null,
     });
   });
 

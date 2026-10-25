@@ -20,12 +20,11 @@ export const COMPARISON_FILTERS = ['all', 'improved', 'regressed', 'unchanged'] 
 export const ComparisonFilterSchema = z.enum(COMPARISON_FILTERS);
 export type ComparisonFilter = z.infer<typeof ComparisonFilterSchema>;
 
-/** The selection that grades each task by its own primary key (the default). */
-export const SCORE_KEY_PRIMARY = 'primary';
-/** The selection under which a run passes only when none of its keys failed, errored or was ungradable. */
-export const SCORE_KEY_ANY_FAILED = 'any_failed';
-
-/** `primary`, `any_failed`, or a key every selected task has (e.g. `answer`). */
+/**
+ * `primary`, `any_failed` (SCORE_KEY_PRIMARY and SCORE_KEY_ANY_FAILED in
+ * vocab.ts, which no task key may be named), or a key every selected task
+ * has (e.g. `answer`).
+ */
 export const ScoreKeySelectionSchema = z.string().min(1);
 export type ScoreKeySelection = z.infer<typeof ScoreKeySelectionSchema>;
 
@@ -113,7 +112,7 @@ export const SensitivityViewSchema = z.object({
   /** The bootstrap interval over the kept runs; null when they fail the 2-runs gate. */
   lo: deltaView.nullable(),
   hi: deltaView.nullable(),
-  /** The verdict the kept runs give: `not_computable` when they fail the gate, `provisional` while running. */
+  /** The verdict the kept runs give: `not_computable` when they fail the gate, `provisional` while the experiment is. */
   verdict: VerdictStateSchema,
   /** True when `verdict` differs from the statistics' verdict. */
   verdictChanges: z.boolean(),
@@ -149,7 +148,11 @@ export const ComparisonViewSchema = z
   .object({
     experimentId: z.string(),
     experimentStatus: z.enum(EXPERIMENT_STATUSES),
-    /** True while running: unscored cells show queued or running, the panel reads "Provisional". */
+    /**
+     * True while running, paused or failed (Retry failed runs can resume a
+     * failed experiment): unscored cells show queued or running, the panel
+     * reads "Provisional".
+     */
     provisional: z.boolean(),
     repetitions: z.number().int().positive(),
     baseline: ExperimentConfigRefSchema,

@@ -147,10 +147,6 @@ export const CONFIG_VERSIONS: Record<ConfigName, ConfigurationVersion> = {
 
 export const CONFIG_NAMES = Object.keys(CONFIG_VERSIONS) as ConfigName[];
 
-export function configByName(name: string): ConfigurationVersion | undefined {
-  return CONFIG_VERSIONS[name as ConfigName];
-}
-
 /** Finds a configuration version by version id, configuration id or name. */
 export function findConfigVersion(idOrName: string): ConfigurationVersion | undefined {
   return Object.values(CONFIG_VERSIONS).find(

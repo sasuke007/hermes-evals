@@ -79,7 +79,13 @@ describe('rows', () => {
         model: 'mock/scripted',
         provider: 'custom',
       },
-      needs: { provider: 'custom', judgeKeys: [], judgeProvider: null },
+      needs: {
+        provider: 'custom',
+        judgeKeys: [],
+        judgeProvider: null,
+        judgeKeysWithoutModel: [],
+        noJudgeModelReason: null,
+      },
     });
     expect(row!.finishedAt).not.toBeNull();
   });
@@ -90,10 +96,12 @@ describe('rows', () => {
       provider: 'custom',
       judgeKeys: ['method'],
       judgeProvider: 'custom',
+      judgeKeysWithoutModel: [],
+      noJudgeModelReason: null,
     });
   });
 
-  it('names no judge provider when no judge model is configured', async () => {
+  it('names no judge provider, and the 409 Re-score answers, when no judge model is configured', async () => {
     const bare = new RunViewsService(t.db, seed.store, viewsConfig({}));
     const result = await bare.list(
       seed.experimentId,
@@ -103,6 +111,9 @@ describe('rows', () => {
       provider: 'custom',
       judgeKeys: ['method'],
       judgeProvider: null,
+      judgeKeysWithoutModel: ['method'],
+      noJudgeModelReason:
+        'Re-score needs a judge model for the method judge: set JUDGE_MODEL (and JUDGE_PROVIDER, nous when unset) in .env, then docker compose up -d api worker.',
     });
   });
 

@@ -188,6 +188,7 @@ export class ExperimentViewsService {
       pausedAt: e.pausedAt?.toISOString() ?? null,
       createdAt: e.createdAt.toISOString(),
       finishedAt: e.finishedAt?.toISOString() ?? null,
+      cancelledAt: e.cancelledAt?.toISOString() ?? null,
       elapsedS: elapsedSeconds(e, now),
       remainingEstimateS: remainingSeconds({
         status: e.status,

@@ -25,13 +25,46 @@ export const TokenCountsSchema = z.object({
 export type TokenCounts = z.infer<typeof TokenCountsSchema>;
 
 /** What a model-needing action on a run requires, for BlockedReason. */
-export const RunModelNeedsSchema = z.object({
-  /** Provider the run's configuration uses: Retry execution needs it connected. */
-  provider,
-  /** llm_judge keys of the task: Re-score needs the judge's provider for them. */
-  judgeKeys: z.array(z.string()),
-  judgeProvider: provider.nullable(),
-});
+export const RunModelNeedsSchema = z
+  .object({
+    /** Provider the run's configuration uses: Retry execution needs it connected. */
+    provider,
+    /** llm_judge keys of the task: Re-score needs the judge's provider for them. */
+    judgeKeys: z.array(z.string()),
+    /** The judge's provider; null when no llm_judge key has a judge model. */
+    judgeProvider: provider.nullable(),
+    /**
+     * llm_judge keys no judge model can grade: the check names no `model:`
+     * and JUDGE_MODEL is unset (Phase 4 question 10). Re-score answers 409
+     * for them whatever model access says, so the button is disabled with
+     * `noJudgeModelReason`.
+     */
+    judgeKeysWithoutModel: z.array(z.string()),
+    /**
+     * The 409 Re-score answers for those keys, word for word, with the fix:
+     * "Re-score needs a judge model for the tone judge: set JUDGE_MODEL …".
+     * Null when every llm_judge key has a model.
+     */
+    noJudgeModelReason: z.string().nullable(),
+  })
+  .superRefine((needs, ctx) => {
+    if (needs.judgeKeysWithoutModel.length > 0 !== (needs.noJudgeModelReason !== null)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['noJudgeModelReason'],
+        message: 'noJudgeModelReason is set exactly when some llm_judge key has no judge model',
+      });
+    }
+    for (const key of needs.judgeKeysWithoutModel) {
+      if (!needs.judgeKeys.includes(key)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['judgeKeysWithoutModel'],
+          message: `${key} is not one of the llm_judge keys`,
+        });
+      }
+    }
+  });
 export type RunModelNeeds = z.infer<typeof RunModelNeedsSchema>;
 
 /** A run's evaluation number: 1 for the first, +1 per re-score (plan 9.4). */

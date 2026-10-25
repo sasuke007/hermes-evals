@@ -1,12 +1,17 @@
 /**
  * Model access (plan section 6.1): provider status and the Nous Portal device login.
- * Serves fixtures by default (src/fixtures/system.ts); VITE_API_MODE=live calls the API.
- * Only a user code, a link, an expiry and a state ever reach the browser; never a token.
- * The state-changing calls go through liveSend, which adds the JSON body and the
- * X-Requested-With header the API requires.
+ * Live mode calls the API through apiGet/apiSend and parses every answer with its shared
+ * schema; fixtures mode serves src/fixtures/system.ts. Only a user code, a link, an expiry and
+ * a state ever reach the browser; never a token. The state-changing calls go through apiSend,
+ * which adds the JSON body and the X-Requested-With header the API requires.
+ *
+ * Two fixture scenarios are applied here, on top of src/fixtures/system.ts:
+ *   nous-unavailable   the login service failed its startup check (status `unavailable`)
+ *   openrouter-in-use  the configurations use only OpenRouter, which has no key: the
+ *                      missing-key SetupCard, the no-key banner and ProviderNotice's step
  */
-import { apiGet } from './client';
-import { apiMode, FIXTURE_LATENCY_MS, fixture, liveSend } from './source';
+import { apiGet, apiSend } from './client';
+import { apiMode, FIXTURE_LATENCY_MS, fixture, hasScenario } from './source';
 import {
   NousLoginSchema,
   ProvidersResponseSchema,
@@ -26,16 +31,35 @@ import {
 export type { LoginOutcome } from '@/fixtures/system';
 export { LOGIN_OUTCOMES } from '@/fixtures/system';
 
+/** The provider list of the fixture world, with this file's two scenarios applied. */
+function providersOfScenario(): ProviderInfo[] {
+  const list = providersFixture();
+  for (const p of list) {
+    if (p.id === 'nous' && hasScenario('nous-unavailable')) {
+      Object.assign(p, { status: 'unavailable', scope: null, login: null });
+    }
+    if (hasScenario('openrouter-in-use')) {
+      if (p.id === 'nous') p.usedBy = [];
+      if (p.id === 'openrouter') p.usedBy = ['or-baseline'];
+    }
+  }
+  return list;
+}
+
 /** GET /providers: every provider, how it authenticates, and its status. */
 export function listProviders(): Promise<ProviderInfo[]> {
   if (apiMode === 'live') return apiGet('/providers', ProvidersResponseSchema);
-  return fixture(providersFixture, { request: 'GET /api/providers' });
+  return fixture(providersOfScenario, { request: 'GET /api/providers' });
 }
 
-/** POST /providers/nous/login: start a login; returns the code, the link and the expiry. */
-export async function startNousLogin(): Promise<NousLogin> {
+/**
+ * POST /providers/nous/login: start a login (a pending one is replaced); returns the code, the
+ * link and the expiry. The API answers 409 in host mode (NOUS_HOST_PROXY) and 503 when the
+ * login service is unavailable; the providers store never sends it in those states.
+ */
+export function startNousLogin(): Promise<NousLogin> {
   if (apiMode === 'live') {
-    return NousLoginSchema.parse(await liveSend<unknown>('POST', '/providers/nous/login'));
+    return apiSend('POST', '/providers/nous/login', {}, NousLoginSchema);
   }
   // "Requesting" is usually under a second; long enough here to be seen.
   return fixture(startNousLoginFixture, {
@@ -50,22 +74,35 @@ export function getNousLogin(): Promise<NousLogin> {
   return fixture(nousLoginFixture, { request: 'GET /api/providers/nous/login' });
 }
 
-/** DELETE /providers/nous/login: cancel a pending login. */
-export async function cancelNousLogin(): Promise<void> {
+/** DELETE /providers/nous/login: cancel a pending login; answers the login state after it. */
+export function cancelNousLogin(): Promise<NousLogin> {
   if (apiMode === 'live') {
-    await liveSend<unknown>('DELETE', '/providers/nous/login');
-    return;
+    return apiSend('DELETE', '/providers/nous/login', {}, NousLoginSchema);
   }
-  await fixture(cancelNousLoginFixture, { request: 'DELETE /api/providers/nous/login' });
+  return fixture(
+    () => {
+      cancelNousLoginFixture();
+      return nousLoginFixture();
+    },
+    { request: 'DELETE /api/providers/nous/login' },
+  );
 }
 
-/** POST /providers/nous/logout: disconnect (what `hermes logout --provider nous` does). */
-export async function logoutNous(): Promise<void> {
+/**
+ * POST /providers/nous/logout: disconnect (what `hermes logout --provider nous` does);
+ * answers the login state after it.
+ */
+export function logoutNous(): Promise<NousLogin> {
   if (apiMode === 'live') {
-    await liveSend<unknown>('POST', '/providers/nous/logout');
-    return;
+    return apiSend('POST', '/providers/nous/logout', {}, NousLoginSchema);
   }
-  await fixture(logoutNousFixture, { request: 'POST /api/providers/nous/logout' });
+  return fixture(
+    () => {
+      logoutNousFixture();
+      return nousLoginFixture();
+    },
+    { request: 'POST /api/providers/nous/logout' },
+  );
 }
 
 /** True when the dev-only login controls can work (fixtures only). */

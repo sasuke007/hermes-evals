@@ -22,8 +22,11 @@ import {
   NETWORK_DECISIONS,
   NETWORK_EVENT_KINDS,
   PLATFORM_EVENT_SUBTYPES,
+  RESERVED_SCORE_KEYS,
+  SCORE_KEY_PRIMARY,
   SCORER_TYPES,
   TRAJECTORY_MODES,
+  type ReservedScoreKey,
 } from './vocab.js';
 
 const isoTime = z.iso.datetime({ offset: true });
@@ -63,9 +66,37 @@ export const TaskLimitsSchema = z.object({
 });
 export type TaskLimits = z.infer<typeof TaskLimitsSchema>;
 
+/** What a verification key looks like: a lowercase letter, then lowercase letters, digits and `_`. */
+export const VERIFICATION_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+export const isReservedScoreKey = (key: string): key is ReservedScoreKey =>
+  (RESERVED_SCORE_KEYS as readonly string[]).includes(key);
+
+/** Why a reserved name cannot be a key, in the words the loader and the editor show. */
+export function reservedScoreKeyMessage(key: ReservedScoreKey): string {
+  const meaning =
+    key === SCORE_KEY_PRIMARY
+      ? "each task's own primary key"
+      : 'a run with any key that did not pass';
+  return `${key} is reserved: the comparison's key select uses it for ${meaning}, so a check named ${key} could never be selected by name; give the check another key`;
+}
+
+/**
+ * A verification key: VERIFICATION_KEY_PATTERN, and not one of
+ * RESERVED_SCORE_KEYS (Phase 4 question 1). The one key rule, for the suite
+ * loader (through VerificationYamlSchema) and the authoring editor.
+ */
+export const VerificationKeySchema = z
+  .string()
+  .regex(VERIFICATION_KEY_PATTERN)
+  .superRefine((key, ctx) => {
+    if (isReservedScoreKey(key))
+      ctx.addIssue({ code: 'custom', message: reservedScoreKeyMessage(key) });
+  });
+
 /** One entry of a task's `verification` list. Params are validated per scorer type. */
 export const VerificationEntrySchema = z.object({
-  key: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  key: VerificationKeySchema,
   type: z.enum(SCORER_TYPES),
   primary: z.boolean(),
   params: z.record(z.string(), z.unknown()),

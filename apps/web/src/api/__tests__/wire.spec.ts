@@ -63,6 +63,14 @@ async function live() {
   };
 }
 
+/**
+ * Sends a request and ignores the answer: the stub answers `{}`, which no response schema
+ * accepts, so the parse step throws after the request was recorded.
+ */
+async function send(request: Promise<unknown>): Promise<void> {
+  await request.catch(() => undefined);
+}
+
 function lastSent(): Sent {
   const request = sent[sent.length - 1];
   if (!request) throw new Error('nothing was sent');
@@ -113,7 +121,7 @@ describe('requests the web sends in live mode', () => {
       ],
     ];
     for (const [filters, expected] of cases) {
-      await runs.listRuns('exp_01JBB7SVNS', filters);
+      await send(runs.listRuns('exp_01JBB7SVNS', filters));
       expect(lastSent().path).toBe('/api/experiments/exp_01JBB7SVNS/runs');
       expect({ filters, parsed: RunListQuerySchema.parse(lastSent().query) }).toEqual({
         filters,
@@ -131,7 +139,7 @@ describe('requests the web sends in live mode', () => {
       repetitions: 5,
       concurrency: 3,
     };
-    await experiments.estimateExperiment(query);
+    await send(experiments.estimateExperiment(query));
     expect(lastSent().path).toBe('/api/experiments/estimate');
     expect(EstimateQuerySchema.parse(lastSent().query)).toEqual(query);
   });
@@ -139,12 +147,12 @@ describe('requests the web sends in live mode', () => {
   it('the comparison and run events queries parse back', async () => {
     const { experiments, runs } = await live();
     const query = { candidate: 'cfgv_skill', key: 'answer', filter: 'improved' } as const;
-    await experiments.getComparison('exp_01JBB7SVNS', query);
+    await send(experiments.getComparison('exp_01JBB7SVNS', query));
     expect(ComparisonQuerySchema.parse(lastSent().query)).toEqual(query);
-    await experiments.getComparison('exp_01JBB7SVNS');
+    await send(experiments.getComparison('exp_01JBB7SVNS'));
     expect(ComparisonQuerySchema.parse(lastSent().query)).toEqual({});
     for (const after of [0, 7]) {
-      await runs.listRunEvents('run_01JB7X4K2M', after);
+      await send(runs.listRunEvents('run_01JB7X4K2M', after));
       expect(lastSent().path).toBe('/api/runs/run_01JB7X4K2M/events');
       expect(RunEventsQuerySchema.parse(lastSent().query)).toEqual({ after });
     }
@@ -152,21 +160,21 @@ describe('requests the web sends in live mode', () => {
 
   it('the launch, resume and bulk bodies parse as sent', async () => {
     const { experiments, runs } = await live();
-    await experiments.launchExperiment(LAUNCH);
+    await send(experiments.launchExperiment(LAUNCH));
     expect(lastSent()).toMatchObject({ method: 'POST', path: '/api/experiments' });
     expect(LaunchExperimentInputSchema.parse(lastSent().body)).toEqual(LAUNCH);
 
     for (const options of [{}, { spendCeilingUsd: 3 }]) {
-      await experiments.resumeExperiment('exp_01JBFMCPVB', options);
+      await send(experiments.resumeExperiment('exp_01JBFMCPVB', options));
       expect(lastSent().path).toBe('/api/experiments/exp_01JBFMCPVB/resume');
       expect(ResumeExperimentInputSchema.parse(lastSent().body)).toEqual(options);
     }
 
     const runIds = ['run_01JB7X4K2M', 'run_01JB7X4K2N'];
-    await runs.rescoreRuns('exp_01JBB7SVNS', runIds);
+    await send(runs.rescoreRuns('exp_01JBB7SVNS', runIds));
     expect(lastSent().path).toBe('/api/experiments/exp_01JBB7SVNS/runs/rescore');
     expect(BulkRunActionInputSchema.parse(lastSent().body)).toEqual({ runIds });
-    await runs.retryRuns('exp_01JBB7SVNS', runIds);
+    await send(runs.retryRuns('exp_01JBB7SVNS', runIds));
     expect(lastSent().path).toBe('/api/experiments/exp_01JBB7SVNS/runs/retry');
     expect(BulkRunActionInputSchema.parse(lastSent().body)).toEqual({ runIds });
   });

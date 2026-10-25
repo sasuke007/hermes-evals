@@ -16,7 +16,6 @@ const run = (passed: boolean): StatsRun => ({
   executionError: null,
   durationS: null,
   tokens: null,
-  costUsd: null,
 });
 
 /** Tasks as [baseline, candidate] strings of P and F. */
@@ -30,6 +29,7 @@ const input = (rows: [string, string][]): StatsInput => ({
   provisional: false,
   labels: { baseline: 'baseline', candidate: 'candidate' },
   progress: { scored: 1, total: 1 },
+  costUsd: { baseline: null, candidate: null },
 });
 
 describe('normalQuantile', () => {

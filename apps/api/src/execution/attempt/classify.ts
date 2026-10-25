@@ -18,6 +18,7 @@
  * - Exit 130 is an interrupted turn.
  */
 import type { ExecutionErrorCategory, Tokens } from '@hermes-evals/shared';
+import type { EgressLogEntry } from '../../sandbox/egress-client.js';
 import type { TrialOutcome } from '../../sandbox/trial-runner.js';
 import type { AttemptOutcome } from '../contracts.js';
 import { firstLine as stderrFirstLine } from '../lifecycle/first-line.js';
@@ -34,16 +35,39 @@ const AUTH_ERROR =
 const PROVIDER_ERROR =
   /\b429\b|\b5\d\d\b|rate[ _-]?limit|too many requests|quota|connection|connect error|econn|enotfound|eai_again|timed? ?out|overloaded|unavailable|bad gateway/i;
 /**
- * Egress's own 429 once the attempt has used its token cap (apps/egress
- * upstream.ts tokenCapRefusal, MODEL_TOKEN_CAP_PER_ATTEMPT). Hermes reports
- * it as an HTTP 429, but no provider failed: the platform stopped a run that
- * used too many tokens, and the automatic retry a `provider` error gets
- * would stop at the same cap after spending as much again. So it has its
- * own category, `limit` (Phase 3 question 8), which is never retried
- * automatically, and is checked before the provider patterns, which match
- * its 429.
+ * Egress's refusal once the attempt has used its token cap (apps/egress
+ * upstream.ts tokenCapRefusal, MODEL_TOKEN_CAP_PER_ATTEMPT). No provider
+ * failed: the platform stopped a run that used too many tokens, and the
+ * automatic retry a `provider` error gets would stop at the same cap after
+ * spending as much again. So it has its own category, `limit` (Phase 3
+ * question 8), which is never retried automatically.
+ *
+ * The run is known to be capped from egress's own connection log (Phase 4
+ * question 8): an entry whose reason begins TOKEN_CAP_REASON_PREFIX, the
+ * prefix of apps/egress upstream.ts of the same name; keep the two in step.
+ * Never from the status Hermes saw, which egress chose so that Hermes does
+ * not retry it (402 since Phase 5, 429 before). Hermes's error text naming
+ * the cap is the fallback when egress returned no log (it lost the
+ * registration), checked before the provider patterns, which match a 429.
  */
+export const TOKEN_CAP_REASON_PREFIX = 'token cap reached';
 const TOKEN_CAP_ERROR = /reached its token cap|token_cap_reached/i;
+
+/**
+ * The first model call egress refused at the attempt's token cap, from its
+ * connection log: what it said ("1043 of 1000 tokens used"), or null.
+ */
+export function tokenCapRefusalOf(log: readonly EgressLogEntry[]): string | null {
+  const entry = log.find(
+    (e) =>
+      e.kind === 'model' &&
+      e.decision === 'denied' &&
+      e.reason !== undefined &&
+      e.reason.startsWith(TOKEN_CAP_REASON_PREFIX),
+  );
+  if (!entry) return null;
+  return entry.reason!.slice(TOKEN_CAP_REASON_PREFIX.length).replace(/^:\s*/, '') || entry.reason!;
+}
 /** Hermes's report of an MCP server that would not start, when nothing else ran. */
 const MCP_START_FAILURE = /mcp server .{0,80}(failed|could not|error)/i;
 
@@ -69,6 +93,11 @@ export interface AttemptObservation {
   stderrTail: string | null;
   /** Configured MCP servers Hermes's errors.log says failed to connect (mcp-start.ts). */
   mcpStartFailures: readonly McpStartFailure[];
+  /**
+   * What egress said when it refused a model call at the attempt's token
+   * cap (tokenCapRefusalOf its connection log), or null when it refused none.
+   */
+  tokenCapRefusal: string | null;
   runBudgetS: number;
   deadlineGraceS: number;
   memoryMiB: number;
@@ -138,6 +167,20 @@ export function classifyAttempt(obs: AttemptObservation): Classification {
   const deadline =
     `Stopped at the deadline: the run budget of ${obs.runBudgetS} s plus ` +
     `${obs.deadlineGraceS} s passed`;
+
+  // Egress refused a model call at the cap, and Hermes did not finish its turn
+  // cleanly: the cap stopped the run, whatever status Hermes saw. A clean finish
+  // keeps its answer (a refused call after it, such as a title, changed nothing).
+  const cleanFinish =
+    result !== null &&
+    (typeof result.exit_code === 'number' ? result.exit_code : trial.exitCode) === 0 &&
+    !stringField(result, 'error');
+  if (obs.tokenCapRefusal !== null && !cleanFinish) {
+    return error(
+      'limit',
+      `The model gateway stopped the run at its token cap: ${cut(obs.tokenCapRefusal)}.`,
+    );
+  }
 
   if (result) {
     const code = typeof result.exit_code === 'number' ? result.exit_code : trial.exitCode;

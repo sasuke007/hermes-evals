@@ -289,7 +289,7 @@ describe('model gateway', () => {
   it('stops serving once the attempt budget is spent', async () => {
     await chat(TOKEN, { model: 'mock/scripted', stream: true });
     await chat(TOKEN, { model: 'mock/scripted', stream: true });
-    expect((await chat(TOKEN, { model: 'mock/scripted', stream: true })).status).toBe(429);
+    expect((await chat(TOKEN, { model: 'mock/scripted', stream: true })).status).toBe(402);
   });
 
   it('stops serving as soon as the attempt is removed', async () => {

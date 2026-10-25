@@ -4,8 +4,8 @@
  * JUDGE_MODEL, on JUDGE_PROVIDER or `nous`.
  */
 import { describe, expect, it } from 'vitest';
-import type { VerificationEntry } from '@hermes-evals/shared';
-import { judgeNeedsOf, judgeSettingsFrom } from './judge-needs.js';
+import { RunModelNeedsSchema, type VerificationEntry } from '@hermes-evals/shared';
+import { judgeNeedsOf, judgeSettingsFrom, noJudgeModelRefusal } from './judge-needs.js';
 import { runNeeds } from './views/config-ref.js';
 
 const answer: VerificationEntry = {
@@ -55,15 +55,31 @@ describe('judgeNeedsOf', () => {
     });
   });
 
-  it('feeds the run views’ needs', () => {
-    expect(runNeeds({ provider: 'custom' }, [answer, judge('method')], {})).toEqual({
+  it('feeds the run views’ needs, naming the keys no judge model can grade and the 409 for them', () => {
+    const needs = runNeeds({ provider: 'custom' }, [answer, judge('method')], {});
+    expect(RunModelNeedsSchema.parse(needs)).toEqual({
       provider: 'custom',
       judgeKeys: ['method'],
       judgeProvider: null,
+      judgeKeysWithoutModel: ['method'],
+      noJudgeModelReason:
+        'Re-score needs a judge model for the method judge: set JUDGE_MODEL (and JUDGE_PROVIDER, nous when unset) in .env, then docker compose up -d api worker.',
     });
+    // The same sentence Re-score answers with its 409.
+    expect(needs.noJudgeModelReason).toBe(noJudgeModelRefusal(['method']));
     expect(
       runNeeds({ provider: 'custom' }, [judge('method')], { provider: 'anthropic', model: 'm' }),
-    ).toEqual({ provider: 'custom', judgeKeys: ['method'], judgeProvider: 'anthropic' });
+    ).toEqual({
+      provider: 'custom',
+      judgeKeys: ['method'],
+      judgeProvider: 'anthropic',
+      judgeKeysWithoutModel: [],
+      noJudgeModelReason: null,
+    });
+    // One key with its own model, one without: only the second blocks.
+    expect(
+      runNeeds({ provider: 'custom' }, [judge('method', 'x/y'), judge('tone')], {}),
+    ).toMatchObject({ judgeProvider: 'nous', judgeKeysWithoutModel: ['tone'] });
   });
 });
 

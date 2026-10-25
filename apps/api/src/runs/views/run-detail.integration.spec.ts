@@ -219,7 +219,13 @@ describe('a scored run with mixed results', () => {
       status: 'scored',
       unavailableReason: null,
     });
-    expect(run.needs).toEqual({ provider: 'custom', judgeKeys: [], judgeProvider: null });
+    expect(run.needs).toEqual({
+      provider: 'custom',
+      judgeKeys: [],
+      judgeProvider: null,
+      judgeKeysWithoutModel: [],
+      noJudgeModelReason: null,
+    });
   });
 });
 
@@ -385,6 +391,8 @@ describe('runs in flight, cancelled or not started', () => {
       provider: 'custom',
       judgeKeys: ['method'],
       judgeProvider: 'custom',
+      judgeKeysWithoutModel: [],
+      noJudgeModelReason: null,
     });
   });
 

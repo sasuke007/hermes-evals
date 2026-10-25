@@ -143,9 +143,12 @@ async function waitForLockWaits(side: pg.Pool, n: number): Promise<void> {
   throw new Error(`expected ${n} sessions waiting for the experiment row`);
 }
 
-/** a: baseline 1 of 2, each candidate 2 of 2; b: baseline 0 of 2, each candidate 1 of 2. */
-function statusOf(task: 'a' | 'b', baseline: boolean, repetition: number): ScoreStatus {
-  if (task === 'a') return baseline && repetition === 2 ? 'failed' : 'passed';
+/**
+ * a and c: baseline 1 of 2, each candidate 2 of 2; b: baseline 0 of 2, each
+ * candidate 1 of 2.
+ */
+function statusOf(task: 'a' | 'b' | 'c', baseline: boolean, repetition: number): ScoreStatus {
+  if (task !== 'b') return baseline && repetition === 2 ? 'failed' : 'passed';
   return !baseline && repetition === 1 ? 'passed' : 'failed';
 }
 
@@ -204,7 +207,7 @@ async function twoCandidates(e: E2eDatabase, w: World) {
     .returning();
   for (const run of inserted) {
     const status = statusOf(
-      run.taskId === w.taskIds[0] ? 'a' : 'b',
+      (['a', 'b', 'c'] as const)[w.taskIds.indexOf(run.taskId)]!,
       run.configurationVersionId === w.baselineVersionId,
       run.repetition,
     );
@@ -216,7 +219,8 @@ async function twoCandidates(e: E2eDatabase, w: World) {
 describe.skipIf(!SERVER_URL)('verdict entries on Postgres 17', () => {
   it('appends one entry per candidate when three finishers reconcile at the same moment', async () => {
     const e = await createDatabase();
-    const w = await seedWorld(e.db);
+    // Three tasks, the fewest a verdict needs.
+    const w = await seedWorld(e.db, { tasks: 3 });
     const { experimentId, candidates } = await twoCandidates(e, w);
 
     const release = await holdExperiment(e.side, experimentId);

@@ -92,6 +92,12 @@ describe('suites', () => {
     });
   });
 
+  it('reloads one directory by its path, or none when the path is unknown', async () => {
+    const one = await reloadSuites('./suites/invoices-v1');
+    expect(one.suites.map((s) => s.sourcePath)).toEqual(['./suites/invoices-v1']);
+    expect((await reloadSuites('./suites/nope')).suites).toEqual([]);
+  });
+
   it('keeps the last good version when a reload fails', async () => {
     setScenario('reload-failed');
     const [row] = await listSuites();

@@ -17,7 +17,8 @@ async function setup(scenario: string | null = 'nous-not-connected') {
 }
 
 const dialog = () => wrapper!.find('[role="dialog"]');
-const footerButtons = () => wrapper!.findAll('.dlg-f button, .dlg-f a').map((b) => b.text());
+const FOOTER = '[data-testid="dialog-footer"]';
+const footerButtons = () => wrapper!.findAll(`${FOOTER} button, ${FOOTER} a`).map((b) => b.text());
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -109,7 +110,7 @@ describe('ConnectDialog', () => {
     expect(store.dialogOpen).toBe(false);
     await store.openDialog();
     await flushPromises();
-    await wrapper!.find('.cd-scrim').trigger('mousedown');
+    await wrapper!.find('[data-testid="dialog-scrim"]').trigger('mousedown');
     expect(store.dialogOpen).toBe(false);
     expect(store.loginPhase).toBe('waiting');
   });
@@ -163,7 +164,7 @@ describe('ConnectDialog', () => {
       expect(document.activeElement?.textContent?.trim()).toBe('Launch now');
 
       await wrapper!
-        .findAll('.dlg-f button')
+        .findAll(`${FOOTER} button`)
         .find((b) => b.text() === 'Launch now')!
         .trigger('click');
       expect(onFollowUp).toHaveBeenCalledWith('launch');
@@ -177,7 +178,7 @@ describe('ConnectDialog', () => {
       await flushPromises();
       store.simulate('approve');
       await flushPromises();
-      await wrapper!.findAll('.dlg-f button')[0]!.trigger('click');
+      await wrapper!.findAll(`${FOOTER} button`)[0]!.trigger('click');
       expect(onFollowUp).toHaveBeenCalledWith('back');
     });
 
@@ -197,7 +198,7 @@ describe('ConnectDialog', () => {
         'Skill vs no skill, invoices-v1 is still paused at 87 of 120.',
       );
       expect(footerButtons()).toEqual(['Close', 'Resume experiment']);
-      await wrapper!.findAll('.dlg-f button')[1]!.trigger('click');
+      await wrapper!.findAll(`${FOOTER} button`)[1]!.trigger('click');
       expect(onFollowUp).toHaveBeenCalledWith('resume');
     });
 
@@ -208,7 +209,7 @@ describe('ConnectDialog', () => {
       await flushPromises();
       store.simulate('approve');
       await flushPromises();
-      await wrapper!.findAll('.dlg-f button')[0]!.trigger('click');
+      await wrapper!.findAll(`${FOOTER} button`)[0]!.trigger('click');
       expect(onFollowUp).not.toHaveBeenCalled();
       expect(store.dialogOpen).toBe(false);
     });
@@ -222,7 +223,7 @@ describe('ConnectDialog', () => {
       await flushPromises();
       expect(dialog().text()).toContain('Every configuration that uses Nous Portal can now run.');
       expect(footerButtons()).toEqual(['Done']);
-      await wrapper!.find('.dlg-f button').trigger('click');
+      await wrapper!.find(`${FOOTER} button`).trigger('click');
       expect(onFollowUp).toHaveBeenCalledWith('done');
     });
   });
@@ -272,7 +273,7 @@ describe('ConnectDialog', () => {
       await flushPromises();
       store.simulate('subscription');
       await flushPromises();
-      const link = dialog().find('.dlg-f a');
+      const link = dialog().find(`${FOOTER} a`);
       expect(link.attributes('href')).toContain('billing');
       expect(link.attributes('target')).toBe('_blank');
     });
@@ -284,7 +285,7 @@ describe('ConnectDialog', () => {
       store.simulate('expire');
       await flushPromises();
       await wrapper!
-        .findAll('.dlg-f button')
+        .findAll(`${FOOTER} button`)
         .find((b) => b.text() === 'Get a new code')!
         .trigger('click');
       await flushPromises();
@@ -308,7 +309,7 @@ describe('ConnectDialog', () => {
       await flushPromises();
       store.simulate('decline');
       await flushPromises();
-      await wrapper!.find('.dlg-f button').trigger('click');
+      await wrapper!.find(`${FOOTER} button`).trigger('click');
       expect(store.dialogOpen).toBe(false);
       expect(store.loginPhase).toBe('idle');
     });
@@ -321,5 +322,42 @@ describe('ConnectDialog', () => {
     expect(wrapper!.find('[aria-label="Fixture controls, development only"]').exists()).toBe(true);
     await wrapper!.setProps({ devControls: false });
     expect(wrapper!.find('[aria-label="Fixture controls, development only"]').exists()).toBe(false);
+  });
+
+  describe('manual: Nous cannot be connected from the UI', () => {
+    it('host proxy down: the sentence and the command to start it, no code requested', async () => {
+      const { store } = await setup('nous-host-down');
+      await store.connect('other');
+      await flushPromises();
+      const d = dialog();
+      expect(d.attributes('data-phase')).toBe('manual');
+      const alert = d.find('[role="alert"]');
+      expect(alert.text()).toContain(
+        "This stack uses this machine's Hermes login, but its proxy is not running.",
+      );
+      expect(alert.text()).toContain('Start it in a terminal:');
+      expect(alert.find('[data-testid="copy-command"] code').text()).toBe(
+        'hermes proxy start --provider nous',
+      );
+      expect(d.find('[data-testid="user-code"]').exists()).toBe(false);
+      expect(footerButtons()).toEqual(['Close']);
+      expect(document.activeElement?.textContent?.trim()).toBe('Close');
+      await wrapper!.find(`${FOOTER} button`).trigger('click');
+      expect(store.dialogOpen).toBe(false);
+      expect(store.loginPhase).toBe('idle');
+    });
+
+    it('login service unavailable: the terminal login instead', async () => {
+      const { store } = await setup('nous-unavailable');
+      await store.connect('new-experiment');
+      await flushPromises();
+      const alert = dialog().find('[role="alert"]');
+      expect(alert.text()).toContain(
+        'The login service failed its startup check: this Hermes version does not offer the device login the platform uses.',
+      );
+      expect(alert.find('[data-testid="copy-command"] code').text()).toBe(
+        'docker compose run --rm --entrypoint /opt/hermes/.venv/bin/hermes nous-proxy auth add nous --type oauth --no-browser',
+      );
+    });
   });
 });

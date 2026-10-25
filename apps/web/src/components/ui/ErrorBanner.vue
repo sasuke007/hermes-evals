@@ -41,11 +41,32 @@ const role = computed(() =>
 const detailMono = computed(
   () => props.mono ?? (props.tone === 'error' || props.tone === 'violet'),
 );
+
+/** Fill, border, and the ink of the icon and title, per tone. */
+const TONES = {
+  error: { box: 'border-fail bg-fail-soft', ink: 'text-fail-text', icon: 'text-fail-text' },
+  violet: { box: 'border-err bg-err-soft', ink: 'text-err-text', icon: 'text-err-text' },
+  warning: { box: 'border-ung bg-ung-soft', ink: 'text-ung-text', icon: 'text-ung-text' },
+  info: { box: 'border-border-strong bg-accent-soft', ink: 'text-text', icon: 'text-accent' },
+} as const;
+const look = computed(() => TONES[props.tone]);
 </script>
 
 <template>
-  <div class="eb" :class="[`eb-${tone}`, { compact }]" :role="role">
-    <svg class="eb-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+  <div
+    class="flex items-start gap-12 rounded-6 border"
+    :class="[look.box, compact ? 'px-12 py-10' : 'px-14 py-12']"
+    :role="role"
+    :data-tone="tone"
+  >
+    <svg
+      class="mt-2 flex-none"
+      :class="look.icon"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
       <template v-if="tone === 'warning'">
         <path
           d="M8 1.8l6.5 11.4H1.5z"
@@ -84,19 +105,27 @@ const detailMono = computed(
         />
       </template>
     </svg>
-    <div class="eb-body">
-      <div v-if="title || $slots.title" class="eb-title">
+    <div
+      class="flex min-w-0 flex-1 flex-col"
+      :class="tone === 'warning' || tone === 'info' ? 'gap-2' : 'gap-4'"
+    >
+      <div
+        v-if="title || $slots.title"
+        class="font-semibold"
+        :class="look.ink"
+        data-testid="error-banner-title"
+      >
         <slot name="title">{{ title }}</slot>
       </div>
       <slot>
-        <code v-if="detail && detailMono" class="t2 eb-detail">{{ detail }}</code>
-        <div v-else-if="detail" class="t2">{{ detail }}</div>
+        <code v-if="detail && detailMono" class="wrap-anywhere text-text-2">{{ detail }}</code>
+        <div v-else-if="detail" class="text-text-2">{{ detail }}</div>
       </slot>
-      <div v-if="hint || $slots.hint" class="cap">
+      <div v-if="hint || $slots.hint" class="text-12 text-text-3" data-testid="error-banner-hint">
         <slot name="hint">{{ hint }}</slot>
       </div>
     </div>
-    <div v-if="retryLabel || $slots.actions" class="eb-actions">
+    <div v-if="retryLabel || $slots.actions" class="flex flex-none items-center gap-8">
       <slot name="actions" />
       <button v-if="retryLabel" type="button" class="btn sm" @click="$emit('retry')">
         {{ retryLabel }}
@@ -104,70 +133,3 @@ const detailMono = computed(
     </div>
   </div>
 </template>
-
-<style scoped>
-.eb {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 12px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--eb-border);
-  background: var(--eb-bg);
-}
-.eb.compact {
-  padding: 10px 12px;
-}
-.eb-error {
-  --eb-bg: var(--fail-soft);
-  --eb-border: var(--fail);
-  --eb-ink: var(--fail-text);
-}
-.eb-violet {
-  --eb-bg: var(--err-soft);
-  --eb-border: var(--err);
-  --eb-ink: var(--err-text);
-}
-.eb-warning {
-  --eb-bg: var(--ung-soft);
-  --eb-border: var(--ung);
-  --eb-ink: var(--ung-text);
-}
-.eb-info {
-  --eb-bg: var(--accent-soft);
-  --eb-border: var(--border-strong);
-  --eb-ink: var(--text);
-}
-.eb-icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--eb-ink);
-}
-.eb-info .eb-icon {
-  color: var(--accent);
-}
-.eb-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.eb-warning .eb-body,
-.eb-info .eb-body {
-  gap: 2px;
-}
-.eb-title {
-  font-weight: 600;
-  color: var(--eb-ink);
-}
-.eb-detail {
-  overflow-wrap: anywhere;
-}
-.eb-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex: none;
-}
-</style>

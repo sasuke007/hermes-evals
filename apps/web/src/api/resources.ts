@@ -3,9 +3,21 @@
  * documents, MCP servers (save, test start) and secrets (names and set /
  * not set only; no value ever reaches the browser).
  *
- * Fixtures by default (src/fixtures/resources.ts); VITE_API_MODE=live calls
- * the planned endpoints of plan section 11.
+ * Live mode calls the endpoints of plan section 11 through apiGet/apiSend and
+ * parses every answer with its shared schema; fixtures mode (VITE_API_MODE=fixtures)
+ * serves src/fixtures/resources.ts (src/api/README.md).
  */
+import {
+  DocumentRowSchema,
+  McpServerRowSchema,
+  McpTestViewSchema,
+  ResourceCountsSchema,
+  SecretRowSchema,
+  SkillDetailSchema,
+  SkillFileContentSchema,
+  SkillRowSchema,
+  SkillUploadValidationSchema,
+} from '@hermes-evals/shared';
 import type {
   DocumentRow,
   McpServerInput,
@@ -18,16 +30,8 @@ import type {
   SkillRow,
   SkillUploadValidation,
 } from './types/resources';
-import {
-  apiMode,
-  fixture,
-  fixtureFailure,
-  hasScenario,
-  liveGet,
-  liveSend,
-  notFound,
-  withQuery,
-} from './source';
+import { API_BASE, apiGet, apiSend } from './client';
+import { apiMode, fixture, fixtureFailure, hasScenario, notFound, withQuery } from './source';
 import {
   documentsFixture,
   documentUploadFixture,
@@ -45,13 +49,17 @@ import {
   skillValidationFixture,
 } from '@/fixtures/resources';
 
+/** The API's upload caps (plan 5.1, 5.2): the dialogs refuse a larger file before sending it. */
+export const SKILL_ZIP_MAX_BYTES = 20 * 1024 * 1024;
+export const DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
+
 const noResources = () => hasScenario('empty') || hasScenario('first-launch');
 /** INVOICE_DB_URL is missing from the worker: Secrets shows it not set and Test start fails. */
 const secretMissing = () => hasScenario('secret-not-set') || hasScenario('mcp-test-failed');
 
 /** Tab counts for the resource kinds nav. */
 export function getResourceCounts(): Promise<ResourceCounts> {
-  if (apiMode === 'live') return liveGet('/resources/counts');
+  if (apiMode === 'live') return apiGet('/resources/counts', ResourceCountsSchema);
   return fixture(() => resourceCountsFixture(noResources()), {
     request: 'GET /api/resources/counts',
   });
@@ -63,13 +71,13 @@ export function getResourceCounts(): Promise<ResourceCounts> {
 
 /** GET /resources/skills: one row per name and version. */
 export function listSkills(): Promise<SkillRow[]> {
-  if (apiMode === 'live') return liveGet('/resources/skills');
+  if (apiMode === 'live') return apiGet('/resources/skills', SkillRowSchema.array());
   return fixture(() => skillsFixture(noResources()), { request: 'GET /api/resources/skills' });
 }
 
 /** GET /resources/skills/:id: SKILL.md (front matter and body), the file tree and "Used by". */
 export function getSkill(id: string): Promise<SkillDetail> {
-  if (apiMode === 'live') return liveGet(`/resources/skills/${id}`);
+  if (apiMode === 'live') return apiGet(`/resources/skills/${id}`, SkillDetailSchema);
   const request = `GET /api/resources/skills/${id}`;
   return fixture(
     () => {
@@ -83,8 +91,12 @@ export function getSkill(id: string): Promise<SkillDetail> {
 
 /** GET /resources/skills/:id/files/:path: one file of a skill (text, or size and hash only). */
 export function getSkillFile(id: string, path: string): Promise<SkillFileContent> {
-  if (apiMode === 'live')
-    return liveGet(`/resources/skills/${id}/files/${encodeURIComponent(path)}`);
+  if (apiMode === 'live') {
+    return apiGet(
+      `/resources/skills/${id}/files/${encodeURIComponent(path)}`,
+      SkillFileContentSchema,
+    );
+  }
   const request = `GET /api/resources/skills/${id}/files/${path}`;
   return fixture(
     () => {
@@ -98,7 +110,7 @@ export function getSkillFile(id: string, path: string): Promise<SkillFileContent
 
 /** URL to download a skill as a zip (a plain link, not a fetch). */
 export function skillZipUrl(id: string): string {
-  return `/api/resources/skills/${id}/zip`;
+  return `${API_BASE}/resources/skills/${id}/zip`;
 }
 
 function uploadCase(): SkillUploadCase {
@@ -117,7 +129,7 @@ export function validateSkillUpload(file: File): Promise<SkillUploadValidation> 
   if (apiMode === 'live') {
     const body = new FormData();
     body.append('file', file);
-    return liveSend('POST', '/resources/skills/validate', body);
+    return apiSend('POST', '/resources/skills/validate', body, SkillUploadValidationSchema);
   }
   return fixture(() => skillValidationFixture(uploadCase()), {
     request: 'POST /api/resources/skills/validate',
@@ -127,7 +139,7 @@ export function validateSkillUpload(file: File): Promise<SkillUploadValidation> 
 
 /** POST /resources/skills with the validation token: stores the skill and returns its row. */
 export function confirmSkillUpload(token: string): Promise<SkillRow> {
-  if (apiMode === 'live') return liveSend('POST', '/resources/skills', { token });
+  if (apiMode === 'live') return apiSend('POST', '/resources/skills', { token }, SkillRowSchema);
   return fixture(() => skillConfirmFixture(token), { request: 'POST /api/resources/skills' });
 }
 
@@ -137,7 +149,7 @@ export function confirmSkillUpload(token: string): Promise<SkillRow> {
 
 /** GET /resources/documents. */
 export function listDocuments(): Promise<DocumentRow[]> {
-  if (apiMode === 'live') return liveGet('/resources/documents');
+  if (apiMode === 'live') return apiGet('/resources/documents', DocumentRowSchema.array());
   return fixture(() => documentsFixture(noResources()), {
     request: 'GET /api/resources/documents',
   });
@@ -148,10 +160,10 @@ export function uploadDocument(file: File): Promise<DocumentRow> {
   if (apiMode === 'live') {
     const body = new FormData();
     body.append('file', file);
-    return liveSend('POST', '/resources/documents', body);
+    return apiSend('POST', '/resources/documents', body, DocumentRowSchema);
   }
   const request = 'POST /api/resources/documents';
-  if (file.size > 50 * 1024 * 1024) {
+  if (file.size > DOCUMENT_MAX_BYTES) {
     return fixtureFailure(request, 413, `${file.name} is larger than 50 MB`);
   }
   return fixture(() => documentUploadFixture(file.name, file.size, file.type), {
@@ -162,7 +174,7 @@ export function uploadDocument(file: File): Promise<DocumentRow> {
 
 /** URL to download a document (a plain link, not a fetch). */
 export function documentContentUrl(id: string): string {
-  return `/api/resources/documents/${id}/content`;
+  return `${API_BASE}/resources/documents/${id}/content`;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +183,7 @@ export function documentContentUrl(id: string): string {
 
 /** GET /resources/mcp-servers. */
 export function listMcpServers(): Promise<McpServerRow[]> {
-  if (apiMode === 'live') return liveGet('/resources/mcp-servers');
+  if (apiMode === 'live') return apiGet('/resources/mcp-servers', McpServerRowSchema.array());
   return fixture(
     () =>
       mcpServersFixture(noResources()).map((row) =>
@@ -190,8 +202,8 @@ export function listMcpServers(): Promise<McpServerRow[]> {
 export function saveMcpServer(input: McpServerInput, id?: string): Promise<McpServerRow> {
   if (apiMode === 'live') {
     return id
-      ? liveSend('PUT', `/resources/mcp-servers/${id}`, input)
-      : liveSend('POST', '/resources/mcp-servers', input);
+      ? apiSend('PUT', `/resources/mcp-servers/${id}`, input, McpServerRowSchema)
+      : apiSend('POST', '/resources/mcp-servers', input, McpServerRowSchema);
   }
   const request = id ? `PUT /api/resources/mcp-servers/${id}` : 'POST /api/resources/mcp-servers';
   const taken = mcpServersFixture(noResources()).find((s) => s.name === input.name.trim());
@@ -210,8 +222,8 @@ export function testMcpServer(target: { id: string } | McpServerInput): Promise<
   const saved = 'id' in target;
   if (apiMode === 'live') {
     return saved
-      ? liveSend('POST', `/resources/mcp-servers/${target.id}/test`)
-      : liveSend('POST', '/resources/mcp-servers/test', target);
+      ? apiSend('POST', `/resources/mcp-servers/${target.id}/test`, {}, McpTestViewSchema)
+      : apiSend('POST', '/resources/mcp-servers/test', target, McpTestViewSchema);
   }
   const request = saved
     ? `POST /api/resources/mcp-servers/${target.id}/test`
@@ -235,7 +247,7 @@ export function testMcpServer(target: { id: string } | McpServerInput): Promise<
  * service that reads each has it (the worker for stdio env, egress for http headers).
  */
 export function listSecrets(): Promise<SecretRow[]> {
-  if (apiMode === 'live') return liveGet('/resources/secrets');
+  if (apiMode === 'live') return apiGet('/resources/secrets', SecretRowSchema.array());
   return fixture(() => secretsFixture({ empty: noResources(), set: !secretMissing() }), {
     request: 'GET /api/resources/secrets',
   });
@@ -243,7 +255,9 @@ export function listSecrets(): Promise<SecretRow[]> {
 
 /** "Check again": asks the worker, and egress through it, to report their environment names now. */
 export function checkSecrets(): Promise<SecretRow[]> {
-  if (apiMode === 'live') return liveGet(withQuery('/resources/secrets', { refresh: true }));
+  if (apiMode === 'live') {
+    return apiGet(withQuery('/resources/secrets', { refresh: 'true' }), SecretRowSchema.array());
+  }
   return fixture(
     () => secretsFixture({ empty: noResources(), set: !secretMissing(), checkedNow: true }),
     { request: 'GET /api/resources/secrets', latencyMs: 600 },

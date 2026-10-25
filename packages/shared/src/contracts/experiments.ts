@@ -259,6 +259,12 @@ const ExperimentDetailFieldsSchema = z.object({
   pausedAt: isoTimeView.nullable(),
   createdAt: isoTimeView,
   finishedAt: isoTimeView.nullable(),
+  /**
+   * When Cancel was pressed; null if it never was. A cancelled experiment stays `running`
+   * while its in-flight runs finish (plan 7.3), so this is how the page tells "cancelling"
+   * from running and stops offering Pause and Cancel. Set only while running or completed.
+   */
+  cancelledAt: isoTimeView.nullable(),
   elapsedS: secondsView,
   remainingEstimateS: secondsView.nullable(),
   /** When the last live event arrived ("Live · updated 15:23:42"). */
@@ -278,7 +284,7 @@ const ExperimentDetailFieldsSchema = z.object({
   spend: ExperimentSpendSchema,
   perConfiguration: z.array(ConfigProgressSchema),
   feed: z.array(FeedEntrySchema).max(10),
-  /** One per candidate, in candidate order. Provisional while running; final once completed. */
+  /** One per candidate, in candidate order. Provisional while running, paused or failed; final once completed. */
   verdicts: z.array(VerdictSummarySchema),
   aggregates: z.array(ConfigAggregateSchema),
   failure: ExperimentFailureViewSchema.nullable(),
@@ -302,6 +308,9 @@ export const ExperimentDetailSchema = ExperimentDetailFieldsSchema.superRefine((
   }
   if (e.status === 'failed' && e.failure === null) {
     issue('failure', 'a failed experiment carries its failure');
+  }
+  if (e.cancelledAt !== null && e.status !== 'running' && e.status !== 'completed') {
+    issue('cancelledAt', 'only a running (cancelling) or completed experiment was cancelled');
   }
 });
 export type ExperimentDetail = z.infer<typeof ExperimentDetailSchema>;
@@ -337,6 +346,11 @@ export const ExperimentListVerdictSchema = z.object({
   delta: deltaView.nullable(),
   lo: deltaView.nullable(),
   hi: deltaView.nullable(),
+  /**
+   * Why there is no verdict, when `verdict` is not_computable, so the chip
+   * can say it ("No interval (1 rep)"); null otherwise.
+   */
+  reason: z.enum(NOT_COMPUTABLE_REASONS).nullable(),
 });
 export type ExperimentListVerdict = z.infer<typeof ExperimentListVerdictSchema>;
 

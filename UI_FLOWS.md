@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** (Phases 0 to 4): postgres, the api with every Phase 1 to Phase 4 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login. The web app is built against fixtures. **Planned**: the pages against the real API (Phase 5), suite authoring (Phase 5b).
+Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`). **Planned**: suite authoring (Phase 5b).
 
 ```mermaid
 flowchart LR
@@ -255,7 +255,7 @@ Two more states come from outside this machine: `host` (development, `NOUS_HOST_
 
 ## 4. App shell: navigation, banners, live pills
 
-Status: **Built** in the web app against fixtures (`AppShell.vue`, providers and system stores). The API serves `/system/summary`, `/system/events` (SSE) and `/providers` (Phase 2). **Planned**: switching the web app to the real API (Phase 5).
+Status: **Built** against the API (Phase 5; `docs/phases/phase-5.md`): `AppShell.vue` with the providers and system stores, the summary streamed from `/system/events` and `/providers` read again every 30 s. The API serves `/system/summary`, `/system/events` (SSE) and `/providers` (Phase 2).
 
 What the user sees on every page: a 48 px top bar with Experiments, Suites, Configurations, Resources, then System after a divider with a status dot. On the right are the live pill ("2 running · 87 of 240 scored"), the approval pill while a Nous login is waiting, and the theme toggle. Under the bar, an amber banner when a provider that configurations use is not connected.
 
@@ -311,21 +311,22 @@ flowchart TD
 Notes:
 
 - The banner cannot be dismissed while its condition holds. It goes away by itself when the status changes.
-- The current web code hides the banner on Suites **and Resources**, following the designer note. The plan exempts only Suites. See open points.
+- The banner shows on every page but Suites, Resources included (Phase 5, open point 4); on System itself it has no action. An API-key provider that configurations use and that has no key gets its own banner ("OpenRouter has no API key. Experiments that use it cannot run." · How to add it). When Nous cannot be connected from the UI (host mode with the proxy down, or the login service `unavailable`), the banner's action opens System instead of Connect.
+- When the summary stream drops, a reconnecting pill shows, and after 30 s an "Offline · Retry" pill (Phase 5).
 - The theme toggle only changes `data-theme` on the page and remembers the choice in the browser. Nothing goes to the server.
 
 ---
 
 ## 5. System page
 
-Status: **Built** in the web app against fixtures (rows, checks, workers). The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1). **Planned**: the page against the real API (Phase 5).
+Status: **Built** against the API (Phase 5; `docs/phases/phase-5.md`): model access, secrets, sandbox and workers. The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1).
 
-The page has three sections, plus a planned fourth:
+The page has four sections:
 
-- **Model access**: one row per provider.
+- **Model access**: one row per provider `GET /providers` lists, with the configurations that use each.
+- **Secrets**: each name, set or not set, and the MCP servers that read it (`GET /resources/secrets`).
 - **Sandbox**: whether isolation is proven, with the 15 checks.
 - **Workers**: one row per worker.
-- **Secrets presence** (planned, plan 12.2 item 11).
 
 ### 5.1 Worker start and the isolation proof
 
@@ -413,7 +414,7 @@ sequenceDiagram
 
 ## 6. Connecting Nous Portal
 
-Status: **Built** in the web app against fixtures (dialog, every state, polling, follow-ups), and in the API: the `nous-login` service and the `providers` module (Phase 2), tested against a fake portal. **To run**: a real login approved in the browser (plan spike I14).
+Status: **Built** in the web app against the API (dialog, every state, polling, follow-ups; Phase 5), with a `manual` step that shows the terminal command and sends nothing when Nous cannot be connected from the UI (host mode with the proxy down, or the login service `unavailable`); and in the API: the `nous-login` service and the `providers` module (Phase 2), tested against a fake portal. **To run**: a real login approved in the browser (plan spike I14).
 
 Nous Portal has no API keys, only an OAuth device login with rotating refresh tokens. The user connects once from the UI, and the login lives in the `nous-home` volume, never in the database or the browser.
 
@@ -479,7 +480,7 @@ Details that matter:
 
 ## 7. Nudges: where the UI blocks model work and why
 
-Status: **Built** in the web app against fixtures (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker), and in the API: the launch 409s and the worker's provider guard (Phase 2), and the 409s of launch and re-score when the LLM judge's provider is not ready (Phase 3). **Planned**: the components against the real API (Phase 5).
+Status: **Built** in the web app against the API (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker; Phase 5), and in the API: the launch 409s and the worker's provider guard (Phase 2), the 409s of launch and re-score when the LLM judge's provider is not ready (Phase 3), and the judge keys with no model in each run's `needs`, so Re-score is disabled with the fix (Phase 5).
 
 The rule: a user should never find out at launch, or halfway through an experiment, that no model is reachable. Every place that leads to a model call checks the providers of the configurations involved.
 
@@ -510,7 +511,7 @@ flowchart TD
 
 ## 8. Suites and tasks
 
-Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`). **Planned**: the remaining sample tasks (Phase 6), the pages against the real API (Phase 5), and authoring in the UI (Phase 5b).
+Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5). **Planned**: the remaining sample tasks (Phase 6) and authoring in the UI (Phase 5b).
 
 Suites are folders under `./suites`, edited on disk with any editor. It shows what was loaded, whether every task passes its own self-check, and every version. Phase 5b adds creating and editing suites in the UI: edits go into a draft, and saving writes the same files and loads them as a reload does (plan section 4.6). Its flows are added here when that phase is built.
 
@@ -623,7 +624,7 @@ The reference answer is shown to the user (it is their own task) but marked "Hid
 
 ## 9. Resources: skills, documents, MCP servers, secrets
 
-Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2). **Planned**: the pages against the real API (Phase 5).
+Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2); the four tabs against the real API (Phase 5).
 
 Resources are the building blocks configurations point at. Every resource version is immutable once a configuration uses it.
 
@@ -717,7 +718,7 @@ The form says, per transport, what the agent can read. Under a stdio server's en
 
 ### 9.4 Secrets
 
-Status: **Built**: the endpoint and presence reporting (Phase 1), and the egress MCP gateway that adds header values (Phase 2, spike I15 passed). **Planned**: the pages against the real API (Phase 5).
+Status: **Built**: the endpoint and presence reporting (Phase 1), the egress MCP gateway that adds header values (Phase 2, spike I15 passed), and the Secrets tab and the System page's secrets against the real API (Phase 5).
 
 `GET /resources/secrets` lists every name that MCP definitions reference: set or not set, its source, what references it, its exposure, and when it was last checked. Values are never shown, stored, typed or sent to the browser. A value is set by adding it to `.env` and restarting the service that reads it (`docker compose up -d egress worker`).
 
@@ -754,7 +755,7 @@ flowchart LR
 
 ## 10. Configurations
 
-Status: **Built**: tables, versioning triggers (a frozen version never changes), the config hash, and every endpoint (Phase 1). **Planned**: the pages against the real API (Phase 5).
+Status: **Built**: tables, versioning triggers (a frozen version never changes), the config hash, and every endpoint (Phase 1); `GET /configurations/new-draft` for a new configuration's form, and the list, form and detail against the real API (Phase 5).
 
 A configuration is a record of how Hermes is set up: model, provider, toolsets, memory, skills, documents, MCP servers and limits. It is only a definition: saving one never calls a model, so Save is never blocked by provider status.
 
@@ -811,7 +812,7 @@ Hermes always installs its own `hermes-agent` skill in every home and it cannot 
 
 ## 11. New experiment and launch
 
-Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2). **Planned**: the page against the real API (Phase 5).
+Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2); the page against the real API (Phase 5).
 
 ### 11.1 Filling the form
 
@@ -1025,7 +1026,7 @@ flowchart TD
   X["Container exited or was stopped"] --> R{"result event?"}
   R -- "exit 0, text" --> EX["executed"]
   R -- "exit 1, partial (max turns)" --> EX
-  R -- "error: the model gateway's token-cap 429" --> LI["execution_error · limit<br/>(never retried automatically)"]
+  R -- "error: the model gateway's token-cap 402" --> LI["execution_error · limit<br/>(never retried automatically)"]
   R -- "error: auth, 401, 403, 429, 5xx, connection" --> PV["execution_error · provider"]
   R -- none --> W{"Why did it stop?"}
   W -- "deadline: SIGTERM, SIGKILL after 10 s" --> TO["execution_error · timeout<br/>(platform result event synthesised)"]
@@ -1174,11 +1175,11 @@ Two workers finishing the last two runs at the same moment append the verdict on
 
 ## 14. Experiment list and overview, live
 
-Status: **Built** in the web app against fixtures, and in the API: the list, the detail and the SSE stream (Phase 2), and the verdicts read from the verdict history, with the SSE `experiment` event's `verdicts` and `verdictUpdatedAt` (Phase 4). **Planned**: the pages against the real API (Phase 5).
+Status: **Built** in the web app against the API (Phase 5; `docs/phases/phase-5.md`): the list, polled while anything runs, and the Overview, live from the experiment's SSE stream; and in the API: the list, the detail and the SSE stream (Phase 2), and the verdicts read from the verdict history, with the SSE `experiment` event's `verdicts` and `verdictUpdatedAt` (Phase 4).
 
 ### 14.1 Experiment list
 
-`GET /experiments` returns one row per experiment, newest first: name, status chip, suite and version, configurations, runs done of total, cost, and once completed one verdict chip per candidate, from its last verdict history entry (Δ and interval included). A running, paused or failed experiment has no chip; the SSE `experiment` event carries the same `verdicts`, so a live list patches its chips. A failed experiment shows its failure reason in the row. Clicking a row opens the Overview tab.
+`GET /experiments` returns one row per experiment, newest first: name, status chip, suite and version, configurations, runs done of total, cost, and once completed one verdict chip per candidate, from its last verdict history entry (Δ and interval included). A running, paused or failed experiment has no chip; the SSE `experiment` event carries the same `verdicts`. A verdict that is `not_computable` carries its `reason`, so the chip says why ("No interval (1 rep)"). The web polls `GET /experiments` every 5 s while anything runs and patches the rows in place (Phase 5). A failed experiment shows its failure reason in the row. Clicking a row opens the Overview tab.
 
 ### 14.2 Overview while running
 
@@ -1205,24 +1206,24 @@ sequenceDiagram
 
 What the overview shows, and where each number comes from:
 
-| On screen                                            | Source                                                                                                                                   |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| "87 of 120 scored · 28 queued · 3 running · 1 error" | run counts by status                                                                                                                     |
-| Per-configuration bars, provisional pass rate        | passed / scored per configuration so far                                                                                                 |
-| Spend "$0.71 of $2.00 ceiling · projected $1.69"     | sum of priced attempt costs, estimate for the rest                                                                                       |
-| Feed                                                 | the last 10 run transitions and scores                                                                                                   |
-| Snapshot strip                                       | what the experiment froze at launch: suite + version, configuration versions, Hermes revision                                            |
-| VerdictCard (complete)                               | each candidate's last `verdict_history` entry; the entries before it, with their cause and note, give "Updated … · previously …"         |
-| VerdictCard (running)                                | the provisional figures so far, computed as the comparison computes them; `not_computable` at once with one repetition or nothing scored |
-| No-worker banner                                     | no worker heartbeat for 60 s while runs are queued                                                                                       |
-| Paused banners                                       | `pause_reason`: user, spend_ceiling, provider_disconnected                                                                               |
-| Failed banner                                        | the circuit breaker's structured failure: category, message, first stderr line, attempt                                                  |
+| On screen                                            | Source                                                                                                                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "87 of 120 scored · 28 queued · 3 running · 1 error" | run counts by status                                                                                                                                          |
+| Per-configuration bars, provisional pass rate        | passed / scored per configuration so far                                                                                                                      |
+| Spend "$0.71 of $2.00 ceiling · projected $1.69"     | sum of priced attempt costs, estimate for the rest                                                                                                            |
+| Feed                                                 | the last 10 run transitions and scores                                                                                                                        |
+| Snapshot strip                                       | what the experiment froze at launch: suite + version, configuration versions, Hermes revision                                                                 |
+| VerdictCard (complete)                               | each candidate's last `verdict_history` entry; the entries before it, with their cause and note, give "Updated … · previously …"                              |
+| VerdictCard (running)                                | the provisional figures so far, computed as the comparison computes them; `not_computable` at once with one repetition, fewer than 3 tasks, or nothing scored |
+| No-worker banner                                     | no worker heartbeat for 60 s while runs are queued                                                                                                            |
+| Paused banners                                       | `pause_reason`: user, spend_ceiling, provider_disconnected                                                                                                    |
+| Failed banner                                        | the circuit breaker's structured failure: category, message, first stderr line, attempt                                                                       |
 
 ---
 
 ## 15. Experiment controls
 
-Status: **Built**: the endpoints and their guards (pause, resume, cancel, retry failed, duplicate, the spend guard and the circuit breaker; Phase 2). **Planned**: the buttons against the real API (Phase 5).
+Status: **Built**: the endpoints and their guards (pause, resume, cancel, retry failed, duplicate, the spend guard and the circuit breaker; Phase 2); the buttons against the real API, with `ExperimentDetail.cancelledAt` so a cancelling experiment offers neither Pause nor Cancel (Phase 5).
 
 Every control is one transaction that locks the experiment row first.
 
@@ -1283,7 +1284,7 @@ A login that lapses during a trial fails that attempt as `execution_error · pro
 
 ## 16. Comparison tab
 
-Status: **Built** in the web app against fixtures, and its contract (`ComparisonViewSchema`); the statistics module, the endpoint and its cache in the API (Phase 4; `docs/phases/phase-4.md` sections 3.3 to 3.7). **Planned**: the tab against the real API (Phase 5).
+Status: **Built** in the web app against the API (Phase 5; `docs/phases/phase-5.md`), and its contract (`ComparisonViewSchema`); the statistics module, the endpoint and its cache in the API (Phase 4; `docs/phases/phase-4.md` sections 3.3 to 3.7), with the gate's `too_few_tasks` and a failed experiment's provisional comparison (Phase 5).
 
 The comparison answers "is the candidate better than the baseline, and how sure are we?", and links every number to the runs beneath it.
 
@@ -1311,7 +1312,7 @@ sequenceDiagram
     A->>A: pass rate per task per configuration = passed / counted
     A->>A: observed difference = mean over tasks of (candidate - baseline)
     A->>A: bootstrap: resample tasks 10,000 times (mulberry32 seeded from the experiment id),<br/>2.5th and 97.5th percentiles
-    A->>A: verdict better (lo > 0), worse (hi < 0), else inconclusive,<br/>provisional while running or paused
+    A->>A: verdict better (lo > 0), worse (hi < 0), else inconclusive,<br/>provisional while running, paused or failed
     A->>A: sensitivity: same difference and interval without execution errors, error and ungradable scores
     A->>A: secondary: median duration, mean tokens, cost, error and ungradable counts
     A->>C: store
@@ -1326,21 +1327,21 @@ States the tab handles:
 
 ```mermaid
 flowchart TD
-  G{"Every selected task has at least 2 counted runs<br/>per configuration?"} -- no --> NC["Statistics not computable, with the reason, in this order:<br/>single_repetition, nothing_scored, not_enough_runs"]
-  G -- yes --> RUN{"Experiment running or paused?"}
+  G{"At least 3 tasks, each with at least 2 counted runs<br/>per configuration?"} -- no --> NC["Statistics not computable, with the reason, in this order:<br/>single_repetition, too_few_tasks, nothing_scored, not_enough_runs"]
+  G -- yes --> RUN{"Experiment running, paused or failed?"}
   RUN -- yes --> PV["Provisional: verdict chip provisional,<br/>unscored cells queued or running"]
   RUN -- no --> FIN["Final verdict"]
   F["Filter: improved / regressed / unchanged"] --> E{"Rows left?"}
   E -- no --> EM["Empty state"]
 ```
 
-Because `results_revision` moves on every run status change and every published or superseded score set, a retry, cancellation, execution error or re-score can never serve a stale comparison. The status is in the cache key because completing, pausing or resuming moves no run but turns provisional into final, and the configuration names because a rename moves no run. `single_repetition` applies whatever has run; `nothing_scored` means no run of the two configurations counts yet (an execution error counts); a cell's tooltip is always the primary score's comment, while its colour follows the selected key; the candidate select's chips are the verdicts on the primary key. A failed experiment's comparison is final, since only a running or paused one is provisional, while its Overview card reads provisional (`docs/phases/phase-4.md` open question 5).
+Because `results_revision` moves on every run status change and every published or superseded score set, a retry, cancellation, execution error or re-score can never serve a stale comparison. The status is in the cache key because completing, pausing or resuming moves no run but turns provisional into final, and the configuration names because a rename moves no run. `single_repetition` applies whatever has run; `nothing_scored` means no run of the two configurations counts yet (an execution error counts); a cell's tooltip is always the primary score's comment, while its colour follows the selected key; the candidate select's chips are the verdicts on the primary key. A failed experiment's comparison is provisional, as its Overview card is, since Retry failed runs can resume it (`docs/phases/phase-4.md` question 5, built in Phase 5). With fewer than 3 tasks there is no interval (`too_few_tasks`), even while running: the interval resamples tasks, and with fewer it cannot say how sure the difference is.
 
 ---
 
 ## 17. Runs tab
 
-Status: **Built** in the web app against fixtures, and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2), and bulk re-score with each row's `generation` and `rescorePending` (Phase 3), which the SSE `run` event now carries too, so a live tab shows a re-score queued and published (Phase 4). **Planned**: the tab against the real API (Phase 5).
+Status: **Built** in the web app against the API, its rows patched in place by the SSE `run` events (Phase 5), and `GET /experiments/:id/runs` with its filters and bulk retry (Phase 2), and bulk re-score with each row's `generation` and `rescorePending` (Phase 3), which the SSE `run` event now carries too, so a live tab shows a re-score queued and published (Phase 4).
 
 ```mermaid
 sequenceDiagram
@@ -1374,7 +1375,7 @@ sequenceDiagram
 
 ## 18. Run inspector
 
-Status: **Built** in the web app against fixtures, and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3). **Planned**: the drawer against the real API (Phase 5).
+Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3).
 
 A right-hand drawer over the experiment, 75% of the window, with its own route (`/experiments/:id/runs/:runId`, or `?run=` from the comparison). Esc closes it back to where it was opened.
 
@@ -1442,15 +1443,15 @@ Each of these needs a decision or a fix before the matching code is written.
 | 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).                                                                     | Done. Follow-ups are points 14 to 16.                                                                                             |
 | 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                                                                                   | Done.                                                                                                                             |
 | 3   | API surface         | **Resolved.** Phase 1 built its own routes (`GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route); Phase 2 built `GET /experiments/new-options` and the artifact preview route. All are in Swagger and plan section 11. | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 4   | Banner on Resources | The web shell hides the not-connected banner on Suites and Resources (designer note). The plan and the design brief exempt only Suites.                                                                                                                                                                                                                                           | Show it on Resources. The gaps prompt already asks the design to fix the note.                                                    |
+| 4   | Banner on Resources | **Resolved in Phase 5**, as suggested: the banner shows on Resources and is hidden on Suites only. Before, the web shell hid it on Suites and Resources (designer note), while the plan and the design brief exempt only Suites.                                                                                                                                                  | Done (`docs/phases/phase-5.md` section 2.5).                                                                                      |
 | 5   | Pause reason        | **Resolved in Phase 2.** `provider_disconnected` is in migration 0004 and `packages/shared`.                                                                                                                                                                                                                                                                                      | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
 | 6   | Network events      | **Resolved in Phase 2.** Subtype `network`, with a defined payload (kind, decision, background, and host, port, reason, status, ms, model, server, method and tokens where known).                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
 | 7   | Host login status   | **Resolved in Phase 2**, as suggested: egress's admin `/health` reports the host forward, the worker records `workers.host_proxy`, and `GET /providers` reports `host` or `host_unreachable`.                                                                                                                                                                                     | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
 | 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                                                                                              | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2). |
-| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling itself is Phase 5.                                                                                                                                                                                                                  | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling is built in Phase 5: the list every 5 s while anything runs, the inspector every 1 s while a run is live.                                                                                                                           | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
 | 10  | Spend ceiling       | **Resolved in Phase 2.** Launch is allowed over the ceiling; the spend guard pauses at it.                                                                                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
 | 11  | Launch and sandbox  | **Resolved in Phase 2.** Launch answers 409 when no connected worker has proven sandbox isolation.                                                                                                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are Phase 5.                                                                                                                                                                                                                                                                  | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are built in Phase 5.                                                                                                                                                                                                                                                         | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
 | 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                                                                                    | Done.                                                                                                                             |
 | 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                                                                                 | Done.                                                                                                                             |
 | 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                                                                                       | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                     |

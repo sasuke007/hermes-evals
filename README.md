@@ -28,7 +28,7 @@ Model access:
 - **API keys** (OpenRouter, the Nous API, OpenAI, Anthropic): set `OPENROUTER_API_KEY`, `NOUS_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`, then `docker compose up -d egress worker`.
 - **A custom OpenAI-compatible endpoint**: a configuration with provider `custom` and its base URL; egress sends `CUSTOM_API_KEY` from `.env` when it is set. A configuration on `custom` with base URL `http://mock-model:8090/v1` runs against the mock model (`docker compose --profile test up -d mock-model`) at no cost, which is how the platform is checked without a real model; `MOCK_SCRIPTS` in `.env` gives chosen prompts their own scripted answers.
 
-Model prices for cost and the spend guard come from `config/prices.yaml`; an experiment freezes it when it launches. A model it does not list is unpriced: its cost shows as unknown, never as zero. The model gateway serves one attempt at most `MODEL_TOKEN_CAP_PER_ATTEMPT` tokens (2,000,000 by default), then answers 429; a run stopped there is `execution_error · limit`, never retried automatically. Every call counts toward it: streamed calls are sent with `stream_options.include_usage` on, and a call that answers without reporting usage is charged an estimate from its size, so an agent calling the gateway itself cannot slip past the cap or the spend guard.
+Model prices for cost and the spend guard come from `config/prices.yaml`; an experiment freezes it when it launches. A model it does not list is unpriced: its cost shows as unknown, never as zero. The model gateway serves one attempt at most `MODEL_TOKEN_CAP_PER_ATTEMPT` tokens (2,000,000 by default), then answers 402 with `x-should-retry: false`, so Hermes stops at once instead of retrying; a run stopped there is `execution_error · limit`, never retried automatically. Every call counts toward it: streamed calls are sent with `stream_options.include_usage` on, and a call that answers without reporting usage is charged an estimate from its size, so an agent calling the gateway itself cannot slip past the cap or the spend guard.
 
 Scoring and re-score:
 
@@ -38,7 +38,7 @@ Scoring and re-score:
 
 Comparison and verdict:
 
-- `GET /api/experiments/:id/comparison?candidate=&key=&filter=` compares one candidate with the baseline task by task: pass rates per task and pooled, the mean per-task difference with a 95% interval from a paired bootstrap over tasks (10,000 resamples, seeded from the experiment id, so the same results always give the same interval), the verdict (`better` when the interval is above 0, `worse` when below, else `inconclusive`; `provisional` while running), a sensitivity figure without runs that broke, and secondary metrics. `key` is `primary` (each task's own primary key, the default), `any_failed`, or a key every selected task declares. With one repetition, or fewer than 2 counted runs of a task under a configuration, there is no interval and the answer says why. The answer is cached by the experiment's results revision, which moves on every run status change and every published re-score, so it is never stale.
+- `GET /api/experiments/:id/comparison?candidate=&key=&filter=` compares one candidate with the baseline task by task: pass rates per task and pooled, the mean per-task difference with a 95% interval from a paired bootstrap over tasks (10,000 resamples, seeded from the experiment id, so the same results always give the same interval), the verdict (`better` when the interval is above 0, `worse` when below, else `inconclusive`; `provisional` while running), a sensitivity figure without runs that broke, and secondary metrics. `key` is `primary` (each task's own primary key, the default), `any_failed`, or a key every selected task declares. With one repetition, fewer than 3 tasks, or fewer than 2 counted runs of a task under a configuration, there is no interval and the answer says why. The answer is cached by the experiment's results revision, which moves on every run status change and every published re-score, so it is never stale.
 - When an experiment completes, and again after a retry or a re-score changes its results, one verdict entry per candidate is appended to its history (cause `initial`, `retry` or `rescore`); the experiment list, its Overview and the live stream show the latest, and the Overview the ones before it.
 
 MCP server secrets also go in `.env`, by the env name the server definition lists: a stdio server's values are read by the worker, an http server's header values by egress, which adds them in its MCP gateway (`http://egress:8080/mcp/<name>`). The database and the UI only ever see the names. The sample stdio server needs `INVOICE_DB_URL` (see `.env.example`).
@@ -77,15 +77,17 @@ scripts/phase3-smoke.sh                            # curl and python3; BASE_URL 
 
 Its configurations, skill and experiments are named `smoke-<timestamp>-…`, and its suite directory `suites/zz-smoke-score-<timestamp>` is deleted again at the end. Afterwards return to the normal configuration with `docker compose up -d` (from a shell without those variables) and `docker compose --profile test rm -sf mock-model`.
 
-Check the comparison and the verdicts live (Phase 4, nothing costs money): a temporary suite of four tasks, the skill and two configurations; one experiment where the configuration with the skill improves every task reads `better`, and one where it improves one task of two stays `inconclusive`; then the comparison's key selector, filters and refusals, the verdict entry each completion appends, the list's chips, and a re-score that appends a second entry. It needs the Phase 2 mock scripts and no judge:
+Check the comparison and the verdicts live (Phase 4, nothing costs money): a temporary suite of four tasks, a skill and three configurations; one experiment where the configuration with the skill improves three tasks of four reads `better`, one where a twin of the baseline answers the same on three tasks stays `inconclusive`, and one with a single repetition is not computable; then the comparison's key selector, filters and refusals, the verdict entry each completion appends, the list's chips, and a re-score that appends a second entry. It needs the Phase 4 mock scripts and no judge:
 
 ```bash
-MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase2-mock-scripts.json"))))')" \
+MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase4-mock-scripts.json"))))')" \
   docker compose --profile test up -d
 scripts/phase4-smoke.sh                            # curl and python3; BASE_URL defaults to http://localhost:3000/api
 ```
 
-Its suite directory is `suites/zz-smoke-analysis-<timestamp>`, deleted again at the end.
+Its suite directory is `suites/zz-smoke-stats-<timestamp>`, deleted again at the end.
+
+Walk Flows A to D in the browser (the design's four flows, with real Hermes and the mock model): `scripts/flows-setup.sh` writes a suite, a skill zip and the mock's scripts, and `docs/flows.md` is the checklist, step by step with what each page should show.
 
 ## How a trial is isolated
 
@@ -116,7 +118,8 @@ pnpm dev            # shared (tsc --watch), api (nest --watch), web (vite) via T
 pnpm --filter @hermes-evals/api dev:worker   # the worker, in a second terminal: loads suites, tests MCP servers, runs and scores trials
 ```
 
-- Web dev server: http://localhost:5173 (proxies `/api` to the API on :3000). The API listens on 127.0.0.1 (`HOST`) and answers only the host names it is reached by: loopback, `api`, the host of `CORS_ORIGIN` and any in `ALLOWED_HOSTS` (comma-separated). To open the Compose web app by another name, add it to `ALLOWED_HOSTS` and to `server_name` in docker/nginx.conf.
+- Web dev server: http://localhost:5173 (proxies `/api` to the API on :3000; `VITE_API_PROXY` points it elsewhere). The API listens on 127.0.0.1 (`HOST`) and answers only the host names it is reached by: loopback, `api`, the host of `CORS_ORIGIN` and any in `ALLOWED_HOSTS` (comma-separated). To open the Compose web app by another name, add it to `ALLOWED_HOSTS` and to `server_name` in docker/nginx.conf.
+- The web app calls the real API, in `pnpm dev` as in the Compose image (`docker/web.Dockerfile` builds with `VITE_API_MODE=live`). To work on a page without the API, `VITE_API_MODE=fixtures pnpm --filter @hermes-evals/web dev` serves the sample data in `apps/web/src/fixtures` instead, and `?scenario=<name>` on any URL shows a designed state: `loading`, `error`, `empty`, a paused, failed or single-repetition experiment, a refused launch, Nous Portal not connected, an invalid task and the rest listed in `apps/web/src/fixtures/scenarios.ts` (several at once separated by commas; `?scenario=clear` forgets the choice). The component tests run on the same fixtures. How pages are built and styled, with Tailwind CSS v4 over the design tokens: `apps/web/CONTRIBUTING.md`; the data layer: `apps/web/src/api/README.md`.
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` run across all packages in dependency order. `pnpm test` runs the unit tests and the integration tests on PGlite (real migrations and triggers, in process).
 - Postgres 17 end-to-end tests, including the whole API and worker on a fresh database (`test/phase2.e2e-spec.ts` launches an experiment over HTTP and runs it to scored, with an in-process fake container engine that plays canned Hermes output; `test/phase3.e2e-spec.ts` scores all eight check types right and wrong, with the LLM judge behind a fake egress judge path, and re-scores; `test/phase4.e2e-spec.ts` follows the comparison and the verdict history through a re-score, a retry and a cancel): `TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e` against a throwaway server (`docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine`). Each spec creates and drops its own database; never point it at the Compose database. The suite stops at once without `TEST_DATABASE_URL` (every file would otherwise skip and read as green) or with port 5432, and runs four files at a time, which peaks at about 70 of the server's 100 connections.
 - Tests that start real trial containers run only with `RUN_SANDBOX_TESTS=1` and a docker-guard socket (`DOCKER_SOCKET`, `TRIALS_DIR`, `TRIAL_IMAGE`, `TRIAL_VOLUME`); Turbo passes these through and keys its cache on them.
@@ -127,7 +130,7 @@ pnpm --filter @hermes-evals/api dev:worker   # the worker, in a second terminal:
 apps/api          NestJS: HTTP API, SSE, pg-boss producer (src/main.ts), worker (src/worker.ts), sandbox client (src/sandbox)
 apps/docker-guard The only holder of the Docker socket: a filtered Docker API for trial containers
 apps/egress       The trials' only way out: forward proxy, model gateway, MCP gateway, scripted mock model
-apps/web          Vue 3 + Vite + Pinia + vue-router
+apps/web          Vue 3 + Vite + Pinia + vue-router + Tailwind CSS v4 (see apps/web/CONTRIBUTING.md)
 packages/shared   Domain types, zod schemas, API contracts used by both apps
 suites/           Task suites, loaded by the worker at start and on POST /api/suites/reload (read-only in the UI)
 config/           prices.yaml: model prices an experiment freezes at launch
@@ -138,3 +141,5 @@ docker/           Dockerfiles: api, worker, web, trial (pinned Hermes image, nou
 
 - `UI_DESIGN_BRIEF.md`: the brief the UI design was produced from
 - `DESIGN_AUDIT.md`: audit of the design against the brief and the system design
+- `docs/phases/phase-<n>.md`: what each phase built, how it was checked, and what it left for later
+- `docs/flows.md`: the manual walk of Flows A to D in the browser against the mock model

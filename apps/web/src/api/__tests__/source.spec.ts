@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/client';
 import {
   apiMode,
   fixture,
   fixtureFailure,
   hasScenario,
+  livePath,
   scenario,
   SCENARIO_STORAGE_KEY,
   withQuery,
@@ -12,8 +13,22 @@ import {
 import { setScenario, settledWithin } from './scenario';
 
 describe('apiMode', () => {
-  it('serves fixtures unless VITE_API_MODE=live', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('serves fixtures under VITE_API_MODE=fixtures (vitest.config.ts sets it)', () => {
     expect(apiMode).toBe('fixtures');
+    expect(livePath('/system/events')).toBeNull();
+  });
+
+  it('calls the real API by default', async () => {
+    vi.stubEnv('VITE_API_MODE', '');
+    vi.resetModules();
+    const source = await import('@/api/source');
+    expect(source.apiMode).toBe('live');
+    expect(source.livePath('/system/events')).toBe('/system/events');
   });
 });
 

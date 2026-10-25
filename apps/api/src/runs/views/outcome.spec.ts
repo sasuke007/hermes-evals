@@ -127,7 +127,7 @@ describe('the score evidence', () => {
 
 describe('the banner of a run stopped at the token cap', () => {
   const message =
-    'The model gateway stopped the run at its token cap: HTTP 429: This attempt reached its token cap of 2000000 tokens (2000418 used; MODEL_TOKEN_CAP_PER_ATTEMPT)';
+    'The model gateway stopped the run at its token cap: 2000418 of 2000000 tokens used.';
 
   it('names the cap and says a retry gets a fresh one, never an automatic retry', () => {
     const view = ExecutionErrorViewSchema.parse(
@@ -138,7 +138,7 @@ describe('the banner of a run stopped at the token cap', () => {
           errorMessage: message,
           exitCode: 1,
           durationMs: 214_400,
-          stderrTail: 'hermes: provider error (429); exit 1\n',
+          stderrTail: 'hermes: provider error (402); exit 1\n',
         },
         budgetS: 300,
         worker: null,
@@ -150,9 +150,10 @@ describe('the banner of a run stopped at the token cap', () => {
       reason: message,
       meta: 'after 214 s',
       exitCode: 1,
-      stderrTail: { lines: ['hermes: provider error (429); exit 1'], totalLines: 1 },
+      stderrTail: { lines: ['hermes: provider error (402); exit 1'], totalLines: 1 },
     });
     expect(view.explanation).toMatch(/MODEL_TOKEN_CAP_PER_ATTEMPT/);
+    expect(view.explanation).toMatch(/402, which Hermes does not retry/);
     expect(view.explanation).toMatch(/never retried automatically/);
   });
 });

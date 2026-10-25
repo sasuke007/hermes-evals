@@ -26,15 +26,46 @@ export interface Upstream {
 export const CUSTOM_API_KEY_ENV = 'CUSTOM_API_KEY';
 
 /**
- * Total tokens one registration is served before the gateway answers 429
- * (Phase 2 question 2), unless the registration names its own maxTokens.
+ * Total tokens one registration is served before the gateway refuses
+ * further calls (Phase 2 question 2), unless the registration names its own maxTokens.
  * MODEL_TOKEN_CAP_PER_ATTEMPT in egress's environment overrides it. Without
  * a cap a runaway agent would call the model until its deadline.
  */
 export const DEFAULT_TOKEN_CAP_PER_ATTEMPT = 2_000_000;
 
-/** The `error.code` of a 429 past the token cap, so a client can tell it from a rate limit. */
+/** The `error.code` of a call refused past the token cap, so a client can tell it from a rate limit. */
 export const TOKEN_CAP_CODE = 'token_cap_reached';
+
+/**
+ * The status a trial's model call gets past the token cap (Phase 4 question
+ * 8): 402, which Hermes does not retry, so a capped run stops at once. Read
+ * in the trial image (Hermes v0.22.4 at 4d04303):
+ * - agent/error_classifier.py classifies a 402 as `billing` unless its
+ *   message names a usage limit with a reset window ("try again", "resets
+ *   in", …), which this one does not; `billing` is not retryable
+ *   (turn_api_error.py settle_unrecovered_error: "402 is deliberately
+ *   treated as non-retryable"), and with no credential pool and no fallback
+ *   configured the turn ends with its error;
+ * - the OpenAI SDK it calls through retries only 408, 409, 429 and 5xx on
+ *   its own, and `x-should-retry: false` tells it not to retry this one.
+ * A 429 was classified `rate_limit` and retried with backoff, about five
+ * times in 15 s, each refused again. For a `nous` route Hermes first checks
+ * the Portal account once (its paid-entitlement refresh), which egress
+ * refuses like any other host, and fails open.
+ *
+ * The platform classifies the run `limit` from the connection log's entry
+ * (TOKEN_CAP_REASON_PREFIX, read by apps/api execution/attempt/classify.ts),
+ * never from this status. The LLM judge's path keeps 429: its only client,
+ * the worker, never retries a 4xx.
+ */
+export const TOKEN_CAP_STATUS = 402;
+
+/**
+ * How the connection-log reason of a call refused at the token cap begins.
+ * apps/api execution/attempt/classify.ts matches it to classify the run
+ * `limit`; keep the two in step.
+ */
+export const TOKEN_CAP_REASON_PREFIX = 'token cap reached';
 
 /** What a registration says about its model route: an upstream name, or its own base URL. */
 export interface ModelRoute {
@@ -220,22 +251,23 @@ export const effectiveTokenCap = (maxTokens: number | undefined, fallback: numbe
   maxTokens ?? fallback;
 
 /**
- * The 429 a registration gets once its total reaches the cap, and the
- * connection-log reason the runner turns into a `network` event. Both name
- * the cap, so the inspector says why the agent stopped getting answers.
+ * The answer a registration gets once its total reaches the cap
+ * (TOKEN_CAP_STATUS for a trial, 429 for a judge), and the connection-log
+ * reason the runner turns into a `network` event. Both name the cap, so the
+ * inspector says why the agent stopped getting answers.
  */
 export function tokenCapRefusal(
   used: number,
   cap: number,
   subject: 'attempt' | 'judge registration' = 'attempt',
 ): { reason: string; body: { error: Record<string, unknown> } } {
-  const reason = `token cap reached: ${used} of ${cap} tokens used`;
+  const reason = `${TOKEN_CAP_REASON_PREFIX}: ${used} of ${cap} tokens used`;
   return {
     reason,
     body: {
       error: {
         message: `This ${subject} reached its token cap of ${cap} tokens (${used} used; MODEL_TOKEN_CAP_PER_ATTEMPT)`,
-        type: 'rate_limit_exceeded',
+        type: TOKEN_CAP_CODE,
         code: TOKEN_CAP_CODE,
         cap,
         used,

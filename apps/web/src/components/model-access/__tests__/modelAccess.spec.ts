@@ -46,7 +46,8 @@ describe('ProviderStatusRow (grid)', () => {
     });
     return { store, w: wrapper };
   }
-  const actions = () => wrapper!.findAll('.psr-actions .btn').map((b) => b.text());
+  const ACTIONS = '[data-testid="psr-actions"]';
+  const actions = () => wrapper!.findAll(`${ACTIONS} .btn`).map((b) => b.text());
 
   it.each([
     [
@@ -88,8 +89,8 @@ describe('ProviderStatusRow (grid)', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-24T15:00:00Z'));
     await row(scenario);
-    expect(wrapper!.find('.status-chip').text()).toBe(chip);
-    expect(wrapper!.find('.psr-detail').text()).toContain(detail);
+    expect(wrapper!.find('[data-kind]').text()).toBe(chip);
+    expect(wrapper!.find('[data-testid="psr-detail"]').text()).toContain(detail);
     expect(actions()).toEqual(buttons);
     expect(wrapper!.find('input').exists()).toBe(false);
     vi.useRealTimers();
@@ -97,14 +98,18 @@ describe('ProviderStatusRow (grid)', () => {
 
   it('shows the host proxy command to copy when the proxy is down', async () => {
     await row('nous-host-down');
-    expect(wrapper!.find('.cmd code').text()).toBe('hermes proxy start --provider nous');
-    expect(wrapper!.find('.cmd button').attributes('aria-label')).toBe('Copy command');
-    expect(wrapper!.find('.psr-actions').text()).toContain('copy the command');
+    expect(wrapper!.find('[data-testid="copy-command"] code').text()).toBe(
+      'hermes proxy start --provider nous',
+    );
+    expect(wrapper!.find('[data-testid="copy-command"] button').attributes('aria-label')).toBe(
+      'Copy command',
+    );
+    expect(wrapper!.find(ACTIONS).text()).toContain('copy the command');
   });
 
   it('asks before disconnecting, Keep connected takes focus', async () => {
     const { store } = await row(null);
-    await wrapper!.find('.psr-actions button').trigger('click');
+    await wrapper!.find(`${ACTIONS} button`).trigger('click');
     const group = wrapper!.find('[role="group"][aria-label="Confirm disconnect"]');
     expect(group.text()).toContain('Disconnect Nous Portal?');
     expect(group.text()).toContain('Running experiments that use it will pause.');
@@ -116,15 +121,49 @@ describe('ProviderStatusRow (grid)', () => {
 
   it('Connect opens the dialog from origin other', async () => {
     const { store } = await row('nous-not-connected');
-    await wrapper!.find('.psr-actions button').trigger('click');
+    await wrapper!.find(`${ACTIONS} button`).trigger('click');
     await flushPromises();
     expect(store.dialogOpen).toBe(true);
     expect(store.origin).toBe('other');
   });
 
+  it('unavailable: says why, then reveals the terminal login on request', async () => {
+    const { store, global } = await storeFor('nous-not-connected');
+    const nous = store.providers.find((p) => p.id === 'nous')!;
+    nous.status = 'unavailable';
+    wrapper = mount(ProviderStatusRow, {
+      props: { provider: nous, layout: 'grid' },
+      global,
+      attachTo: document.body,
+    });
+    const chip = wrapper.find('[data-kind]');
+    expect(chip.text()).toBe('unavailable');
+    expect(chip.attributes('data-tone')).toBe('fail');
+    expect(wrapper.find('[data-testid="psr-detail"]').text()).toContain(
+      'The login service failed its startup check: this Hermes version does not offer the device login the platform uses.',
+    );
+    expect(wrapper.find('[data-testid="copy-command"]').exists()).toBe(false);
+    expect(actions()).toEqual(['Show how to connect from a terminal']);
+    await wrapper.find(`${ACTIONS} button`).trigger('click');
+    expect(wrapper.find('[data-testid="copy-command"] code').text()).toBe(
+      'docker compose run --rm --entrypoint /opt/hermes/.venv/bin/hermes nous-proxy auth add nous --type oauth --no-browser',
+    );
+    // ModelAccessStates: once shown, the command can be hidden again.
+    expect(actions()).toEqual(['Hide command']);
+    await wrapper.find(`${ACTIONS} button`).trigger('click');
+    expect(wrapper.find('[data-testid="copy-command"]').exists()).toBe(false);
+    expect(actions()).toEqual(['Show how to connect from a terminal']);
+  });
+
+  it('sets the backticked names of the host detail in code', async () => {
+    await row('nous-host');
+    const codes = wrapper!.findAll('[data-testid="psr-detail"] code').map((c) => c.text());
+    expect(codes).toEqual(['NOUS_HOST_PROXY', '.env']);
+  });
+
   it('OpenRouter missing: steps and a copy button, never a key field', async () => {
     await row(null, 'openrouter');
-    expect(wrapper!.find('.status-chip').text()).toBe('missing');
+    expect(wrapper!.find('[data-kind]').text()).toBe('missing');
     expect(wrapper!.text()).toContain('OPENROUTER_API_KEY=…');
     expect(wrapper!.find('button[aria-label="Copy command"]').text()).toContain('Copy command');
     expect(wrapper!.find('input').exists()).toBe(false);
@@ -148,15 +187,17 @@ describe('ProviderStatusRow (table)', () => {
       },
     });
     wrapper = mount(Table, { global, attachTo: document.body });
-    const rows = wrapper.findAll('tr.psr-row');
+    const rows = wrapper.findAll('tr[data-provider]');
     expect(rows).toHaveLength(2);
     expect(rows[0]!.findAll('td')).toHaveLength(5);
     expect(rows[1]!.text()).toContain(
       'No input here: keys are never accepted or stored in the UI.',
     );
-    expect(rows[1]!.find('.cmd code').text()).toBe('docker compose up -d egress worker');
+    expect(rows[1]!.find('[data-testid="copy-command"] code').text()).toBe(
+      'docker compose up -d egress worker',
+    );
     await rows[0]!.find('button').trigger('click');
-    expect(wrapper.find('tr.psr-confirm-row td').attributes('colspan')).toBe('5');
+    expect(wrapper.find('[data-testid="psr-confirm-row"] td').attributes('colspan')).toBe('5');
   });
 });
 
@@ -164,11 +205,11 @@ describe('SandboxCheckList', () => {
   it('collapses to the summary when every check passes', () => {
     useScenario(null);
     wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
-    expect(wrapper.find('.status-chip').text()).toBe('proven');
+    expect(wrapper.find('[data-kind]').text()).toBe('proven');
     expect(wrapper.text()).toContain(
       'Isolation proven · 15 of 15 checks · checked 2 min ago at worker start',
     );
-    expect(wrapper.findAll('li.chk')).toHaveLength(0);
+    expect(wrapper.findAll('li[data-check]')).toHaveLength(0);
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     const toggle = wrapper.find('button[aria-expanded]');
     expect(toggle.text()).toBe('Show 15 checks');
@@ -179,7 +220,7 @@ describe('SandboxCheckList', () => {
     useScenario(null);
     wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
     await wrapper.find('button[aria-expanded]').trigger('click');
-    const rows = wrapper.findAll('li.chk');
+    const rows = wrapper.findAll('li[data-check]');
     expect(rows).toHaveLength(15);
     expect(rows[0]!.text()).toContain('01 runs as an unprivileged user (uid 10000)');
     expect(rows[4]!.text()).toContain('ip route → no default route');
@@ -189,7 +230,7 @@ describe('SandboxCheckList', () => {
   it('lists failing checks, disables execution and names the self-test', async () => {
     useScenario('sandbox-failed');
     wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
-    expect(wrapper.find('.status-chip').text()).toBe('not proven');
+    expect(wrapper.find('[data-kind]').text()).toBe('not proven');
     expect(wrapper.find('[role="alert"]').text()).toContain(
       'Execution is disabled: 2 of 15 isolation checks failed. No run will start until every check passes.',
     );
@@ -197,15 +238,23 @@ describe('SandboxCheckList', () => {
       'docker compose exec worker node dist/sandbox-cli.js selftest',
     );
     expect(wrapper.text()).toContain('Isolation not proven · 13 of 15 checks');
-    // Expanded by default when failing; collapsing still keeps the failures.
-    expect(wrapper.findAll('li.chk')).toHaveLength(15);
-    await wrapper.find('button[aria-expanded]').trigger('click');
-    const failing = wrapper.findAll('li.chk');
+    // Collapsed by default, as the System board draws it: only the failures show.
+    const failing = wrapper.findAll('li[data-check]');
     expect(failing).toHaveLength(2);
     expect(failing[0]!.find('[role="img"]').attributes('aria-label')).toBe('failed');
     expect(failing[0]!.text()).toContain('192.168.5.2:22 open');
     expect(failing[1]!.text()).toContain('10.0.4.7:5432 reachable');
     expect(wrapper.find('button[aria-expanded]').text()).toBe('Show all 15 checks');
+    await wrapper.find('button[aria-expanded]').trigger('click');
+    expect(wrapper.findAll('li[data-check]')).toHaveLength(15);
+    expect(wrapper.find('button[aria-expanded]').text()).toBe('Hide checks');
+  });
+
+  it('shortens the image digest as drawn, the full one in the tooltip', () => {
+    const digest = `sha256:${'70484f8952851150ad628ca89c11d853faecf82da84f388cecc896ae0e2c2ad1'}`;
+    wrapper = mount(SandboxCheckList, { props: { status: { ...sandboxFixture(), digest } } });
+    const code = wrapper.find(`code[title="${digest}"]`);
+    expect(code.text()).toBe('sha256:70484f…');
   });
 });
 
@@ -226,7 +275,7 @@ describe('BlockedReason', () => {
       global,
     });
     const control = wrapper.find('button.btn.primary');
-    const reason = wrapper.find('.blocked-reason');
+    const reason = wrapper.find('[data-testid="blocked-reason"]');
     expect(control.attributes('disabled')).toBeDefined();
     expect(control.attributes('title')).toBe("Can't launch yet: Nous Portal is not connected.");
     expect(control.attributes('aria-describedby')).toBe(reason.attributes('id'));
@@ -252,7 +301,7 @@ describe('BlockedReason', () => {
       global,
     });
     expect(wrapper.find('button').attributes('disabled')).toBeUndefined();
-    expect(wrapper.find('.blocked-reason').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="blocked-reason"]').exists()).toBe(false);
   });
 });
 
@@ -268,6 +317,32 @@ describe('ProviderNotice', () => {
     const { global } = await storeFor(scenario);
     wrapper = mount(ProviderNotice, { props: { provider: 'nous' }, global });
     expect(wrapper.text().replace(/\s+/g, ' ')).toBe(text);
+  });
+
+  it('an API-key provider without a key: the server step with Copy, never a field or Connect', async () => {
+    const { global } = await storeFor('openrouter-in-use');
+    wrapper = mount(ProviderNotice, { props: { provider: 'openrouter' }, global });
+    const notice = wrapper.find('[role="status"]');
+    expect(notice.attributes('data-status')).toBe('missing');
+    const text = notice.text().replace(/\s+/g, ' ');
+    expect(text).toContain(
+      'No API key. OPENROUTER_API_KEY is not set on the server. You can save this configuration now and add the key before you launch.',
+    );
+    expect(text).toContain(
+      'Add OPENROUTER_API_KEY=… to .env, then run docker compose up -d egress worker',
+    );
+    expect(notice.find('button[aria-label="Copy the command"]').text()).toContain('Copy');
+    const link = notice.find('a');
+    expect(link.text()).toBe('See System › Model access');
+    expect(link.attributes('href')).toBe('/system');
+    expect(wrapper.find('input').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('Connect');
+  });
+
+  it('a configured key reads Connected', async () => {
+    const { global } = await storeFor('openrouter-configured');
+    wrapper = mount(ProviderNotice, { props: { provider: 'openrouter' }, global });
+    expect(wrapper.text()).toBe('Connected');
   });
 });
 
@@ -288,7 +363,39 @@ describe('SetupCard', () => {
   it('goes away once a provider is connected', async () => {
     const { global } = await storeFor(null);
     wrapper = mount(SetupCard, { global });
-    expect(wrapper.find('.setup-card').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="setup-card"]').exists()).toBe(false);
+  });
+
+  it('missing-key: the server step and Open System, no Connect button', async () => {
+    const { store, global } = await storeFor('openrouter-in-use');
+    wrapper = mount(SetupCard, { global });
+    expect(wrapper.find('[data-testid="setup-card"]').exists()).toBe(false);
+    const card = wrapper.find('[data-testid="setup-key-card"]');
+    expect(card.attributes('data-provider')).toBe('openrouter');
+    expect(card.find('#setup-key-title').text()).toBe(
+      'Add an OpenRouter API key to run experiments',
+    );
+    expect(card.text().replace(/\s+/g, ' ')).toContain(
+      'Your configurations use openrouter, and the server has no key for it. The platform never accepts keys in the UI: add it on the server.',
+    );
+    expect(card.text().replace(/\s+/g, ' ')).toContain(
+      'Add OPENROUTER_API_KEY=… to .env, then run docker compose up -d egress worker',
+    );
+    expect(card.find('a').text()).toBe('Open System');
+    expect(card.findAll('button').map((b) => b.attributes('aria-label'))).toEqual([
+      'Copy the command',
+    ]);
+    expect(store.dialogOpen).toBe(false);
+  });
+
+  it('forced variants follow `show`', async () => {
+    const { global } = await storeFor(null);
+    wrapper = mount(SetupCard, { props: { variant: 'card', show: true }, global });
+    expect(wrapper.find('[data-testid="setup-card"]').exists()).toBe(true);
+    await wrapper.setProps({ variant: 'missing-key' });
+    expect(wrapper.find('[data-testid="setup-key-card"]').exists()).toBe(true);
+    await wrapper.setProps({ show: false });
+    expect(wrapper.html()).not.toContain('setup');
   });
 
   it('merges into the empty list; connected turns step 1 into a chip', async () => {
@@ -301,7 +408,7 @@ describe('SetupCard', () => {
 
     const connected = await storeFor(null);
     wrapper = mount(SetupCard, { props: { variant: 'empty' }, global: connected.global });
-    expect(wrapper.find('.status-chip').text()).toBe('Connected');
+    expect(wrapper.find('[data-kind]').text()).toBe('Connected');
     expect(wrapper.find('a.btn.primary').text()).toBe('New configuration');
   });
 });

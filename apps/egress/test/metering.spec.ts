@@ -134,7 +134,7 @@ describe('metering', () => {
     ]);
     expect(registry.usage(ATTEMPT)).toMatchObject({ calls: 2, totalTokens: 2000 });
     const refused = await post({ model: 'stream', stream: true, messages: [] });
-    expect(refused.status).toBe(429);
+    expect(refused.status).toBe(402);
     expect(await refused.json()).toMatchObject({ error: { code: 'token_cap_reached' } });
   });
 

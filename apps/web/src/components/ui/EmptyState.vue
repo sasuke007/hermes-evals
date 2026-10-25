@@ -26,11 +26,21 @@ withDefaults(
 </script>
 
 <template>
-  <div class="empty" :class="[`align-${align}`, { panel, lg: size === 'lg' }]">
-    <div class="empty-title">{{ title }}</div>
-    <p v-if="body" class="t2 empty-body">{{ body }}</p>
+  <div
+    class="flex flex-col gap-10"
+    :class="[
+      align === 'start' ? 'items-start px-28 py-36' : 'items-center px-24 py-40 text-center',
+      { 'rounded-6 border border-border bg-surface': panel },
+    ]"
+    data-testid="empty-state"
+  >
+    <div class="font-semibold" :class="size === 'lg' ? 'text-17' : 'text-15'">{{ title }}</div>
+    <p v-if="body" class="max-w-520 text-text-2">{{ body }}</p>
     <slot />
-    <div v-if="action || $slots.actions || $slots.action" class="empty-actions">
+    <div
+      v-if="action || $slots.actions || $slots.action"
+      class="mt-6 flex flex-wrap items-center gap-10"
+    >
       <slot name="actions">
         <slot name="action">
           <RouterLink v-if="action" class="btn primary" :to="action.to">{{
@@ -39,45 +49,6 @@ withDefaults(
         </slot>
       </slot>
     </div>
-    <p v-if="$slots.footer" class="cap empty-footer"><slot name="footer" /></p>
+    <p v-if="$slots.footer" class="mt-8 text-12 text-text-3"><slot name="footer" /></p>
   </div>
 </template>
-
-<style scoped>
-.empty {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 40px 24px;
-}
-.align-center {
-  align-items: center;
-  text-align: center;
-}
-.align-start {
-  align-items: flex-start;
-  padding: 36px 28px;
-}
-.empty-title {
-  font-size: 15px;
-  line-height: 22px;
-  font-weight: 600;
-}
-.lg .empty-title {
-  font-size: 17px;
-  line-height: 24px;
-}
-.empty-body {
-  max-width: 520px;
-}
-.empty-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-top: 6px;
-}
-.empty-footer {
-  margin-top: 8px;
-}
-</style>

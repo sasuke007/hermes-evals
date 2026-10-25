@@ -1,5 +1,6 @@
 /**
- * Seeds for the experiment view tests: a suite version with two tasks, a
+ * Seeds for the experiment view tests: a suite version with two tasks (three
+ * with WorldOptions.tasks, for a verdict, which needs 3), a
  * baseline and a candidate configuration (the candidate with one more turn
  * and the invoice-db MCP server), a live worker, and helpers that move runs
  * through their lifecycle the way the worker does, so every row passes the
@@ -75,7 +76,8 @@ export const at = (s: number): Date => new Date(T0.getTime() + s * 1000);
 
 export interface World {
   suiteId: string;
-  taskIds: [string, string];
+  /** total_due, dup_invoices, then vat_split when the world has three tasks. */
+  taskIds: [string, string, ...string[]];
   baselineVersionId: string;
   candidateVersionId: string;
   workerId: string;
@@ -143,6 +145,11 @@ export async function insertVersion(
 export interface WorldOptions {
   /** The candidate's model; the price table prices only PRICED_MODEL. */
   candidateModel?: string;
+  /**
+   * 3 adds the task vat_split (runs keyed `c/…`): a verdict needs at least 3
+   * tasks (statistics/compute.ts MIN_TASKS). Default 2.
+   */
+  tasks?: 2 | 3;
 }
 
 export async function seedWorld(db: AppDb, options: WorldOptions = {}): Promise<World> {
@@ -155,8 +162,8 @@ export async function seedWorld(db: AppDb, options: WorldOptions = {}): Promise<
       versionLabel: '1',
       contentHash: sha('suite v1'),
       checkHash: sha('checks v1'),
-      taskCount: 2,
-      validCount: 2,
+      taskCount: options.tasks ?? 2,
+      validCount: options.tasks ?? 2,
     })
     .returning();
   await db.insert(suiteSources).values({
@@ -165,10 +172,13 @@ export async function seedWorld(db: AppDb, options: WorldOptions = {}): Promise<
     currentSuiteId: suite!.id,
     lastOutcome: 'created',
   });
-  const taskIds: [string, string] = [
+  const taskIds: World['taskIds'] = [
     await insertTask(db, suite!.id, 'total_due', 0, sha('task total_due v1')),
     await insertTask(db, suite!.id, 'dup_invoices', 1, sha('task dup_invoices v1')),
   ];
+  if (options.tasks === 3) {
+    taskIds.push(await insertTask(db, suite!.id, 'vat_split', 2, sha('task vat_split v1')));
+  }
   const mcpVersionId = await db.transaction(async (tx) => {
     const [server] = await tx.insert(mcpServers).values({ name: 'invoice-db' }).returning();
     const [version] = await tx
@@ -218,21 +228,24 @@ export interface LaunchOptions {
   createdAt?: Date;
   /** Candidates after the world's, in order; their runs are keyed `cand2`, `cand3`, … */
   moreCandidates?: string[];
+  /** The tasks selected, by index into the world's (a, b, c); default every one. */
+  tasks?: readonly number[];
 }
 
 /**
  * A running experiment with every run of its matrix queued, keyed
- * `<task>/<config>/<rep>`: task `a` or `b`, config `base`, `cand`, then
- * `cand2`, … for options.moreCandidates.
+ * `<task>/<config>/<rep>`: task `a`, `b` (and `c` in a three-task world),
+ * config `base`, `cand`, then `cand2`, … for options.moreCandidates.
  */
 export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
   const candidates = [w.candidateVersionId, ...(options.moreCandidates ?? [])];
+  const taskIds = options.tasks ? options.tasks.map((i) => w.taskIds[i]!) : w.taskIds;
   const [experiment] = await db
     .insert(experiments)
     .values({
       name: options.name ?? 'MCP vs baseline',
       suiteId: w.suiteId,
-      taskIds: w.taskIds,
+      taskIds,
       baselineVersionId: w.baselineVersionId,
       candidateVersionIds: candidates,
       repetitions: options.repetitions ?? 2,
@@ -249,7 +262,7 @@ export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
   const rows = await db
     .insert(runs)
     .values(
-      w.taskIds.flatMap((taskId) =>
+      taskIds.flatMap((taskId) =>
         [w.baselineVersionId, ...candidates].flatMap((configurationVersionId) =>
           reps.map((repetition) => ({
             experimentId: experiment!.id,
@@ -263,7 +276,7 @@ export async function launch(db: AppDb, w: World, options: LaunchOptions = {}) {
     .returning();
   const keys = new Map<string, string>();
   for (const run of rows) {
-    const task = run.taskId === w.taskIds[0] ? 'a' : 'b';
+    const task = 'abc'[w.taskIds.indexOf(run.taskId)]!;
     const index = candidates.indexOf(run.configurationVersionId);
     const config = index < 0 ? 'base' : index === 0 ? 'cand' : `cand${index + 1}`;
     keys.set(`${task}/${config}/${run.repetition}`, run.id);

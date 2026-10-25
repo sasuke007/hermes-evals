@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import FormField from './FormField.vue';
 
 /**
- * Label, control and one help line. The help line turns amber for a warning and orange for an
- * error (which also sets aria-invalid); validation runs on blur in the forms that use it.
+ * Label, text input and one help line. The help line turns amber for a warning and orange for
+ * an error (which also sets aria-invalid); validation runs on blur in the forms that use it.
+ * `multiline` renders a textarea (TextArea is the same with its own defaults).
  */
-const props = withDefaults(
+withDefaults(
   defineProps<{
     label: string;
     id?: string | null;
@@ -20,6 +21,8 @@ const props = withDefaults(
     /** Renders a textarea. */
     multiline?: boolean;
     rows?: number;
+    /** sm: 30px / 12px (filter bars). */
+    size?: 'sm' | 'md';
   }>(),
   {
     id: null,
@@ -33,54 +36,50 @@ const props = withDefaults(
     disabled: false,
     multiline: false,
     rows: 3,
+    size: 'md',
   },
 );
 const model = defineModel<string | number | null>({ default: '' });
 defineEmits<{ blur: [event: FocusEvent] }>();
-
-const autoId = useId();
-const inputId = computed(() => props.id ?? `in-${autoId}`);
-const helpId = computed(() => `${inputId.value}-help`);
-const helpText = computed(() => props.error ?? props.warning ?? props.help);
 </script>
 
 <template>
-  <div class="field">
-    <label :for="inputId">{{ label }}</label>
+  <FormField
+    v-slot="{ id: controlId, describedBy, invalid, warn }"
+    :label="label"
+    :id="id"
+    :help="help"
+    :warning="warning"
+    :error="error"
+    :required="required"
+  >
     <textarea
       v-if="multiline"
-      :id="inputId"
+      :id="controlId"
       v-model="model"
-      class="in"
-      :class="{ mono, warn: !error && !!warning }"
+      class="input"
+      :class="{ 'font-mono': mono, warn }"
       :rows="rows"
       :placeholder="placeholder"
       :required="required"
       :disabled="disabled"
-      :aria-invalid="error ? 'true' : undefined"
-      :aria-describedby="helpText ? helpId : undefined"
+      :aria-invalid="invalid"
+      :aria-describedby="describedBy"
       @blur="$emit('blur', $event)"
     />
     <input
       v-else
-      :id="inputId"
+      :id="controlId"
       v-model="model"
-      class="in"
-      :class="{ mono, warn: !error && !!warning }"
+      class="input"
+      :class="{ 'font-mono': mono, warn, sm: size === 'sm' }"
       :type="type"
       :placeholder="placeholder"
       :required="required"
       :disabled="disabled"
-      :aria-invalid="error ? 'true' : undefined"
-      :aria-describedby="helpText ? helpId : undefined"
+      :aria-invalid="invalid"
+      :aria-describedby="describedBy"
       @blur="$emit('blur', $event)"
     />
-    <span
-      v-if="helpText"
-      :id="helpId"
-      class="help"
-      :class="{ error: !!error, warn: !error && !!warning }"
-      >{{ helpText }}</span
-    >
-  </div>
+  </FormField>
 </template>

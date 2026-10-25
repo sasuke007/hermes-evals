@@ -919,11 +919,11 @@ function executionErrorFor(
         reason: 'Stopped at the token cap: 2,000,000 model tokens in this attempt',
         meta: 'after 214 s · 2,000,418 tokens metered by the model gateway',
         explanation:
-          'The model gateway answers 429 once an attempt has used its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT). The agent kept re-reading invoices.csv into its context. A limit is never retried automatically: Retry execution starts a new attempt with a fresh cap.',
+          'The model gateway refuses every model call (402, which Hermes does not retry) once an attempt has used its token cap (MODEL_TOKEN_CAP_PER_ATTEMPT). The agent kept re-reading invoices.csv into its context. A limit is never retried automatically: Retry execution starts a new attempt with a fresh cap.',
         stderrTail: {
           lines: [
-            'POST http://egress:8080/v1/chat/completions → 429 · token cap of 2000000 reached for this attempt',
-            'hermes: provider error (429); exit 1',
+            'POST http://egress:8080/v1/chat/completions → 402 · token cap of 2000000 reached for this attempt',
+            'hermes: provider error (402); exit 1',
           ],
           totalLines: 2,
         },

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import StatusDot from '@/components/ui/StatusDot.vue';
 import { formatCountdown } from '@/stores/providers';
 
 /**
@@ -43,33 +44,13 @@ const text = computed(() => {
 <template>
   <button
     type="button"
-    class="approval-pill"
+    class="inline-flex h-28 items-center gap-8 rounded-4 border border-run bg-run-soft px-10 text-12 font-medium whitespace-nowrap text-run-text hover:border-run-text"
     title="Reopen the Nous Portal login"
+    data-testid="approval-pill"
     @click="$emit('open')"
   >
-    <span class="dot pulse tone-run" aria-hidden="true" />
+    <StatusDot tone="run" mode="pulse" />
     <span>Waiting for Nous approval</span>{{ ' ' }}<span aria-hidden="true">·</span>{{ ' '
-    }}<span class="mono">{{ text }} left</span>
+    }}<span class="font-mono">{{ text }} left</span>
   </button>
 </template>
-
-<style scoped>
-.approval-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--run);
-  border-radius: 4px;
-  background: var(--run-soft);
-  color: var(--run-text);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.approval-pill:hover {
-  border-color: var(--run-text);
-}
-</style>

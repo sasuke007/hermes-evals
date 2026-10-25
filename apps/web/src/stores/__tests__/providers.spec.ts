@@ -7,10 +7,15 @@ import { setVisibility, useScenario } from './scenarioEnv';
 
 vi.mock('@/api/providers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/providers')>();
-  return { ...actual, getNousLogin: vi.fn<typeof actual.getNousLogin>(actual.getNousLogin) };
+  return {
+    ...actual,
+    getNousLogin: vi.fn<typeof actual.getNousLogin>(actual.getNousLogin),
+    startNousLogin: vi.fn<typeof actual.startNousLogin>(actual.startNousLogin),
+  };
 });
 
 const getNousLogin = vi.mocked(api.getNousLogin);
+const startNousLogin = vi.mocked(api.startNousLogin);
 
 async function setup(scenario: string | null) {
   useScenario(scenario);
@@ -32,6 +37,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-24T15:00:00Z'));
   setVisibility('visible');
   getNousLogin.mockClear();
+  startNousLogin.mockClear();
 });
 afterEach(() => {
   useProvidersStore().dispose();
@@ -332,5 +338,61 @@ describe('providers store: the Nous login', () => {
     await store.disconnect();
     expect(store.nousStatus).toBe('not_connected');
     expect(store.bannerKind).toBe('not-connected');
+  });
+});
+
+describe('providers store: when Nous cannot be connected from the UI', () => {
+  it.each([
+    ['nous-host-down', 'host_unreachable'],
+    ['nous-unavailable', 'unavailable'],
+  ])('%s: Connect opens the manual step and asks the API for nothing', async (scenario, status) => {
+    const store = await setup(scenario);
+    expect(store.nousStatus).toBe(status);
+    expect(store.nousManualOnly).toBe(true);
+    await store.connect('new-experiment');
+    expect(store.dialogOpen).toBe(true);
+    expect(store.loginPhase).toBe('manual');
+    await store.retry();
+    expect(store.loginPhase).toBe('manual');
+    expect(startNousLogin).not.toHaveBeenCalled();
+
+    store.closeDialog();
+    expect(store.loginPhase).toBe('idle');
+    expect(store.approvalLeft).toBeNull();
+  });
+
+  it('the development login is connected, not manual', async () => {
+    const store = await setup('nous-host');
+    expect(store.nousManualOnly).toBe(false);
+    await store.connect('other');
+    expect(store.loginPhase).toBe('connected');
+    expect(startNousLogin).not.toHaveBeenCalled();
+  });
+});
+
+describe('providers store: the setup card above the experiment list', () => {
+  it('asks for nothing while connected, and for a connection while nothing is', async () => {
+    expect((await setup(null)).setupVariant).toBe('none');
+    useProvidersStore().dispose();
+    expect((await setup('nous-not-connected')).setupVariant).toBe('connect');
+  });
+
+  it('asks for nothing before the first answer', () => {
+    useScenario('nous-not-connected');
+    setActivePinia(createPinia());
+    expect(useProvidersStore().setupVariant).toBe('none');
+  });
+
+  it('asks for the key when every provider in use is a key provider without one', async () => {
+    const store = await setup('openrouter-in-use');
+    expect(store.usedProviders.map((p) => p.id)).toEqual(['openrouter']);
+    expect(store.setupVariant).toBe('missing-key');
+    expect(store.setupKeyProvider?.envVar).toBe('OPENROUTER_API_KEY');
+    expect(store.bannerKind).toBe('no-key');
+  });
+
+  it('a configured key or a connected Nous among the providers in use is enough', async () => {
+    const store = await setup('openrouter-in-use,openrouter-configured');
+    expect(store.setupVariant).toBe('none');
   });
 });

@@ -57,7 +57,11 @@ onBeforeUnmount(() => {
 <template>
   <button
     type="button"
-    :class="variant === 'icon' ? 'copy' : 'btn mid copy-btn'"
+    :class="
+      variant === 'icon'
+        ? 'inline-flex h-22 w-24 flex-none items-center justify-center rounded-3 border-0 bg-transparent text-text-3 hover:bg-surface-3 hover:text-text'
+        : 'btn mid px-8'
+    "
     :aria-label="label"
     :title="copied ? 'Copied' : label"
     @click="copy"
@@ -86,12 +90,6 @@ onBeforeUnmount(() => {
       <path d="M2 8V2.5A.5.5 0 0 1 2.5 2H8" fill="none" stroke="currentColor" stroke-width="1.3" />
     </svg>
     <template v-if="variant === 'button'">{{ copied ? 'Copied' : buttonText }}</template>
-    <span class="visually-hidden" aria-live="polite">{{ copied ? 'Copied' : '' }}</span>
+    <span class="sr-only" aria-live="polite">{{ copied ? 'Copied' : '' }}</span>
   </button>
 </template>
-
-<style scoped>
-.copy-btn {
-  padding: 0 8px;
-}
-</style>

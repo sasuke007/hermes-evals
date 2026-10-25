@@ -119,6 +119,18 @@ describe('SseConnection', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('is closed from the start when the client left before it opened', () => {
+    (req as EventEmitter & { destroyed: boolean }).destroyed = true;
+    const c = open();
+    expect(c.closed).toBe(true);
+    expect(res.status).toBe(0);
+    expect(res.chunks).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    const onClose = vi.fn();
+    c.whenClosed(onClose);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('drops a client that stopped reading', () => {
     const c = open();
     const onClose = vi.fn();
@@ -148,6 +160,27 @@ describe('SseConnection on a real socket', () => {
   afterEach(async () => {
     client?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('is closed already when the client went away while the request waited', async () => {
+    // The experiment stream awaits its 404 check before opening: the client can leave meanwhile.
+    const opened = new Promise<SseConnection>((resolve) => {
+      server = http.createServer((req, res) => {
+        const gone = (emitter: NodeJS.EventEmitter) =>
+          new Promise<void>((done) => emitter.once('close', () => done()));
+        void Promise.all([gone(req), gone(res)]).then(() => resolve(SseConnection.open(req, res)));
+        client?.destroy();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    client = connect(port, '127.0.0.1');
+    client.write('GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n');
+    const c = await opened;
+    expect(c.closed).toBe(true);
+    const unsubscribe = vi.fn();
+    c.whenClosed(unsubscribe);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('frees the socket of a client that never reads once the buffer cap is passed', async () => {

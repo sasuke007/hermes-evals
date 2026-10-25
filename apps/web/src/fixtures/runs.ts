@@ -32,6 +32,9 @@ export function runNeeds(run: RunSeed): RunModelNeeds {
     provider: CONFIG_VERSIONS[run.config].provider,
     judgeKeys,
     judgeProvider: judgeKeys.length ? 'nous' : null,
+    // The sample settings give every judge key a model (JUDGE_MODEL is set).
+    judgeKeysWithoutModel: [],
+    noJudgeModelReason: null,
   };
 }
 

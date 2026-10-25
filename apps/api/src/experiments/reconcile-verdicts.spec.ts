@@ -5,7 +5,8 @@
  * appended in the statement that moves the verdict revision, with the cause
  * `initial` at the first completion, `rescore` when a re-score moved a
  * completed experiment's results, and `retry` when a retry reopened it and
- * it settled again. The entries' numbers are the comparison's.
+ * it settled again. The entries' numbers are the comparison's. The world
+ * has three tasks, the fewest a verdict needs.
  */
 import { and, eq, isNull } from 'drizzle-orm';
 import { VerdictEntrySchema, type ScoreStatus, type VerdictEntry } from '@hermes-evals/shared';
@@ -42,7 +43,7 @@ let w: World;
 
 beforeEach(async () => {
   t = await createTestDatabase();
-  w = await seedWorld(t.db);
+  w = await seedWorld(t.db, { tasks: 3 });
 });
 
 afterEach(async () => {
@@ -67,7 +68,10 @@ async function scoreAll(
   }
 }
 
-/** a: baseline 1 of 2, candidate 2 of 2; b: baseline 0 of 2, candidate 1 of 2. */
+/**
+ * a and c: baseline 1 of 2, candidate 2 of 2; b: baseline 0 of 2, candidate
+ * 1 of 2. Each task improves by 0.5.
+ */
 const MATRIX: Record<string, ScoreStatus> = {
   'a/base/1': 'passed',
   'a/base/2': 'failed',
@@ -77,6 +81,10 @@ const MATRIX: Record<string, ScoreStatus> = {
   'b/base/2': 'failed',
   'b/cand/1': 'passed',
   'b/cand/2': 'failed',
+  'c/base/1': 'passed',
+  'c/base/2': 'failed',
+  'c/cand/1': 'passed',
+  'c/cand/2': 'passed',
 };
 
 /** Publishes a queued re-score of a scored run with its single key `answer`, as publish.ts does. */
@@ -144,9 +152,9 @@ describe('the first completion', () => {
       reason: null,
       note: null,
       results_revision: done.resultsRevision,
-      pass_rates: { baseline: 0.25, candidate: 0.75 },
-      pass_counts: { baseline: { passed: 1, counted: 4 }, candidate: { passed: 3, counted: 4 } },
-      task_counts: { improved: 2, regressed: 0, unchanged: 0 },
+      pass_rates: { baseline: 1 / 3, candidate: 5 / 6 },
+      pass_counts: { baseline: { passed: 2, counted: 6 }, candidate: { passed: 5, counted: 6 } },
+      task_counts: { improved: 3, regressed: 0, unchanged: 0 },
       resamples: 10_000,
       confidence: 0.95,
     } satisfies VerdictEntry);
@@ -165,7 +173,7 @@ describe('the first completion', () => {
 
   it('records why there is no verdict: one repetition, or too few runs once cancelled ones are left out', async () => {
     const single = await launch(t.db, w, { name: 'one repetition', repetitions: 1 });
-    for (const key of ['a/base/1', 'a/cand/1', 'b/base/1', 'b/cand/1']) {
+    for (const key of ['a/base/1', 'a/cand/1', 'b/base/1', 'b/cand/1', 'c/base/1', 'c/cand/1']) {
       await scored(t.db, w, single.run(key), { startedAt: at(0), durationS: 5, status: 'passed' });
     }
     expect(await reconcile(single.experiment.id)).toBe('completed');
@@ -186,6 +194,10 @@ describe('the first completion', () => {
       'a/base/2': 'passed',
       'a/cand/1': 'passed',
       'a/cand/2': 'failed',
+      'c/base/1': 'passed',
+      'c/base/2': 'passed',
+      'c/cand/1': 'passed',
+      'c/cand/2': 'failed',
     });
     for (const key of ['b/base/1', 'b/base/2', 'b/cand/1', 'b/cand/2']) {
       await cancelled(t.db, short.run(key), at(1));
@@ -194,6 +206,32 @@ describe('the first completion', () => {
     expect((await row(short.experiment.id)).verdictHistory).toMatchObject([
       { verdict: 'not_computable', reason: 'not_enough_runs', delta: -0.5, lo: null, hi: null },
     ]);
+  });
+
+  it('records too_few_tasks for an experiment of fewer than 3 tasks, with its difference', async () => {
+    const two = await launch(t.db, w, { name: 'two tasks', tasks: [0, 1] });
+    const { 'c/base/1': _1, 'c/base/2': _2, 'c/cand/1': _3, 'c/cand/2': _4, ...ab } = MATRIX;
+    await scoreAll(two.run, ab);
+    expect(await reconcile(two.experiment.id)).toBe('completed');
+    expect((await row(two.experiment.id)).verdictHistory).toMatchObject([
+      {
+        cause: 'initial',
+        verdict: 'not_computable',
+        reason: 'too_few_tasks',
+        delta: 0.5,
+        lo: null,
+        hi: null,
+        pass_counts: { baseline: { passed: 1, counted: 4 }, candidate: { passed: 3, counted: 4 } },
+      },
+    ]);
+    const view = await new ComparisonService(t.db).comparison(two.experiment.id, {});
+    expect(view.statisticsUnavailable).toEqual({
+      reason: 'too_few_tasks',
+      message:
+        'No interval with 2 tasks. Pass rates: baseline 0.25, with-mcp 0.75. A verdict needs at ' +
+        'least 3 tasks: the interval resamples the tasks, and with fewer it cannot say how sure ' +
+        'the difference is.',
+    });
   });
 
   it('appends one entry per candidate, in candidate order', async () => {
@@ -274,8 +312,8 @@ describe('a completed experiment whose results move', () => {
       cause: 'rescore',
       note: '1 run re-scored',
       results_revision: moved.resultsRevision,
-      pass_counts: { baseline: { passed: 1, counted: 4 }, candidate: { passed: 4, counted: 4 } },
-      task_counts: { improved: 2, regressed: 0, unchanged: 0 },
+      pass_counts: { baseline: { passed: 2, counted: 6 }, candidate: { passed: 6, counted: 6 } },
+      task_counts: { improved: 3, regressed: 0, unchanged: 0 },
     });
     expect(await reconcile(experiment.id)).toBe('unchanged');
     expect((await row(experiment.id)).verdictHistory).toHaveLength(2);
@@ -306,7 +344,7 @@ describe('a completed experiment whose results move', () => {
     expect(after.verdictHistory[1]).toMatchObject({
       cause: 'rescore',
       note: '2 runs re-scored',
-      pass_counts: { baseline: { passed: 3, counted: 4 } },
+      pass_counts: { baseline: { passed: 4, counted: 6 } },
     });
     expect(after.verdictRevision).toBe(after.resultsRevision);
   });
@@ -394,7 +432,7 @@ describe('a completed experiment whose results move', () => {
       cause: 'retry',
       note: '1 retry',
       results_revision: after.resultsRevision,
-      pass_counts: { baseline: { passed: 2, counted: 4 } },
+      pass_counts: { baseline: { passed: 3, counted: 6 } },
     });
   });
 });

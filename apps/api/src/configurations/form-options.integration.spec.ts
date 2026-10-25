@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ConfigurationFormOptionsSchema, HERMES_TOOLSETS } from '@hermes-evals/shared';
+import {
+  ConfigurationDraftSchema,
+  ConfigurationFormOptionsSchema,
+  ConfigurationInputSchema,
+  HERMES_TOOLSETS,
+} from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import { HERMES_REVISION } from '../../test/support/seed.js';
 import type { Env } from '../config/env.js';
@@ -159,6 +164,47 @@ describe('form options', () => {
     const options = await service(prices).formOptions();
     expect(options.models).toEqual([]);
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe('a new configuration’s draft', () => {
+  it('starts from the first model offered, the default toolsets, 20 turns and 300 s', async () => {
+    const prices = join(dir, 'prices.yaml');
+    await writeFile(
+      prices,
+      "mock/scripted:\n  input_per_1m: 0\n  output_per_1m: 0\n  checked_at: '2026-10-24'\n",
+    );
+    const draft = ConfigurationDraftSchema.parse(await service(prices).newDraft());
+    expect(draft).toEqual({
+      mode: 'new',
+      source: null,
+      values: {
+        name: '',
+        model: 'mock/scripted',
+        provider: 'nous',
+        baseUrl: null,
+        toolsets: ['terminal', 'file'],
+        memoryEnabled: false,
+        skillIds: [],
+        documentIds: [],
+        mcpServerVersionIds: [],
+        maxTurns: 20,
+        timeBudgetS: 300,
+        duplicatedFromVersionId: null,
+      },
+      createsNewVersion: false,
+      nextVersion: null,
+      experimentsKeepingVersion: [],
+    });
+    // Filled in with a name, it saves as it is.
+    expect(ConfigurationInputSchema.safeParse({ ...draft.values, name: 'first' }).success).toBe(
+      true,
+    );
+  });
+
+  it('leaves the model empty when nothing is offered', async () => {
+    const draft = await service(join(dir, 'missing.yaml')).newDraft();
+    expect(draft.values.model).toBe('');
   });
 });
 

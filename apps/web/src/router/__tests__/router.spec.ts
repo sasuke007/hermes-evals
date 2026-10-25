@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defineComponent, h, nextTick, type Component } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import {
   createMemoryHistory,
   createRouter,
@@ -139,8 +140,19 @@ describe('route props', () => {
 
   it('maps params and query to page props', () => {
     expect(propsAt(`/experiments/${EXP}/comparison`)).toEqual({ experimentId: EXP });
-    expect(propsAt('/experiments/new?from=exp_1')).toEqual({ duplicateOf: 'exp_1' });
-    expect(propsAt('/experiments/new')).toEqual({ duplicateOf: undefined });
+    expect(propsAt('/experiments/new?from=exp_1')).toEqual({
+      duplicateOf: 'exp_1',
+      repetitions: undefined,
+    });
+    expect(propsAt('/experiments/new?from=exp_1&repetitions=5')).toEqual({
+      duplicateOf: 'exp_1',
+      repetitions: 5,
+    });
+    expect(propsAt('/experiments/new?repetitions=x')).toEqual({
+      duplicateOf: undefined,
+      repetitions: undefined,
+    });
+    expect(propsAt('/experiments/new')).toEqual({ duplicateOf: undefined, repetitions: undefined });
     expect(propsAt('/suites/s1/tasks/dup_invoices')).toEqual({
       suiteId: 's1',
       taskKey: 'dup_invoices',
@@ -182,7 +194,10 @@ describe('run inspector drawer routing', () => {
     const router = makeRouter();
     await router.push(path);
     await router.isReady();
-    const wrapper = mount(Root, { global: { plugins: [router] }, attachTo: document.body });
+    // The experiment page, its tabs and the drawer all read Pinia stores.
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = mount(Root, { global: { plugins: [pinia, router] }, attachTo: document.body });
     await flushPromises();
     return { router, wrapper };
   }
@@ -224,7 +239,8 @@ describe('run inspector drawer routing', () => {
   it('marks the current tab', async () => {
     const { wrapper } = await mountAt(`/experiments/${EXP}/runs`);
     const current = wrapper.findAll('nav[aria-label="Experiment"] a[aria-current="page"]');
-    expect(current.map((a) => a.text())).toEqual(['Runs']);
+    // The Runs tab carries its run count ('Runs 120').
+    expect(current.map((a) => a.text())).toEqual([expect.stringMatching(/^Runs/)]);
     wrapper.unmount();
   });
 });

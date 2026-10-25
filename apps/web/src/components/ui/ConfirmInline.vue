@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue';
-import ErrorBanner from './ErrorBanner.vue';
 
 /**
- * A confirmation step drawn in the page (browser dialogs are not available). The trigger is
+ * A confirmation step drawn in the page (browser dialogs are never used). The trigger is
  * replaced in place by a panel that states the consequence in numbers. Focus moves to the safe
- * option; Esc backs out. The parent performs the action on `confirm` and sets `busy`; when busy
- * goes back to false the panel closes and, if `error` is set, an ErrorBanner shows under the
- * returned trigger.
+ * option; Esc backs out. The parent performs the action on `confirm` and sets `busy` (the
+ * confirm button then shows a spinner and busyLabel, both buttons disabled).
+ *
+ * When busy goes back to false: without `error` the panel closes and focus returns to the
+ * trigger; with `error` the panel stays open with the server message verbatim in place of the
+ * consequence, and the confirm button reads "Try again" (Components 1, ConfirmInline failed).
+ * The safe option closes it and the trigger returns.
  *
  * Without `triggerLabel` (and no #trigger slot) nothing is drawn until `v-model:open` is set
  * by the parent, as on System, where the confirmation expands under the provider row.
+ *
+ * #consequence replaces the consequence's text (OverviewRunning sets `cancelled` in mono).
  */
 const props = withDefaults(
   defineProps<{
@@ -31,11 +36,18 @@ const props = withDefaults(
     busy?: boolean;
     /** "Cancelling…". Defaults to the confirm label followed by an ellipsis. */
     busyLabel?: string | null;
-    /** Verbatim server message after a failed attempt. */
+    /** Verbatim server message after a failed attempt: the panel stays open and shows it. */
     error?: string | null;
+    /** The bold line above the message: "Could not cancel. Nothing was stopped." */
     errorTitle?: string;
-    /** stacked: title, consequence, buttons (Components 1) · row: text left, buttons right. */
-    layout?: 'stacked' | 'row';
+    /** The confirm button after a failure. */
+    retryLabel?: string;
+    /**
+     * stacked: title, consequence, buttons (Components 1) · row: one run of text left, buttons
+     * right (System, ModelAccessStates) · columns: a text column of at most 820px, the title on
+     * its own line and the consequence under it, buttons right (OverviewRunning).
+     */
+    layout?: 'stacked' | 'row' | 'columns';
     /** Button height: md 32px (default) or mid 28px (System, ModelAccessStates). */
     buttonSize?: 'md' | 'mid';
     /** aria-label of the group. Defaults to the title. */
@@ -53,6 +65,7 @@ const props = withDefaults(
     busyLabel: null,
     error: null,
     errorTitle: 'That did not work',
+    retryLabel: 'Try again',
     layout: 'stacked',
     buttonSize: 'md',
     label: null,
@@ -66,16 +79,46 @@ const triggerEl = ref<HTMLButtonElement | null>(null);
 const cancelEl = ref<HTMLButtonElement | null>(null);
 const groupId = useId();
 
+const failed = computed(() => !!props.error && !props.busy);
+const mid = computed(() => (props.buttonSize === 'mid' ? 'mid' : ''));
 const triggerClass = computed(() => {
   const variant = props.triggerVariant ?? (props.tone === 'danger' ? 'danger' : 'default');
-  return ['btn', variant === 'default' ? '' : variant, props.buttonSize === 'mid' ? 'mid' : ''];
+  return ['btn', variant === 'default' ? '' : variant, mid.value];
 });
 const confirmClass = computed(() => [
   'btn',
   props.tone === 'danger' ? 'danger' : 'primary',
-  props.buttonSize === 'mid' ? 'mid' : '',
+  mid.value,
 ]);
-const cancelClass = computed(() => ['btn', props.buttonSize === 'mid' ? 'mid' : '']);
+/** The title and consequence run on in one line of text. */
+const inline = computed(() => props.layout === 'row');
+const LAYOUT = {
+  stacked: { group: 'flex-col gap-10', pad: 'p-14', text: 'flex flex-col gap-10', gap: 'gap-8' },
+  row: {
+    group: 'flex-wrap items-center justify-between gap-x-20 gap-y-10',
+    pad: 'px-16 py-10',
+    text: '',
+    gap: 'gap-6',
+  },
+  columns: {
+    group: 'flex-wrap items-center justify-between gap-x-24 gap-y-12',
+    pad: 'px-16 py-14',
+    text: 'flex min-w-0 max-w-820 flex-col gap-2',
+    gap: 'gap-8',
+  },
+} as const;
+const look = computed(() => LAYOUT[props.layout]);
+/** bare leaves the border, fill and padding to the container. */
+const groupClass = computed(() => [
+  look.value.group,
+  props.bare
+    ? ''
+    : [
+        'rounded-6 border',
+        look.value.pad,
+        props.tone === 'danger' ? 'border-fail bg-fail-soft' : 'border-border-strong bg-surface-2',
+      ],
+]);
 
 async function start(): Promise<void> {
   open.value = true;
@@ -104,15 +147,20 @@ watch(open, async (value, previous) => {
   }
 });
 
-// The parent finished the action: close, and let the trigger (and any error) return.
+// The parent finished the action: close and return the trigger, unless it failed.
 watch(
   () => props.busy,
   async (busy, wasBusy) => {
-    if (wasBusy && !busy) {
-      open.value = false;
+    if (!wasBusy || busy) return;
+    if (props.error) {
+      // Failed: stay open with the message; the safe option takes focus again.
       await nextTick();
-      triggerEl.value?.focus();
+      cancelEl.value?.focus();
+      return;
     }
+    open.value = false;
+    await nextTick();
+    triggerEl.value?.focus();
   },
 );
 
@@ -120,7 +168,7 @@ defineExpose({ start, close: back });
 </script>
 
 <template>
-  <div class="confirm-inline">
+  <div class="flex min-w-0 flex-col gap-12">
     <template v-if="!open">
       <slot name="trigger" :open="start">
         <button
@@ -139,17 +187,34 @@ defineExpose({ start, close: back });
       :id="groupId"
       role="group"
       :aria-label="label ?? title"
-      class="ci-group"
-      :class="[`tone-${tone}`, `layout-${layout}`, { bare }]"
+      :aria-busy="busy || undefined"
+      class="flex"
+      :class="groupClass"
+      :data-layout="layout"
+      :data-tone="tone"
       @keydown.esc.stop.prevent="back"
     >
-      <div class="ci-text">
-        <b class="ci-title">{{ title }}</b>
-        <template v-if="consequence">
-          {{ ' ' }}<span class="t2 ci-consequence">{{ consequence }}</span>
+      <div :class="look.text" data-testid="confirm-text">
+        <b class="font-semibold" :class="tone === 'danger' ? 'text-fail-text' : 'text-text'">{{
+          title
+        }}</b>
+        <template v-if="(consequence || $slots.consequence) && !failed">
+          <template v-if="inline">{{ ' ' }}</template
+          ><span class="text-text-2" data-testid="confirm-consequence"
+            ><slot name="consequence">{{ consequence }}</slot></span
+          >
         </template>
+        <div
+          v-if="failed && layout === 'stacked'"
+          class="flex flex-col gap-4 rounded-4 border border-fail bg-surface px-12 py-10"
+          role="alert"
+          data-testid="confirm-error"
+        >
+          <b class="text-fail-text">{{ errorTitle }}</b>
+          <code class="whitespace-normal text-text-2">{{ error }}</code>
+        </div>
       </div>
-      <div class="ci-buttons">
+      <div class="flex" :class="look.gap">
         <button
           type="button"
           :class="confirmClass"
@@ -157,78 +222,33 @@ defineExpose({ start, close: back });
           :aria-busy="busy || undefined"
           @click="confirm"
         >
-          {{ busy ? (busyLabel ?? `${confirmLabel}…`) : confirmLabel }}
+          <span
+            v-if="busy"
+            class="size-10 flex-none animate-spin rounded-full border-[1.5px] border-current border-r-transparent"
+            aria-hidden="true"
+          />
+          {{ busy ? (busyLabel ?? `${confirmLabel}…`) : failed ? retryLabel : confirmLabel }}
         </button>
-        <button ref="cancelEl" type="button" :class="cancelClass" :disabled="busy" @click="back">
+        <button
+          ref="cancelEl"
+          type="button"
+          class="btn"
+          :class="mid"
+          :disabled="busy"
+          @click="back"
+        >
           {{ cancelLabel }}
         </button>
       </div>
+      <div
+        v-if="failed && layout !== 'stacked'"
+        class="flex basis-full flex-col gap-4 rounded-4 border border-fail bg-surface px-12 py-10"
+        role="alert"
+        data-testid="confirm-error"
+      >
+        <b class="text-fail-text">{{ errorTitle }}</b>
+        <code class="whitespace-normal text-text-2">{{ error }}</code>
+      </div>
     </div>
-    <ErrorBanner
-      v-if="error && !open"
-      class="ci-error"
-      tone="error"
-      :title="errorTitle"
-      :detail="error"
-    />
   </div>
 </template>
-
-<style scoped>
-.confirm-inline {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-.ci-group {
-  display: flex;
-  border-radius: 6px;
-  border: 1px solid var(--ci-border);
-  background: var(--ci-bg);
-}
-.tone-danger {
-  --ci-border: var(--fail);
-  --ci-bg: var(--fail-soft);
-  --ci-title: var(--fail-text);
-}
-.tone-default {
-  --ci-border: var(--border-strong);
-  --ci-bg: var(--surface-2);
-  --ci-title: var(--text);
-}
-.layout-stacked {
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-}
-.layout-stacked .ci-text {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.layout-row {
-  flex-wrap: wrap;
-  gap: 10px 20px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-}
-.ci-group.bare {
-  border: 0;
-  background: none;
-  padding: 0;
-  border-radius: 0;
-}
-.ci-title {
-  font-weight: 600;
-  color: var(--ci-title);
-}
-.ci-buttons {
-  display: flex;
-  gap: 8px;
-}
-.layout-row .ci-buttons {
-  gap: 6px;
-}
-</style>

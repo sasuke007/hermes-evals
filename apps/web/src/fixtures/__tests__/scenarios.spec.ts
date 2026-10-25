@@ -35,6 +35,9 @@ const READ_BY_THIS_DATA_LAYER = [
   'upload-same-version-different-hash',
   'mcp-test-failed',
   'secret-not-set',
+  'nous-unavailable',
+  'openrouter-in-use',
+  'stream-offline',
 ];
 
 describe('scenario registry', () => {

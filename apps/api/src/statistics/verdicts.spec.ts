@@ -1,8 +1,8 @@
 /**
  * The verdict on constructed inputs (./cases.support-spec.ts): worse,
  * provisional, a sensitivity figure that changes the verdict, the edge cases
- * (all passed, all failed, one task, float noise), the options, and the
- * secondary metrics.
+ * (all passed, all failed, float noise), the options, and the secondary
+ * metrics.
  */
 import { describe, expect, it } from 'vitest';
 import { computed, input, stats } from './cases.support-spec.js';
@@ -131,6 +131,7 @@ describe('edge cases', () => {
         input([
           ['FF', 'FF'],
           ['FF', 'FF'],
+          ['FF', 'FF'],
         ]),
       ),
     );
@@ -150,14 +151,6 @@ describe('edge cases', () => {
     expect(result).toMatchObject({ observedDelta: 1, lo: 1, hi: 1, verdict: 'better' });
   });
 
-  it('one task: the bootstrap can only redraw it, so the interval is the observed difference', () => {
-    const result = computed(stats(input([['PFFFF', 'PPPPF']])));
-    expect(result.observedDelta).toBeCloseTo(0.6, 12);
-    expect(result.lo).toBeCloseTo(0.6, 12);
-    expect(result.hi).toBeCloseTo(0.6, 12);
-    expect(result.verdict).toBe('better');
-  });
-
   it('float noise does not leave a difference where there is none', () => {
     // The differences +0.2, +0.4 and −0.6 sum to 1.1e-16 in floats, and to 0.
     const rows: [string, string][] = [
@@ -174,6 +167,7 @@ describe('edge cases', () => {
     const ok = input([
       ['PP', 'PP'],
       ['PF', 'PP'],
+      ['PF', 'PF'],
     ]);
     expect(() => computeComparisonStats(ok, { seed: -1 })).toThrow(RangeError);
     expect(() => computeComparisonStats(ok, { seed: 1, resamples: 0 })).toThrow(RangeError);
@@ -199,7 +193,7 @@ describe('edge cases', () => {
 });
 
 describe('secondary metrics', () => {
-  it('summarises each configuration over its counted runs, and the difference', () => {
+  it('summarises each configuration over its counted runs, the cost over its arm, and the difference', () => {
     const result = stats(
       input([
         ['PE', 'PP'],
@@ -224,12 +218,26 @@ describe('secondary metrics', () => {
     expect(result.secondary.difference.costUsd).toBeCloseTo(-0.01, 12);
   });
 
+  it('takes the cost the caller priced over every attempt of the arm, not the counted runs', () => {
+    // A cancelled run is not in the input, but what its attempt spent is in the arm's cost.
+    const rows: [string, string][] = [
+      ['PF', 'PP'],
+      ['PP', 'FP'],
+      ['PF', 'PP'],
+    ];
+    const result = stats(input(rows, { costUsd: { baseline: 0.5, candidate: null } }));
+    expect(result.secondary.baseline.costUsd).toBe(0.5);
+    expect(result.secondary.candidate.costUsd).toBeNull();
+    expect(result.secondary.difference.costUsd).toBeNull();
+    // Duration and tokens stay over the counted runs.
+    expect(result.secondary.baseline).toMatchObject({ medianDurationS: 40, meanTokens: 12_000 });
+  });
+
   it('leaves unknown figures null rather than 0', () => {
     const unknown = (r: StatsRun): StatsRun => ({
       ...r,
       durationS: null,
       tokens: null,
-      costUsd: null,
     });
     const i = input([
       ['PF', 'PP'],
@@ -238,6 +246,7 @@ describe('secondary metrics', () => {
     const blank = {
       ...i,
       tasks: i.tasks.map((t) => ({ ...t, baseline: t.baseline.map(unknown) })),
+      costUsd: { ...i.costUsd, baseline: null },
     };
     const { secondary } = stats(blank);
     expect(secondary.baseline).toMatchObject({

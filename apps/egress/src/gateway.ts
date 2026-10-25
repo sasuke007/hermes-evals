@@ -8,9 +8,11 @@
  *
  * The token cap: once an attempt's metered total reaches its registration's
  * maxTokens, or MODEL_TOKEN_CAP_PER_ATTEMPT (default 2,000,000) when it names
- * none, every further call answers 429 with `error.code` token_cap_reached
+ * none, every further call answers 402 (TOKEN_CAP_STATUS, which Hermes does
+ * not retry) with `x-should-retry: false`, `error.code` token_cap_reached
  * and the cap, and is logged with that reason, so the inspector's `network`
- * event says why the agent stopped getting answers. A call already running
+ * event says why the agent stopped getting answers and the platform
+ * classifies the run `limit`. A call already running
  * finishes: the cap is checked before forwarding, never mid-stream, so the
  * calls in flight together (at most `maxModelCallsPerAttempt`) can overshoot
  * it by what they generate.
@@ -51,6 +53,7 @@ import {
   meteredUsage,
   requestedMaxTokens,
   resolveUpstream,
+  TOKEN_CAP_STATUS,
   tokenCapRefusal,
   upstreamFetch,
   USAGE_ON_REQUEST_PATHS,
@@ -270,10 +273,13 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         registry.log(registration.attemptId, {
           kind: 'model',
           decision: 'denied',
-          status: 429,
+          status: TOKEN_CAP_STATUS,
           reason: refusal.reason,
         });
-        res.writeHead(429, { 'content-type': 'application/json' });
+        res.writeHead(TOKEN_CAP_STATUS, {
+          'content-type': 'application/json',
+          'x-should-retry': 'false',
+        });
         res.end(JSON.stringify(refusal.body));
         return;
       }

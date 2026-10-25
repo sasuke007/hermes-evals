@@ -4,18 +4,20 @@
  * so its results revision names the snapshot the rest is read in, then a
  * fixed number of statements whatever the matrix's size: the selected
  * tasks and their declared keys, every run with its current attempt, what
- * each run's attempts cost, and the scores of each run's current evaluation
- * (completed, not superseded; evaluations_current_uq), so a re-scored run
- * counts once. inputs.ts picks a candidate and a key from it.
+ * each configuration's attempts cost (every attempt, as the Overview prices
+ * them), and the scores of each run's current evaluation (completed, not
+ * superseded; evaluations_current_uq), so a re-scored run counts once.
+ * inputs.ts picks a candidate and a key from it.
  *
  * Read-only; the caller's transaction decides the isolation: the
  * comparison's REPEATABLE READ READ ONLY, or reconcile's, which holds the
  * experiment row so no run can change status while it reads.
  */
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type {
   ExecutionErrorCategory,
   ExperimentStatus,
+  PriceTable,
   RunStatus,
   ScoreStatus,
   Tokens,
@@ -32,7 +34,8 @@ import {
 } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
 import type { ConfigFacts } from '../views/facts.js';
-import { versionFactsOf, type VersionFacts } from '../views/queries.js';
+import { knownCost } from '../views/money.js';
+import { armMoneyOf, versionFactsOf, type VersionFacts } from '../views/queries.js';
 import { experimentConfigs } from '../views/snapshot.js';
 
 /** The comparison's transaction: one consistent snapshot, and no writes. */
@@ -52,6 +55,8 @@ export interface ExperimentHead {
   taskIds: string[];
   baselineVersionId: string;
   candidateVersionIds: string[];
+  /** The experiment's frozen price table, which prices its attempts. */
+  priceTable: PriceTable;
 }
 
 /** A selected task with the keys its frozen verification declares. */
@@ -71,7 +76,7 @@ export interface ScoreResult {
   comment: string;
 }
 
-/** One run of the matrix with its current attempt, its cost and its current scores. */
+/** One run of the matrix with its current attempt and its current scores. */
 export interface RunResult {
   id: string;
   taskId: string;
@@ -84,8 +89,6 @@ export interface RunResult {
   durationS: number | null;
   /** The current attempt's total tokens; null when they were not metered. */
   tokens: number | null;
-  /** Every priced attempt of the run, summed; null when none is priced. */
-  costUsd: number | null;
   /** The current evaluation's scores; empty unless the run is scored. */
   scores: ScoreResult[];
 }
@@ -96,6 +99,13 @@ export interface ExperimentResults extends ExperimentHead {
   /** The selected tasks, in experiment order. */
   tasks: TaskResult[];
   runs: RunResult[];
+  /**
+   * What each configuration version spent, by version id: every attempt of
+   * its arm, cancelled runs and earlier attempts included, as the
+   * Overview's aggregates price it (views/money.ts knownCost); null when
+   * unknown (Phase 4 question 2).
+   */
+  costUsd: Map<string, number | null>;
 }
 
 const headColumns = {
@@ -108,6 +118,7 @@ const headColumns = {
   taskIds: experiments.taskIds,
   baselineVersionId: experiments.baselineVersionId,
   candidateVersionIds: experiments.candidateVersionIds,
+  priceTable: experiments.priceTable,
 };
 
 /** The experiment row: the comparison's first read, so its results revision names the snapshot. */
@@ -175,16 +186,7 @@ export async function loadExperimentResults(
     .leftJoin(attempts, eq(attempts.id, runs.currentAttemptId))
     .where(eq(runs.experimentId, e.id))
     .orderBy(asc(runs.id));
-  const costs = await db
-    .select({
-      runId: attempts.runId,
-      priced: sql<number>`count(${attempts.costUsd})`.mapWith(Number),
-      costUsd: sql<number>`coalesce(sum(${attempts.costUsd}), 0)`.mapWith(Number),
-    })
-    .from(attempts)
-    .innerJoin(runs, eq(runs.id, attempts.runId))
-    .where(eq(runs.experimentId, e.id))
-    .groupBy(attempts.runId);
+  const money = (await armMoneyOf(db, [e.id])).get(e.id) ?? [];
   const scoreRows = await db
     .select({
       runId: evaluations.runId,
@@ -204,7 +206,8 @@ export async function loadExperimentResults(
       ),
     );
   const byTask = new Map(taskRows.map((t) => [t.id, t]));
-  const costByRun = new Map(costs.map((c) => [c.runId, c.priced > 0 ? c.costUsd : null]));
+  const models = new Map([...versions].map(([id, v]) => [id, v.model]));
+  const versionIds = [e.baselineVersionId, ...e.candidateVersionIds];
   const scoresByRun = new Map<string, ScoreResult[]>();
   for (const { runId, ...score } of scoreRows) {
     const list = scoresByRun.get(runId);
@@ -231,10 +234,10 @@ export async function loadExperimentResults(
       errorMessage: r.errorMessage,
       durationS: secondsOf(r),
       tokens: totalTokens(r.tokens),
-      costUsd: costByRun.get(r.id) ?? null,
       // Only a scored run has a result; a run being re-scored keeps its current one.
       scores: r.status === 'scored' ? (scoresByRun.get(r.id) ?? []) : [],
     })),
+    costUsd: new Map(versionIds.map((id) => [id, knownCost(e.priceTable, models, [id], money)])),
   };
 }
 

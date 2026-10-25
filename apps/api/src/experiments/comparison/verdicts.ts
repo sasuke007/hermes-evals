@@ -18,7 +18,7 @@ import {
   type StatsResult,
 } from '../../statistics/contracts.js';
 import type { AppDb } from '../../database/types.js';
-import { comparisonInputsOf } from './inputs.js';
+import { comparisonInputsOf, isProvisional } from './inputs.js';
 import { READ_ONLY_SNAPSHOT, loadExperimentResults, type ExperimentResults } from './results.js';
 
 /** Each candidate's statistics on the primary key, from one read of the results. */
@@ -28,8 +28,6 @@ export interface VerdictFigures {
   /** By candidate version id, in candidate order. */
   byCandidate: Map<string, StatsResult>;
 }
-
-const isLive = (status: ExperimentStatus): boolean => status === 'running' || status === 'paused';
 
 /**
  * The statistics of every candidate on the primary key. `final` computes
@@ -66,9 +64,12 @@ export function readVerdictFigures(
   }, READ_ONLY_SNAPSHOT);
 }
 
-/** A candidate's chip: provisional while the experiment runs, else its verdict or not computable. */
+/**
+ * A candidate's chip: provisional while the experiment runs, is paused or
+ * has failed, else its verdict or not computable.
+ */
 export function chipVerdict(stats: StatsResult, status: ExperimentStatus): VerdictState {
-  if (isLive(status)) return 'provisional';
+  if (isProvisional(status)) return 'provisional';
   return stats.computable ? stats.verdict : 'not_computable';
 }
 

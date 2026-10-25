@@ -98,9 +98,10 @@ function summaryOfEntry(
 /**
  * A summary from statistics computed now: final for a completed experiment
  * with no entry, else provisional (a running, paused or failed one, which
- * Retry failed runs can resume). One repetition, or nothing scored yet, is
- * not computable at once, as the design's card says; too few runs so far
- * is provisional, since the runs still to come may fill the gate.
+ * Retry failed runs can resume). One repetition, fewer than 3 tasks, or
+ * nothing scored yet, is not computable at once, as the design's card says;
+ * too few runs so far is provisional, since the runs still to come may
+ * fill the gate.
  */
 function summaryOfStats(
   ctx: SummaryContext,
@@ -181,6 +182,7 @@ export function listVerdicts(input: VerdictsInput): ExperimentListVerdict[] {
     delta: s.delta,
     lo: s.lo,
     hi: s.hi,
+    reason: s.reason,
   }));
 }
 

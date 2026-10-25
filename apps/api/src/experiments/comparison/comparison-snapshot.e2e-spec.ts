@@ -95,7 +95,8 @@ const cellOf = (view: ComparisonView, runId: string) =>
 describe.skipIf(!SERVER_URL)('the comparison snapshot on Postgres 17', () => {
   it('reads at the experiment row’s revision: REPEATABLE READ, READ ONLY, nothing committed later', async () => {
     const db = await createDatabase();
-    const w = await seedWorld(db);
+    // Three tasks: with fewer the answer would be too_few_tasks whatever has run.
+    const w = await seedWorld(db, { tasks: 3 });
     const { experiment, run } = await launch(db, w);
     const service = new ComparisonService(db);
     const revision = async () => {
@@ -124,7 +125,7 @@ describe.skipIf(!SERVER_URL)('the comparison snapshot on Postgres 17', () => {
     expect(await revision()).toBeGreaterThan(r0);
     // Every part of the answer is the row's revision: the run scored after it is in none.
     expect(cellOf(view, run('a/base/1'))).toMatchObject({ runStatus: 'queued', scoreStatus: null });
-    expect(view.progress).toEqual({ scored: 0, total: 8 });
+    expect(view.progress).toEqual({ scored: 0, total: 12 });
     expect(view.passCounts.baseline).toEqual({ passed: 0, counted: 0 });
     expect(view.statisticsUnavailable?.reason).toBe('nothing_scored');
 
@@ -135,7 +136,7 @@ describe.skipIf(!SERVER_URL)('the comparison snapshot on Postgres 17', () => {
       runStatus: 'scored',
       scoreStatus: 'passed',
     });
-    expect(next.progress).toEqual({ scored: 1, total: 8 });
+    expect(next.progress).toEqual({ scored: 1, total: 12 });
     expect(next.passCounts.baseline).toEqual({ passed: 1, counted: 1 });
     expect(await service.comparison(experiment.id, {})).toBe(next);
   });

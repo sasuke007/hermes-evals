@@ -1,115 +1,63 @@
 <script setup lang="ts">
-/**
- * System page placeholder: the API health check (GET /api/health, the one
- * endpoint that exists). The system builder replaces this page with model
- * access, sandbox and workers.
- */
 import { onMounted, ref } from 'vue';
-import type { HealthResponse } from '@hermes-evals/shared';
-import { getHealth } from '@/api/system';
+import { errorMessage } from '@/api/client';
+import { listSecrets } from '@/api/resources';
+import type { SecretRow } from '@/api/types/resources';
+import PageContainer from '@/components/layout/PageContainer.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
+import { usePolling } from '@/composables/usePolling';
+import { useProvidersStore } from '@/stores/providers';
+import { useSystemStore } from '@/stores/system';
+import ModelAccessSection from './ModelAccessSection.vue';
+import SandboxSection from './SandboxSection.vue';
+import SecretsSection from './SecretsSection.vue';
+import WorkersSection from './WorkersSection.vue';
 
-const health = ref<HealthResponse | null>(null);
-const error = ref<string | null>(null);
-const loading = ref(false);
+/**
+ * System (plan 12.2 items 1 and 11; System and SystemDark boards): Model access with the Nous
+ * connect flow, the secrets MCP servers reference, the sandbox's isolation proof and the
+ * workers. Read live from the running stack: the summary stream (the AppShell keeps it open)
+ * carries the workers, and this page reads providers every 5 s, so a terminal login or a
+ * restarted host proxy shows without a reload, and secrets every 30 s. It never shows or
+ * stores a token or a key.
+ */
+const PROVIDERS_REFRESH_MS = 5_000;
+const SECRETS_REFRESH_MS = 30_000;
 
-async function load(): Promise<void> {
-  loading.value = true;
-  error.value = null;
+const providers = useProvidersStore();
+const system = useSystemStore();
+
+const secrets = ref<SecretRow[] | null>(null);
+const secretsError = ref<string | null>(null);
+
+async function loadSecrets(): Promise<void> {
   try {
-    health.value = await getHealth();
+    secrets.value = await listSecrets();
+    secretsError.value = null;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
+    secretsError.value = errorMessage(err);
   }
 }
-onMounted(load);
 
-const tone = (v: string): string => (v === 'ok' ? 'pass' : v === 'unavailable' ? 'fail' : 'que');
+usePolling(() => providers.load(), PROVIDERS_REFRESH_MS);
+usePolling(loadSecrets, SECRETS_REFRESH_MS);
+
+onMounted(() => {
+  void providers.load();
+  void system.load();
+  void loadSecrets();
+});
 </script>
 
 <template>
-  <main class="page">
-    <div class="head">
-      <h1 class="page-title">System</h1>
-      <button type="button" class="btn" :disabled="loading" @click="load">Refresh</button>
-    </div>
-    <p class="t2">Model access, sandbox and workers are being built.</p>
-    <div v-if="error" role="alert" class="panel alert">
-      <b>Could not reach the API</b>
-      <code>{{ error }}</code>
-      <span class="cap"
-        >Check that the <code>api</code> service is up: <code>pnpm dev</code> or
-        <code>docker compose ps api</code></span
-      >
-    </div>
-    <dl v-else-if="health" class="panel grid" data-testid="health">
-      <dt>Status</dt>
-      <dd>
-        <span class="chip" :class="`tone-${tone(health.status)}`">{{ health.status }}</span>
-      </dd>
-      <dt>Version</dt>
-      <dd class="mono">{{ health.version }}</dd>
-      <dt>Uptime</dt>
-      <dd class="mono">{{ health.uptimeSeconds }} s</dd>
-      <dt>Database</dt>
-      <dd>
-        <span class="chip" :class="`tone-${tone(health.checks.database)}`">{{
-          health.checks.database
-        }}</span>
-      </dd>
-      <dt>Migrations</dt>
-      <dd>
-        <span class="chip" :class="`tone-${tone(health.checks.migrations)}`">{{
-          health.checks.migrations
-        }}</span>
-      </dd>
-      <dt>Queue</dt>
-      <dd>
-        <span class="chip" :class="`tone-${tone(health.checks.queue)}`">{{
-          health.checks.queue
-        }}</span>
-      </dd>
-      <dt>Checked</dt>
-      <dd class="mono t2">{{ health.timestamp }}</dd>
-    </dl>
-    <p v-else class="cap">Loading…</p>
-  </main>
+  <PageContainer variant="system">
+    <PageHeader
+      title="System"
+      description="Model access, the run sandbox and the workers. Read live from the running stack. This page never shows or stores a token or a key."
+    />
+    <ModelAccessSection />
+    <SecretsSection :secrets="secrets" :error="secretsError" @retry="loadSecrets" />
+    <SandboxSection />
+    <WorkersSection />
+  </PageContainer>
 </template>
-
-<style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.grid {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 0;
-  margin: 0;
-  max-width: 640px;
-}
-.grid dt,
-.grid dd {
-  margin: 0;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.grid dt {
-  color: var(--text-2);
-}
-.grid dt:nth-last-of-type(1),
-.grid dd:last-child {
-  border-bottom: 0;
-}
-.alert {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border-color: var(--fail);
-  background: var(--fail-soft);
-  max-width: 640px;
-}
-</style>

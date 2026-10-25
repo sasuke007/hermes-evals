@@ -1,11 +1,22 @@
 /**
  * Suites and tasks: list, detail, reload, version history, task detail,
- * task history and task diff, fixture previews. Suites are read-only in the
- * UI and never call a model.
+ * task history and task diff, fixture previews. Suites never call a model.
  *
- * Fixtures by default (src/fixtures/suites.ts); VITE_API_MODE=live calls the
- * planned endpoints of plan section 11.
+ * Live mode calls the endpoints of plan section 11 through apiGet/apiSend and
+ * parses every answer with its shared schema; fixtures mode serves
+ * src/fixtures/suites.ts (src/api/README.md).
  */
+import {
+  SuiteDetailSchema,
+  SuiteHistoryEntrySchema,
+  SuiteListRowSchema,
+  SuiteReloadResultSchema,
+  TablePreviewSchema,
+  TaskDetailSchema,
+  TaskDiffSchema,
+  TaskVersionEntrySchema,
+  type SuiteReloadRequest,
+} from '@hermes-evals/shared';
 import type {
   SuiteDetail,
   SuiteHistoryEntry,
@@ -16,7 +27,8 @@ import type {
   TaskDiff,
   TaskVersionEntry,
 } from './types/suites';
-import { apiMode, fixture, hasScenario, liveGet, liveSend, notFound, withQuery } from './source';
+import { apiGet, apiSend } from './client';
+import { apiMode, fixture, hasScenario, notFound, withQuery } from './source';
 import { experimentsOnSuiteFixture, taskUsageFixture } from '@/fixtures/experiments';
 import {
   fixturePreviewFixture,
@@ -33,9 +45,15 @@ import {
 
 const state = () => suiteStateFrom(hasScenario);
 
+/** One path segment: ids and keys are slugs today, but a segment never splits the path. */
+const seg = (value: string): string => encodeURIComponent(value);
+const suitePath = (id: string): string => `/suites/${seg(id)}`;
+const taskPath = (suiteId: string, key: string): string =>
+  `${suitePath(suiteId)}/tasks/${seg(key)}`;
+
 /** GET /suites: one row per suite directory, at its current version. */
 export function listSuites(): Promise<SuiteListRow[]> {
-  if (apiMode === 'live') return liveGet('/suites');
+  if (apiMode === 'live') return apiGet('/suites', SuiteListRowSchema.array());
   return fixture(() => suiteListFixture(noSuitesFrom(hasScenario) ? 'none' : state()), {
     request: 'GET /api/suites',
   });
@@ -43,7 +61,7 @@ export function listSuites(): Promise<SuiteListRow[]> {
 
 /** GET /suites/:id: a suite version with its tasks, validity and version selector. */
 export function getSuite(id: string): Promise<SuiteDetail> {
-  if (apiMode === 'live') return liveGet(`/suites/${id}`);
+  if (apiMode === 'live') return apiGet(suitePath(id), SuiteDetailSchema);
   const request = `GET /api/suites/${id}`;
   return fixture(
     () => {
@@ -56,20 +74,29 @@ export function getSuite(id: string): Promise<SuiteDetail> {
 }
 
 /**
- * POST /suites/reload: re-reads ./suites and re-runs every self-check. The
- * result line per suite reads like "1 task now invalid: late_fees".
+ * POST /suites/reload: re-reads one suite directory (`path`, as the list shows it:
+ * `./suites/invoices-v1`) or every directory, and re-runs the self-checks in the worker.
+ * The result line per suite reads like "1 task now invalid: late_fees". 503 without a live
+ * worker, 504 when the load outlasts SUITE_RELOAD_TIMEOUT_S.
  */
-export function reloadSuites(): Promise<SuiteReloadResult> {
-  if (apiMode === 'live') return liveSend('POST', '/suites/reload');
-  return fixture(() => suiteReloadFixture(state()), {
-    request: 'POST /api/suites/reload',
-    latencyMs: 1400,
-  });
+export function reloadSuites(path?: string): Promise<SuiteReloadResult> {
+  const body: SuiteReloadRequest = path ? { path } : {};
+  if (apiMode === 'live') return apiSend('POST', '/suites/reload', body, SuiteReloadResultSchema);
+  return fixture(
+    () => {
+      const result = suiteReloadFixture(state());
+      return path
+        ? { ...result, suites: result.suites.filter((s) => s.sourcePath === path) }
+        : result;
+    },
+    { request: 'POST /api/suites/reload', latencyMs: 1400 },
+  );
 }
 
 /** GET /suites/:id/history: every version of the directory with its changes and experiments. */
 export function getSuiteHistory(id: string): Promise<SuiteHistoryEntry[]> {
-  if (apiMode === 'live') return liveGet(`/suites/${id}/history`);
+  if (apiMode === 'live')
+    return apiGet(`${suitePath(id)}/history`, SuiteHistoryEntrySchema.array());
   return fixture(
     () =>
       suiteHistoryFixture(state()).map((entry) => ({
@@ -82,7 +109,7 @@ export function getSuiteHistory(id: string): Promise<SuiteHistoryEntry[]> {
 
 /** GET /suites/:id/tasks/:key: prompt, fixtures, verification, reference, self-check, usage. */
 export function getTask(suiteId: string, key: string): Promise<TaskDetail> {
-  if (apiMode === 'live') return liveGet(`/suites/${suiteId}/tasks/${key}`);
+  if (apiMode === 'live') return apiGet(taskPath(suiteId, key), TaskDetailSchema);
   const request = `GET /api/suites/${suiteId}/tasks/${key}`;
   return fixture(
     () => {
@@ -94,22 +121,31 @@ export function getTask(suiteId: string, key: string): Promise<TaskDetail> {
   );
 }
 
-/** GET /suites/:id/tasks/:key/history: the task's versions, newest first. */
+/** GET /suites/:id/tasks/:key/history: the task key's versions, newest first. */
 export function getTaskHistory(suiteId: string, key: string): Promise<TaskVersionEntry[]> {
-  if (apiMode === 'live') return liveGet(`/suites/${suiteId}/tasks/${key}/history`);
+  if (apiMode === 'live') {
+    return apiGet(`${taskPath(suiteId, key)}/history`, TaskVersionEntrySchema.array());
+  }
   return fixture(() => taskHistoryFixture(state(), key), {
     request: `GET /api/suites/${suiteId}/tasks/${key}/history`,
   });
 }
 
-/** GET /suites/:id/tasks/:key/diff?against=: the task's changes from another suite version. */
+/**
+ * GET /suites/:id/tasks/:key/diff?against=: the task's changes from suite version
+ * `againstSuiteId` (the older side) to suite version `suiteId`. Against itself it lists the
+ * version's files with nothing changed, which is how a first version's files are shown.
+ */
 export function getTaskDiff(
   suiteId: string,
   key: string,
   againstSuiteId: string,
 ): Promise<TaskDiff> {
   if (apiMode === 'live') {
-    return liveGet(withQuery(`/suites/${suiteId}/tasks/${key}/diff`, { against: againstSuiteId }));
+    return apiGet(
+      withQuery(`${taskPath(suiteId, key)}/diff`, { against: againstSuiteId }),
+      TaskDiffSchema,
+    );
   }
   const request = `GET /api/suites/${suiteId}/tasks/${key}/diff`;
   return fixture(
@@ -122,21 +158,22 @@ export function getTaskDiff(
   );
 }
 
-/** GET /suites/:id/tasks/:key/fixtures/:path as a table preview, or null when not tabular. */
+/**
+ * GET /suites/:id/tasks/:key/fixtures/:path/preview: the first rows of a CSV or TSV fixture,
+ * null for any other file. `path` is the fixture's workspace path (`invoices.csv`).
+ */
 export function getFixturePreview(
   suiteId: string,
   key: string,
   path: string,
 ): Promise<TablePreview | null> {
   if (apiMode === 'live') {
-    return liveGet(`/suites/${suiteId}/tasks/${key}/fixtures/${encodeURIComponent(path)}/preview`);
+    return apiGet(
+      `${taskPath(suiteId, key)}/fixtures/${seg(path)}/preview`,
+      TablePreviewSchema.nullable(),
+    );
   }
   return fixture(() => fixturePreviewFixture(path), {
-    request: `GET /api/suites/${suiteId}/tasks/${key}/fixtures/${path}`,
+    request: `GET /api/suites/${suiteId}/tasks/${key}/fixtures/${path}/preview`,
   });
-}
-
-/** URL to download a fixture file (a plain link, not a fetch). */
-export function fixtureDownloadUrl(suiteId: string, key: string, path: string): string {
-  return `/api/suites/${suiteId}/tasks/${key}/fixtures/${encodeURIComponent(path)}`;
 }
