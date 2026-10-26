@@ -9,6 +9,7 @@
  * whose rows hold no problem loads valid (self-checks aside).
  */
 import type {
+  DraftUploadKind,
   LoadIssue,
   ReadinessIssue,
   ReadinessRule,
@@ -38,6 +39,7 @@ const FORM_FIELDS: Record<string, string> = {
   expected_workspace: 'expectedWorkspace',
   expected_home: 'expectedHome',
   negative_control: 'negativeControl',
+  answers_from_fixtures: 'answersFromFixtures',
 };
 
 const target = (section: TaskEditorSection, field: string | null = null): ReadinessTarget => ({
@@ -63,7 +65,14 @@ export function targetOfYamlPath(parts: readonly (string | number)[]): Readiness
     }
     case 'self_check': {
       const field = typeof second === 'string' ? (FORM_FIELDS[second] ?? null) : null;
-      return target(second === 'expected_home' ? 'home' : 'expected', field);
+      // answers_from_fixtures sits by the workspace files the leak rule reads.
+      const section =
+        second === 'expected_home'
+          ? 'home'
+          : second === 'answers_from_fixtures'
+            ? 'workspace'
+            : 'expected';
+      return target(section, field);
     }
     default:
       return target('yaml');
@@ -85,6 +94,18 @@ export function targetOfFile(path: string, layout: DraftLayout): ReadinessTarget
   if (layout.rubrics.includes(path)) return target('checks', path);
   return target('workspace', path);
 }
+
+/** The section an upload of each kind is made in, where a refused one's Fix goes. */
+const UPLOAD_SECTIONS = {
+  fixture: 'workspace',
+  expected: 'expected',
+  home_seed: 'home',
+  expected_home: 'home',
+} as const satisfies Record<DraftUploadKind, TaskEditorSection>;
+
+/** Where the Fix of an upload refused for its size goes: its kind's section, its path as the field. */
+export const targetOfUpload = (kind: DraftUploadKind, path: string): ReadinessTarget =>
+  target(UPLOAD_SECTIONS[kind], path);
 
 /** The loader's message without the "(line 12)" it ends with and the key it starts with. */
 const bare = (message: string, key?: string): string => {

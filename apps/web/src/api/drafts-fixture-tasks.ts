@@ -63,6 +63,7 @@ export function taskYamlOf(form: TaskForm): string {
   if (form.expectedWorkspace) selfCheck.expected_workspace = form.expectedWorkspace;
   if (form.expectedHome) selfCheck.expected_home = form.expectedHome;
   if (form.negativeControl !== null) selfCheck.negative_control = form.negativeControl;
+  if (form.answersFromFixtures) selfCheck.answers_from_fixtures = true;
   if (Object.keys(selfCheck).length > 0) {
     lines.push('self_check:');
     for (const [k, v] of Object.entries(selfCheck)) lines.push(`  ${k}: ${scalar(v)}`);
@@ -92,6 +93,7 @@ const KNOWN_KEYS = [
   'expected_workspace',
   'expected_home',
   'negative_control',
+  'answers_from_fixtures',
 ];
 
 function distance(a: string, b: string): number {
@@ -158,6 +160,7 @@ export function readTaskYaml(
     if (name === 'max_turns') form.maxTurns = Number.isInteger(number) ? number : null;
     if (name === 'run_budget_seconds')
       form.runBudgetSeconds = Number.isInteger(number) ? number : null;
+    if (name === 'answers_from_fixtures') form.answersFromFixtures = rest === 'true' ? true : null;
   }
   return { form, lock: null };
 }

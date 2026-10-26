@@ -98,7 +98,16 @@ describe('authoring, live', () => {
       suite: { name: 'vendor-statements-v1', versionLabel: '0.1', description: null },
       nameTaken: null,
       tasks: [],
-      scripts: [],
+      scripts: [
+        {
+          path: 'statement_total/verify/check.py',
+          sizeBytes: 812,
+          sha256: 'a'.repeat(64),
+          runByCheck: true,
+        },
+      ],
+      verifyCounts: { files: 1, checkScripts: 1 },
+      rootFilesNotKept: [{ path: 'README.md', sizeBytes: 640 }],
       fileCount: 7,
       unpackedBytes: 26_700,
       problems: [],

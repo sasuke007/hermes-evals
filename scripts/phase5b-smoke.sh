@@ -36,14 +36,15 @@
 #
 # The stack needs the Phase 5b images (docker-guard, api, worker and web
 # rebuilt together) and the mock model (profile `test`) with
-# scripts/phase5b-mock-scripts.json among MOCK_SCRIPTS: its two scripts
+# scripts/phase5b-mock-scripts.json among its scripts: its two scripts
 # answer the Flow E tasks by their prompts' first line (the answer task with
 # the reference, the file task with a terminal call that writes summary.csv,
 # so the file configuration fails it and file-terminal passes). Compose
-# reads MOCK_SCRIPTS from the shell before .env, so no file changes:
+# mounts the file or directory MOCK_SCRIPTS_FILE names into the mock, and
+# reads the variable from the shell before .env, so no file changes; the
+# scripts/ directory gives it every scripts/*mock-scripts.json:
 #
-#   MOCK_SCRIPTS="$(python3 -c 'import glob, json; print(json.dumps([s for f in sorted(glob.glob("scripts/*mock-scripts.json")) for s in json.load(open(f))]))')" \
-#     docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=./scripts docker compose --profile test up -d
 #
 # Every configuration uses provider `custom` with base URL
 # http://mock-model:8090/v1 and model mock/scripted, which config/prices.yaml
@@ -270,7 +271,7 @@ request GET /suites/drafts
 check 'GET /suites/drafts answers the open drafts' 200 'isinstance(d, list)' '"{} open".format(len(d))'
 
 if [ "$DOCKER" = 1 ]; then
-  dc exec -T mock-model printenv MOCK_SCRIPTS >"$WORK/mock-scripts.json" 2>/dev/null
+  dc exec -T mock-model node dist/mock-model.js --print-scripts >"$WORK/mock-scripts.json" 2>/dev/null
   check_file 'the mock holds every scripts/*mock-scripts.json, phase5b included' "$WORK/mock-scripts.json" \
     'all(s["match"] in {x["match"] for x in d} for f in __import__("glob").glob(env["REPO_DIR"] + "/scripts/*mock-scripts.json") for s in json.load(open(f)))' \
     '"{} scripts".format(len(d))'
@@ -281,8 +282,8 @@ if [ "$DOCKER" = 1 ]; then
   SQL='select json_agg(hash order by id) from drizzle.__drizzle_migrations'
   dc exec -T postgres psql -U hermes -d hermes_evals -Atc "$SQL" >"$WORK/migrations.json" 2>/dev/null
   check_file 'migration 0009 (draft tables) is applied' "$WORK/migrations.json" \
-    'd[-1] == sha(open(env["REPO_DIR"] + "/apps/api/drizzle/0009_phase5b_authoring.sql", "rb").read())' \
-    '"{} migrations, the last 0009 ({})".format(len(d), d[-1][:12])'
+    'sha(open(env["REPO_DIR"] + "/apps/api/drizzle/0009_phase5b_authoring.sql", "rb").read()) in d' \
+    '"{} migrations, 0009 among them (the last {})".format(len(d), d[-1][:12])'
 else
   skip 'docker checks: mock scripts, mounts, migration 0009' 'docker compose not reachable here (or SMOKE_DOCKER=0)'
 fi

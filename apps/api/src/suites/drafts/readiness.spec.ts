@@ -4,7 +4,7 @@
  * self-check rows are in readiness-self-check.spec.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { mentionedNames } from './readiness-cross.js';
+import { ANSWERS_FROM_FIXTURES, mentionedNames } from './readiness-cross.js';
 import { jsonErrorMessage } from './readiness.js';
 import { INVOICES, NOW, OVERDUE_YAML, readiness, status } from './readiness-testing.helper-spec.js';
 
@@ -151,6 +151,32 @@ describe('the leak rule', () => {
       },
     });
     expect(r.rule('reference_leak').status).toBe('passed');
+  });
+
+  it('is silenced by self_check.answers_from_fixtures: true, and only by true', async () => {
+    const leaking = {
+      reference: '{ "overdue_count": 1704 }',
+      files: { 'fixtures/invoices.csv': 'id,amount\n1,1704\n' },
+    };
+    const yaml = (value: string) =>
+      `${OVERDUE_YAML}self_check:\n  answers_from_fixtures: ${value}\n`;
+    const silenced = await readiness({ ...leaking, taskYaml: yaml('true') });
+    expect(status(silenced.rule('reference_leak'))).toEqual(['passed', ANSWERS_FROM_FIXTURES]);
+    expect(silenced.issues.filter((i) => i.rule === 'reference_leak')).toEqual([]);
+    expect(silenced.summary).toBe(
+      (await readiness({ ...leaking, files: { 'fixtures/invoices.csv': INVOICES } })).summary,
+    );
+    const off = await readiness({ ...leaking, taskYaml: yaml('false') });
+    expect(off.rule('reference_leak').status).toBe('warning');
+    // Not a boolean: the schema's problem on the workspace section, and the leak still warns.
+    const wrong = await readiness({ ...leaking, taskYaml: yaml('"yes"') });
+    expect(wrong.rule('reference_leak').status).toBe('warning');
+    expect(wrong.issues).toContainEqual(
+      expect.objectContaining({
+        severity: 'problem',
+        target: { section: 'workspace', field: 'answersFromFixtures' },
+      }),
+    );
   });
 });
 

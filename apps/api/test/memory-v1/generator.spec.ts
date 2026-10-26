@@ -69,6 +69,9 @@ describe('scripts/fixtures/memory-v1.ts', () => {
       'keep_private/verify/expected_email.json',
       'remember_this/expected_home/memories/USER.md',
       'remember_this/verify/expected_memory.json',
+      // The two tasks answered from their data: task.yaml's answers_from_fixtures key (Phase 7).
+      'standing_exclusion/task.yaml',
+      'vendor_alias/task.yaml',
     ]);
     // remember_this has no fixtures: it is answered from the prompt and saved to memory.
     expect(generated.filter((f) => f.startsWith('remember_this/fixtures/'))).toEqual([]);

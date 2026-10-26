@@ -132,14 +132,49 @@ describe('secrets', () => {
     // The whole of stderr.log is counted, for the inspector's "last 40 of N lines".
     const collected = outcome.finalEvents.find((e) => e.payload.subtype === 'collected')!;
     expect(collected.payload.stderr_lines).toBe(2);
+    // The "Full log" (Phase 7): the whole stderr.log, redacted, as a blob the API serves.
+    const log = collected.payload.stderr_log as { sha256: string; bytes: number };
+    expect(log.bytes).toBe(Buffer.byteLength(`connecting with key ${SECRET}\nstill fine\n`));
+    expect((await world.blobs.read(log.sha256)).toString('utf8')).toBe(
+      'connecting with key <from env INVOICE_DB_KEY>\nstill fine\n',
+    );
     const noise = sink.events.find((e) => e.payload.subtype === 'noise')!;
     expect(noise.payload).toMatchObject({ truncated: true });
     // Redacted whole, then cut: no prefix of the value survives the cut.
     expect(String(noise.payload.line).endsWith('x<from env ')).toBe(true);
     expect(String(noise.payload.line)).not.toContain('sk-');
-    // tool_result (2 values), the noise line, the result text, and the stderr tail.
+    // tool_result (2 values), the noise line, the result text, and the stderr tail (the stored
+    // log holds the same one value, so it adds none).
     expect(outcome.redactions).toBe(5);
     expect(outcome.errorMessage).toBeNull();
+  });
+
+  it('keeps the stored log reference whole when a short stdio value occurs in its sha256', async () => {
+    // DEBUG=1: a random sha256 holds a '1' about 98% of the time, and this log's does.
+    const debug = mcpServer({ name: 'debug-db', envNames: ['DEBUG'] });
+    const plan = world.plan({ configuration: { mcpServers: [debug] } });
+    const log = 'starting\nready\n';
+    const { runner } = runnerKit(
+      world,
+      () => ({
+        steps: [
+          { stdout: streamJson.init() },
+          { stderr: log },
+          { stdout: streamJson.result({ text: 'done' }) },
+        ],
+      }),
+      { env: { DEBUG: '1' } },
+    );
+    const sink = new MemorySink(plan.attemptId);
+    const outcome = await runner.run(plan, sink, new AbortController().signal);
+
+    expect(sha(log)).toContain('1');
+    const collected = outcome.finalEvents.find((e) => e.payload.subtype === 'collected')!;
+    expect(collected.payload.stderr_log).toEqual({ sha256: sha(log), bytes: log.length });
+    expect((await world.blobs.read(sha(log))).toString('utf8')).toBe(log);
+    // Every replacement counted is one a stored text shows: none was made inside the sha256.
+    const kept = JSON.stringify([sink.events, outcome.finalEvents, outcome.stderrTail]);
+    expect(outcome.redactions).toBe(kept.match(/<from env [A-Z_]+>/g)?.length ?? 0);
   });
 
   it('ends as setup, naming the variable, when a stdio value is missing or empty', async () => {
@@ -399,7 +434,7 @@ describe('MCP and the network', () => {
       transport: 'http',
       command: null,
       url: 'https://mcp.vendor.example/mcp',
-      headers: [{ header: 'X-Api-Key', env: 'VENDOR_TOKEN' }],
+      headers: [{ header: 'X-Api-Key', env: 'VENDOR_TOKEN', prefix: 'Bearer ' }],
     });
     const plan = world.plan({ configuration: { mcpServers: [vendor], toolsets: ['web'] } });
     let home: Record<string, string> = {};
@@ -419,7 +454,8 @@ describe('MCP and the network', () => {
         {
           name: 'vendor',
           url: 'https://mcp.vendor.example/mcp',
-          headers: [{ header: 'X-Api-Key', env: 'VENDOR_TOKEN' }],
+          // The prefix reaches egress, which writes it before the raw value (P6-6).
+          headers: [{ header: 'X-Api-Key', env: 'VENDOR_TOKEN', prefix: 'Bearer ' }],
         },
       ],
     });
@@ -622,6 +658,7 @@ describe('MCP and the network', () => {
         port: 443,
         decision: 'denied',
         reason: 'allowlist',
+        origin: 'hermes_background',
         background: true,
       },
       {
@@ -632,9 +669,10 @@ describe('MCP and the network', () => {
         status: 200,
         ms: 812,
         model: 'openai/gpt-6.1-sol',
+        origin: 'agent',
         background: false,
       },
-      expect.objectContaining({ host: 'example.com', background: false }),
+      expect.objectContaining({ host: 'example.com', origin: 'agent', background: false }),
     ]);
     expect(network[0]!.ts).toBe(Date.parse('2026-10-24T12:00:00.000Z'));
     expect(outcome.egressUsage).toEqual({

@@ -67,6 +67,29 @@ describe('FileDropZone', () => {
     );
     expect(w.get('[data-testid="upload-rejected"]').text()).toContain('The file was not added.');
   });
+
+  it('says a refusal the API kept is over 25 MB, its size unknown (Phase 5b #11)', async () => {
+    const w = mount(FileDropZone, {
+      props: {
+        target: 'workspace files',
+        rejected: [
+          {
+            name: 'ledger-2025.parquet',
+            kind: 'fixture',
+            sizeBytes: null,
+            reason: 'The limit is 25 MB per file.',
+            path: 'fixtures/ledger-2025.parquet',
+          },
+        ],
+      },
+    });
+    const row = w.get('[data-testid="upload-rejected"]');
+    expect(row.text().replace(/\s+/g, ' ')).toContain(
+      'ledger-2025.parquet is over 25 MB. The file was not added.',
+    );
+    await row.get('button[aria-label="Dismiss ledger-2025.parquet"]').trigger('click');
+    expect(w.emitted('dismiss')?.[0]).toEqual(['ledger-2025.parquet']);
+  });
 });
 
 describe('TaskFileTree', () => {
@@ -187,5 +210,19 @@ describe('TaskFolderTable', () => {
     expect(w.emitted('openYaml')).toHaveLength(1);
     await w.get('[data-path="prompt.md"] button').trigger('click');
     expect(w.emitted('editInForm')).toHaveLength(1);
+  });
+
+  it('shows a text too large to edit as a read-only other file (Phase 5b #18)', () => {
+    const big = {
+      ...file('rubrics/method.md', 'other', 'Text · 18,204 lines', 1_468_006),
+      tooLargeToEdit: true,
+    };
+    const w = mount(TaskFolderTable, { props: { files: [...all, big] } });
+    const row = w.get('[data-path="rubrics/method.md"]');
+    expect(row.get('[data-testid="read-only"]').text()).toBe('read-only');
+    expect(row.text()).toContain(
+      'Over 1 MiB of text, too large to edit here · read-only, kept as is',
+    );
+    expect(row.findAll('button').map((b) => b.text())).toEqual(['Copy path']);
   });
 });

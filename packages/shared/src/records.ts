@@ -21,6 +21,7 @@ import {
   MCP_TRANSPORTS,
   NETWORK_DECISIONS,
   NETWORK_EVENT_KINDS,
+  NETWORK_ORIGINS,
   PLATFORM_EVENT_SUBTYPES,
   RESERVED_SCORE_KEYS,
   SCORE_KEY_PRIMARY,
@@ -213,14 +214,35 @@ const McpToolSchema = z.object({ name: z.string(), description: z.string().optio
 export const ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 
 /**
- * One header of an http MCP server: the header name and the environment
- * variable that holds its value. Egress reads the value from its own
- * environment and adds the header on the way to the server (plan 5.3);
- * the value never enters a trial.
+ * What a header's prefix may hold (Phase 6 question 6): 1 to 64 printable
+ * ASCII characters, spaces included, so `Bearer ` fits and no line break or
+ * control character can reach the header line. The mcp_server_versions
+ * headers CHECK holds the same rule (migration 0010).
+ */
+export const MCP_HEADER_PREFIX_PATTERN = /^[\x20-\x7E]{1,64}$/;
+
+/**
+ * One header of an http MCP server: the header name, the environment
+ * variable that holds its value and, optionally, a fixed prefix written
+ * before the value (Phase 6 question 6, Phase 7): `Authorization` with
+ * prefix `Bearer ` and env `VENDOR_DIRECTORY_TOKEN` sends
+ * `Authorization: Bearer <the token>`, so `.env` holds the raw token like
+ * every other key. Without a prefix the header is the whole value, as
+ * before Phase 7, and a definition stored without one keeps its hash
+ * (canonicalMcpHeaders in contracts/mcp-servers.ts). Egress reads the value
+ * from its own environment and adds the header on the way to the server
+ * (plan 5.3); the value never enters a trial. The prefix is not a secret.
  */
 export const McpHeaderSchema = z.object({
   header: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
   env: z.string().regex(ENV_NAME_PATTERN),
+  prefix: z
+    .string()
+    .regex(
+      MCP_HEADER_PREFIX_PATTERN,
+      'a prefix is 1 to 64 printable ASCII characters, such as "Bearer "',
+    )
+    .optional(),
 });
 export type McpHeader = z.infer<typeof McpHeaderSchema>;
 
@@ -520,9 +542,16 @@ export const NetworkEventPayloadSchema = z.looseObject({
   /**
    * True for Hermes's own baseline traffic rather than an agent action, such
    * as the credits-seed pricing fetch every `nous` run makes (plan 8.2). The
-   * inspector labels these rows as Hermes background calls.
+   * inspector labels these rows as Hermes background calls. On an event
+   * with `origin`, true exactly when origin is `hermes_background`.
    */
   background: z.boolean(),
+  /**
+   * Who the entry was for, as egress labelled it (Phase 7): a request to one
+   * of HERMES_BACKGROUND_HOSTS is `hermes_background`. Absent on events
+   * stored before Phase 7, where `background` alone says it.
+   */
+  origin: z.enum(NETWORK_ORIGINS).optional(),
 });
 export type NetworkEventPayload = z.infer<typeof NetworkEventPayloadSchema>;
 
@@ -618,16 +647,58 @@ export const TextMatchEvidenceSchema = z.object({
 export type TextMatchEvidence = z.infer<typeof TextMatchEvidenceSchema>;
 
 /**
+ * One row of json_match's key-by-key evidence (Phase 5 section 6.1, Phase 7;
+ * RunInspectorStates "✓ Fjord Software 3", "✗ Granite Office expected 2,
+ * got 3"): a key of the compared object, or an item of the compared list,
+ * with both sides' values there and whether they are equal.
+ */
+export const JsonMatchEntrySchema = z.object({
+  /**
+   * Relative to the compared value, in json-match-paths' notation: a key
+   * (`Granite Office`, or `["a.b"]` for a key that needs quoting) for unit
+   * `keys`, the reference's index (`[2]`) for unit `items`, and '' for unit
+   * `value`. An answer item paired with no reference item is listed after
+   * the reference's, at its index in the answer, with no `expected`.
+   */
+  path: z.string(),
+  /** The reference's value there; absent when the reference has none (a key only the answer has). */
+  expected: JsonValueSchema.optional(),
+  /** The answer's value there; absent when the answer has none (a missing key or item). */
+  observed: JsonValueSchema.optional(),
+  /**
+   * Equal as the check compares (its `unordered` and `inner_unordered`).
+   * Keys `exclude_keys` leaves out are not listed.
+   */
+  match: z.boolean(),
+});
+export type JsonMatchEntry = z.infer<typeof JsonMatchEntrySchema>;
+
+/**
  * json_match's partial credit, key by key (DESIGN_CHECKS_FIX_PROMPT.md Part
  * B: "4 of 5 keys match", or "4 of 5 items match" for a list compared
  * without order): what was counted, how many matched exactly, and the path
  * of each mismatch, such as `bands[2].net`.
+ *
+ * Since Phase 7 it also says where it compared and lists every key or item
+ * with both values (`entries`), for the inspector's evidence table and Try
+ * it ("Compared at overdue_by_vendor against the reference, key by key").
+ * Both are absent on rows stored before Phase 7. `entries` go one level
+ * deep only (the compared object's keys, or the compared list's items), so
+ * they hold no more than the compared values themselves.
  */
 export const JsonMatchEvidenceSchema = z.object({
   unit: z.enum(['keys', 'items', 'value']),
   matched: count,
   total: count,
   mismatches: z.array(z.string()),
+  /**
+   * The answer path compared: the check's `path` (the primary check's falls
+   * back to the task's `answer.path`, plan 4.2); null when the whole answer
+   * was compared.
+   */
+  path: z.string().nullable().optional(),
+  /** In the reference's order, then what only the answer has. */
+  entries: z.array(JsonMatchEntrySchema).optional(),
 });
 export type JsonMatchEvidence = z.infer<typeof JsonMatchEvidenceSchema>;
 

@@ -38,7 +38,7 @@ import {
   TaskFileChangeSchema,
   TaskTextFileDiffSchema,
   TextDiffLineSchema,
-} from './suites.js';
+} from './task-diff.js';
 
 /** A task key: the task's folder name in the suite. */
 export const DraftTaskKeySchema = z
@@ -103,6 +103,13 @@ export const TaskFormSchema = z.strictObject({
   expectedHome: z.string().nullable(),
   /** `self_check.negative_control`; null leaves it to the default (on when an expected folder is set). */
   negativeControl: z.boolean().nullable(),
+  /**
+   * `self_check.answers_from_fixtures` (Phase 7): true silences the
+   * `reference_leak` readiness rule, for an answer picked from the task's
+   * own data; null when task.yaml does not set it (false). The API always
+   * sends it; a form sent without it leaves task.yaml's value as it is.
+   */
+  answersFromFixtures: z.boolean().nullable().optional(),
 });
 export type TaskForm = z.infer<typeof TaskFormSchema>;
 
@@ -133,6 +140,14 @@ export const DraftFileViewSchema = z.object({
   sha256: sha256View,
   /** e.g. "CSV · 48 rows · 8 columns", "PDF · 2 pages", "Text · 3 lines". */
   typeLabel: z.string(),
+  /**
+   * True for a text the forms edit (task.yaml, prompt.md, reference.json, a
+   * rubric) that a zip held at more than AUTHORING_LIMITS.draftTextMaxChars
+   * characters (Phase 5b question 18, Phase 7): it is kept as an `other`
+   * blob, saved byte for byte and shown read-only, since the editor could
+   * not save it back. Absent or false for every other file.
+   */
+  tooLargeToEdit: z.boolean().optional(),
 });
 export type DraftFileView = z.infer<typeof DraftFileViewSchema>;
 
@@ -238,13 +253,47 @@ export type DraftUploadKind = (typeof DRAFT_UPLOAD_KINDS)[number];
  * The fields beside `file` in POST …/tasks/:key/files (multipart). `path` is
  * inside the kind's folder (`docs/payment-terms.pdf` under `fixtures/`; for
  * a home seed `memories/USER.md`); the file's own name when absent. Files
- * over AUTHORING_LIMITS.suiteMaxFileBytes are refused (413).
+ * over AUTHORING_LIMITS.suiteMaxFileBytes are refused (413), and the
+ * refusal is kept on the draft task (DraftRefusedUpload).
  */
 export const DraftFileUploadFieldsSchema = z.strictObject({
   kind: z.enum(DRAFT_UPLOAD_KINDS),
   path: DraftFilePathSchema.optional(),
 });
 export type DraftFileUploadFields = z.infer<typeof DraftFileUploadFieldsSchema>;
+
+/**
+ * An upload refused for its size (Phase 5b question 11, Phase 7), kept on
+ * the draft task (suite_draft_tasks.refused_uploads, migration 0010) so the
+ * readiness rule `file_limits` still reports it after a reload: a `problem`
+ * row worded by refusedUploadMessage, whose Fix goes to the kind's section
+ * with `path` as the field. Nothing of the file is stored. The API drops
+ * the record when a file is stored at the same path, or when the path is
+ * deleted (DELETE …/files/:path), which is how the author dismisses it.
+ */
+export const DraftRefusedUploadSchema = z.object({
+  /** Where it would have gone, in the task folder: `fixtures/ledger-2025.parquet`. */
+  path: z.string().min(1),
+  kind: z.enum(DRAFT_UPLOAD_KINDS),
+  /** The size the upload declared or reached before it was cut off; null when unknown. */
+  sizeBytes: countView.nullable(),
+  /** The limit it was refused against: AUTHORING_LIMITS.suiteMaxFileBytes when it was refused. */
+  limitBytes: countView,
+  refusedAt: isoTimeView,
+});
+export type DraftRefusedUpload = z.infer<typeof DraftRefusedUploadSchema>;
+
+/** `a/b/ledger.csv` → `ledger.csv`. */
+const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+
+/** "`ledger-2025.parquet` is over 25 MB." (ReadinessPanel, problems state): the `file_limits` row of a refused upload. */
+export function refusedUploadMessage(
+  upload: Pick<DraftRefusedUpload, 'path' | 'limitBytes'>,
+): string {
+  const limit = upload.limitBytes / (1024 * 1024);
+  const shown = Number.isInteger(limit) ? String(limit) : limit.toFixed(1);
+  return `\`${baseName(upload.path)}\` is over ${shown} MB.`;
+}
 
 /** Body of PATCH …/files/:path: the file's new path in the task folder (Rename, or a move into another folder). */
 export const MoveDraftFileRequestSchema = z.strictObject({

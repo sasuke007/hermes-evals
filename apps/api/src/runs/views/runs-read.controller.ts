@@ -2,6 +2,8 @@ import { Controller, Get, Inject, Param, Query, Res, StreamableFile } from '@nes
 import { ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
+  AttemptStderrParamsSchema,
+  AttemptStderrSchema,
   RUN_SORT_KEYS,
   RUN_STATUSES,
   RunDetailSchema,
@@ -12,6 +14,8 @@ import {
   SCORE_STATUSES,
   SORT_DIRECTIONS,
   TablePreviewSchema,
+  type AttemptStderr,
+  type AttemptStderrParams,
   type RunDetail,
   type RunEventsPage,
   type RunEventsQuery,
@@ -103,6 +107,18 @@ export class RunsReadController {
     @Query(new ZodValidationPipe(RunEventsQuerySchema)) query: RunEventsQuery,
   ): Promise<RunEventsPage> {
     return RunEventsPageSchema.parse(await this.views.events(id, query.after));
+  }
+
+  @Get('runs/:id/attempts/:n/stderr')
+  @ApiParam({ name: 'n', description: 'The attempt number, from 1' })
+  @ApiJsonResponse(AttemptStderrSchema, {
+    description:
+      "The attempt's stderr.log, redacted as the stderr tail is: the whole log, or its last 1 MiB from a line start (`truncated`). 404 while the attempt runs, when it wrote nothing, and for attempts that ended before Phase 7",
+  })
+  async stderr(
+    @Param(new ZodValidationPipe(AttemptStderrParamsSchema)) params: AttemptStderrParams,
+  ): Promise<AttemptStderr> {
+    return AttemptStderrSchema.parse(await this.views.stderr(params.id, params.n));
   }
 
   @Get('runs/:id/artifacts/:artifactId/content')

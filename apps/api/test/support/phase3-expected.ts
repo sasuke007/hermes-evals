@@ -52,7 +52,8 @@ const unanswered = (row: StoredScore): void =>
 
 /**
  * An answer check's stored values: what the reference holds and what the
- * agent answered, and its evidence (json_match's counts; none for the others).
+ * agent answered, and its evidence (json_match's counts, path and entries;
+ * none for the others).
  */
 const answered =
   (expected: JsonValue, observed: JsonValue, evidence: StoredScore['evidence'] = {}) =>
@@ -151,7 +152,20 @@ function expectations(task: Phase3Task, config: Phase3Config, seqs: ToolSeqs): E
               score: 1,
               comment: '3 of 3 items match exactly (3 items)',
               row: answered(['a', 'b', 'c'], ['c', 'a', 'b'], {
-                json_match: { unit: 'items', matched: 3, total: 3, mismatches: [] },
+                json_match: {
+                  unit: 'items',
+                  matched: 3,
+                  total: 3,
+                  mismatches: [],
+                  // Phase 7: the compared path, and each item paired as the score paired it.
+                  path: 'ids',
+                  entries: ['a', 'b', 'c'].map((id, i) => ({
+                    path: `[${i}]`,
+                    expected: id,
+                    observed: id,
+                    match: true,
+                  })),
+                },
               }),
             },
             currency: { status: 'passed', score: 1, comment: 'equal', row: answered('EUR', 'eur') },

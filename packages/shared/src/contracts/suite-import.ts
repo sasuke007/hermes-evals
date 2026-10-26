@@ -175,14 +175,29 @@ export type TaskImportRefusalBody = z.infer<typeof TaskImportRefusalBodySchema>;
 // A suite from a .zip (SA.10)
 // ---------------------------------------------------------------------------
 
-/** A verifier script in the zip: "This suite contains code" lists each one. */
+/**
+ * A file under a task's `verify/` folder in the zip: "This suite contains
+ * code" lists each one. Data a script reads (`expected_stock.json` of
+ * `tools-v1`) is listed too, so `runByCheck` tells the scripts a check runs
+ * from the rest (Phase 5b question 12, Phase 7).
+ */
 export const SuiteZipScriptSchema = z.object({
   /** In the suite: `late_fees/verify/check_late_fees.py`. */
   path: z.string(),
   sizeBytes: countView,
   sha256: sha256View,
+  /** True when a verifier_script check of its task names it as its `script`. */
+  runByCheck: z.boolean(),
 });
 export type SuiteZipScript = z.infer<typeof SuiteZipScriptSchema>;
+
+/** A file at the zip's suite root other than suite.yaml (a README), which a draft does not keep. */
+export const SuiteZipRootFileSchema = z.object({
+  /** At the suite root: `README.md`. */
+  path: z.string(),
+  sizeBytes: countView,
+});
+export type SuiteZipRootFile = z.infer<typeof SuiteZipRootFileSchema>;
 
 /** One task of the zip: "unmatched_lines · valid · 2 workspace files · 1 check". */
 export const SuiteZipTaskSchema = z.object({
@@ -227,7 +242,20 @@ export const SuiteZipValidationSchema = z
       })
       .nullable(),
     tasks: z.array(SuiteZipTaskSchema),
+    /** Every file under a task's `verify/` folder, by path. */
     scripts: z.array(SuiteZipScriptSchema),
+    /**
+     * "3 files under verify/ · 2 scripts a check runs" (Phase 5b question
+     * 12): `files` is scripts.length, `checkScripts` the scripts of them
+     * with runByCheck.
+     */
+    verifyCounts: z.object({ files: countView, checkScripts: countView }),
+    /**
+     * Files at the suite root other than suite.yaml, by path (Phase 5b
+     * question 2, Phase 7): a draft holds no suite-level file, so the import
+     * leaves them out, and the dialog says so. Empty when there are none.
+     */
+    rootFilesNotKept: z.array(SuiteZipRootFileSchema),
     fileCount: countView,
     unpackedBytes: countView,
     problems: z.array(UploadProblemSchema),
@@ -239,7 +267,13 @@ export const SuiteZipValidationSchema = z
   .refine((v) => (v.outcome === 'name_taken') === (v.nameTaken !== null), {
     path: ['nameTaken'],
     message: 'nameTaken exactly when the outcome is name_taken',
-  });
+  })
+  .refine(
+    (v) =>
+      v.verifyCounts.files === v.scripts.length &&
+      v.verifyCounts.checkScripts === v.scripts.filter((s) => s.runByCheck).length,
+    { path: ['verifyCounts'], message: 'verifyCounts count the listed scripts' },
+  );
 export type SuiteZipValidation = z.infer<typeof SuiteZipValidationSchema>;
 
 /**

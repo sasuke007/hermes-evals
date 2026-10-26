@@ -20,10 +20,10 @@ trial reaches it through egress's MCP gateway and nothing else. Every
 request must carry `Authorization: Bearer <VENDOR_DIRECTORY_TOKEN>`, the
 token from this process's environment; anything else gets 401 before the MCP
 layer sees it. The token is set in .env (any random string works for the
-sample). Compose gives egress the whole header value, `Bearer <token>`, and
-an http definition maps `Authorization` to VENDOR_DIRECTORY_TOKEN, so egress
-adds it on the way here and the value never enters a trial (plan 5.3).
-Without a token the server refuses to start.
+sample), and Compose gives egress the same value. The http definition maps
+`Authorization` to VENDOR_DIRECTORY_TOKEN with the prefix `Bearer ` (Phase
+7), so egress writes `Bearer <token>` on the way here and the value never
+enters a trial (plan 5.3). Without a token the server refuses to start.
 
 Stateless, with JSON responses: each POST stands alone, so no session is
 left open between trials, and the server has nothing to push, so a GET (the

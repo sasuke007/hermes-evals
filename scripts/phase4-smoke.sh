@@ -44,17 +44,18 @@
 #   BASE_URL=http://localhost:8080/api scripts/phase4-smoke.sh  # through nginx
 #
 # The stack needs the mock model (profile `test`) with the scripts in
-# scripts/phase4-mock-scripts.json. Compose reads MOCK_SCRIPTS from the shell
-# before .env, so no file changes:
+# scripts/phase4-mock-scripts.json. Compose mounts the file or directory
+# MOCK_SCRIPTS_FILE names into the mock, and reads the variable from the
+# shell before .env, so no file changes:
 #
-#   MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase4-mock-scripts.json"))))')" \
-#     docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=./scripts docker compose --profile test up -d
 #
-# No task has an llm_judge check, so no judge setting is needed. To run the
-# Phase 2 and 3 smoke tests on the same stack, put the Phase 4 scripts first
-# in the Phase 3 start (their phrases occur nowhere else):
+# No task has an llm_judge check, so no judge setting is needed. The whole
+# scripts/ directory gives the mock every scripts/*mock-scripts.json, whose
+# phrases occur nowhere else, so with the Phase 3 start's judge settings the
+# Phase 2 and 3 smoke tests pass on the same stack:
 #
-#   MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase4-mock-scripts.json")) + json.load(open("scripts/phase3-mock-scripts.json")) + json.load(open("scripts/phase2-mock-scripts.json"))))')" \
+#   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
 #     docker compose --profile test up -d
 #
@@ -281,10 +282,10 @@ check 'the API document lists GET /experiments/{id}/comparison' 200 \
   '"{} paths".format(len(d["paths"]))'
 
 if [ "$DOCKER" = 1 ]; then
-  if dc exec -T mock-model printenv MOCK_SCRIPTS 2>/dev/null | grep -q 'smoke-stats-method'; then
-    pass 'the mock model has scripts/phase4-mock-scripts.json' 'MOCK_SCRIPTS matches the skill phrase, "Smoke stats task NORTH", ...'
+  if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'smoke-stats-method' >/dev/null; then
+    pass 'the mock model has scripts/phase4-mock-scripts.json' 'its scripts match the skill phrase, "Smoke stats task NORTH", ...'
   else
-    fail 'the mock model has scripts/phase4-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS)'
+    fail 'the mock model has scripts/phase4-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
   fi
   MIGRATIONS="$(psql_ro 'select count(*) from drizzle.__drizzle_migrations')"
   LIMIT_CK="$(psql_ro "select count(*) from pg_constraint where conname = 'attempts_error_category_ck' and pg_get_constraintdef(oid) like '%''limit''%'")"

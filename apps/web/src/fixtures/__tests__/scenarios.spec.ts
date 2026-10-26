@@ -41,6 +41,13 @@ const READ_BY_THIS_DATA_LAYER = [
   'stream-offline',
   'memory-files',
   'skills-on-demand',
+  // Phase 7: Full log, Hermes's background requests, the http MCP sample.
+  'stderr-long',
+  'stderr-missing',
+  'hermes-background',
+  'mcp-http',
+  'document-in-older-version',
+  'diff-not-recorded',
   // Suite authoring (Phase 5b).
   'missing-folders',
   'draft-invalid-task',

@@ -44,6 +44,7 @@ const primaryKey = computed(() => props.detail.scores.find((s) => s.primary)?.ke
 
     <template v-if="status === 'execution_error' && detail.executionError">
       <ExecutionErrorPanel
+        :run-id="detail.id"
         :error="detail.executionError"
         :attempts="detail.attempts"
         :shown-attempt="detail.shownAttempt"

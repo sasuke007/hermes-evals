@@ -246,6 +246,8 @@ export class DraftTasksService {
         removed: false,
         restoredFromTaskId: null,
         selfCheck: null,
+        // The base version holds no refused upload: revert dismisses them too.
+        refusedUploads: [],
       });
     });
     return this.detail(folder, base.key);
@@ -327,6 +329,7 @@ export class DraftTasksService {
       renamedFrom: null,
       readBlob: this.read,
       lastSelfCheck: task.selfCheck,
+      refusedUploads: task.refusedUploads,
     });
     return outcome.readiness;
   }

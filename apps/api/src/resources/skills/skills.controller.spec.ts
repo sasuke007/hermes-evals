@@ -78,8 +78,10 @@ describe('POST /api/resources/skills/validate, then POST /api/resources/skills',
     const configId = await seedConfiguration(t.db, 'with-skill', [{ skillIds: [row.id] }]);
 
     const list = await http().get('/api/resources/skills').expect(200);
+    const links = [{ configurationId: configId, name: 'with-skill' }];
+    expect(row).toMatchObject({ inUse: false, inUseBy: [] });
     expect(SkillRowSchema.array().parse(list.body)).toEqual([
-      { ...row, usedBy: [{ configurationId: configId, name: 'with-skill' }] },
+      { ...row, usedBy: links, inUse: true, inUseBy: links },
     ]);
 
     const detail = await http().get(`/api/resources/skills/${row.id}`).expect(200);

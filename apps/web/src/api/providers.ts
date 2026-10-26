@@ -11,29 +11,27 @@
  *                      missing-key SetupCard, the no-key banner and ProviderNotice's step
  */
 import { apiGet, apiSend } from './client';
-import { apiMode, FIXTURE_LATENCY_MS, fixture, hasScenario } from './source';
+import {
+  apiMode,
+  FIXTURE_LATENCY_MS,
+  fixture,
+  fixtureWorld,
+  hasScenario,
+  type FixtureWorld,
+} from './source';
 import {
   NousLoginSchema,
   ProvidersResponseSchema,
   type NousLogin,
   type ProviderInfo,
 } from './types/system';
-import {
-  cancelNousLoginFixture,
-  logoutNousFixture,
-  nousLoginFixture,
-  providersFixture,
-  simulateNousLoginFixture,
-  startNousLoginFixture,
-  type LoginOutcome,
-} from '@/fixtures/system';
+import { LOGIN_OUTCOMES, type LoginOutcome } from './login-outcomes';
 
-export type { LoginOutcome } from '@/fixtures/system';
-export { LOGIN_OUTCOMES } from '@/fixtures/system';
+export { LOGIN_OUTCOMES, type LoginOutcome };
 
 /** The provider list of the fixture world, with this file's two scenarios applied. */
-function providersOfScenario(): ProviderInfo[] {
-  const list = providersFixture();
+function providersOfScenario(w: FixtureWorld): ProviderInfo[] {
+  const list = w.system.providersFixture();
   for (const p of list) {
     if (p.id === 'nous' && hasScenario('nous-unavailable')) {
       Object.assign(p, { status: 'unavailable', scope: null, login: null });
@@ -62,7 +60,7 @@ export function startNousLogin(): Promise<NousLogin> {
     return apiSend('POST', '/providers/nous/login', {}, NousLoginSchema);
   }
   // "Requesting" is usually under a second; long enough here to be seen.
-  return fixture(startNousLoginFixture, {
+  return fixture((w) => w.system.startNousLoginFixture(), {
     request: 'POST /api/providers/nous/login',
     latencyMs: FIXTURE_LATENCY_MS === 0 ? 0 : 700,
   });
@@ -71,7 +69,7 @@ export function startNousLogin(): Promise<NousLogin> {
 /** GET /providers/nous/login: the current login state (polled every 2 s while waiting). */
 export function getNousLogin(): Promise<NousLogin> {
   if (apiMode === 'live') return apiGet('/providers/nous/login', NousLoginSchema);
-  return fixture(nousLoginFixture, { request: 'GET /api/providers/nous/login' });
+  return fixture((w) => w.system.nousLoginFixture(), { request: 'GET /api/providers/nous/login' });
 }
 
 /** DELETE /providers/nous/login: cancel a pending login; answers the login state after it. */
@@ -80,9 +78,9 @@ export function cancelNousLogin(): Promise<NousLogin> {
     return apiSend('DELETE', '/providers/nous/login', {}, NousLoginSchema);
   }
   return fixture(
-    () => {
-      cancelNousLoginFixture();
-      return nousLoginFixture();
+    (w) => {
+      w.system.cancelNousLoginFixture();
+      return w.system.nousLoginFixture();
     },
     { request: 'DELETE /api/providers/nous/login' },
   );
@@ -97,9 +95,9 @@ export function logoutNous(): Promise<NousLogin> {
     return apiSend('POST', '/providers/nous/logout', {}, NousLoginSchema);
   }
   return fixture(
-    () => {
-      logoutNousFixture();
-      return nousLoginFixture();
+    (w) => {
+      w.system.logoutNousFixture();
+      return w.system.nousLoginFixture();
     },
     { request: 'POST /api/providers/nous/logout' },
   );
@@ -109,6 +107,7 @@ export function logoutNous(): Promise<NousLogin> {
 export const canSimulateLogin = apiMode === 'fixtures';
 
 /** Fixtures only: decide how the waiting login ends. A no-op against the live API. */
-export function simulateNousLogin(outcome: LoginOutcome): void {
-  if (apiMode === 'fixtures') simulateNousLoginFixture(outcome);
+export async function simulateNousLogin(outcome: LoginOutcome): Promise<void> {
+  if (apiMode !== 'fixtures') return;
+  (await fixtureWorld()).system.simulateNousLoginFixture(outcome);
 }

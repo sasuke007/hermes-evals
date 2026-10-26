@@ -285,6 +285,35 @@ export const SCENARIOS: ScenarioEntry[] = [
     baseData: true,
   },
 
+  {
+    name: 'stderr-long',
+    domain: 'inspector',
+    description:
+      'Full log on disputed · baseline · rep 4: the stderr.log is 3.3 MB, so only its last 1 MB comes back ("stderr · last 1 MB of 3.3 MB · 48,213 lines in all").',
+    route: run('skillVsNoSkill', 'disputed', 'baseline', 4),
+  },
+  {
+    name: 'stderr-missing',
+    domain: 'inspector',
+    description:
+      'Full log answers 404: no log is stored for the attempt, which ended before the worker kept full logs; the stored tail stays.',
+    route: run('skillVsNoSkill', 'disputed', 'baseline', 4),
+  },
+  {
+    name: 'hermes-background',
+    domain: 'inspector',
+    description:
+      "Every run's timeline also has Hermes's own background requests, origin hermes_background: a refused CONNECT to hermes-agent.nousresearch.com and an allowed one to raw.githubusercontent.com, both neutral and tagged Hermes background.",
+    route: run('skillVsNoSkill', 'per_vendor', 'with-skill', 1),
+  },
+  {
+    name: 'mcp-http',
+    domain: 'inspector',
+    description:
+      'with-mcp runs call the http sample vendor-directory: its 405 to the event-stream GET is a neutral "MCP event stream not offered · vendor-directory · 405", and search_vendors\'s 31,204-character result is cut at the MCP window of 20,000 characters.',
+    route: run('mcpVsBaseline', 'per_vendor', 'with-mcp', 1),
+  },
+
   // Suites ----------------------------------------------------------------------
   {
     name: 'invalid-task',
@@ -309,6 +338,13 @@ export const SCENARIOS: ScenarioEntry[] = [
       'invoices-v1 v2 changed total_due (still valid): experiments on v1 say "A newer version of invoices-v1 exists (v2): 1 task changed (total_due)" with Duplicate on v2; task total_due shows v2 and its diff.',
     route: exp('skillVsNoSkill'),
     alsoAt: [`/suites/${SUITE_V2_ID}/tasks/total_due`],
+  },
+  {
+    name: 'diff-not-recorded',
+    domain: 'suites',
+    description:
+      'With newer-version (?scenario=newer-version,diff-not-recorded): total_due v1 was loaded before Phase 5b, so the diff\'s reference.json reads "not recorded → 47 B" for its size and hash instead of a dash.',
+    route: `/suites/${SUITE_V2_ID}/tasks/total_due?diff=${SUITE_V1_ID}`,
   },
   {
     name: 'reload-failed',
@@ -342,6 +378,13 @@ export const SCENARIOS: ScenarioEntry[] = [
     description:
       'The upload declares 1.0.0 again with a different hash: "Bump version: in SKILL.md", Confirm stays disabled.',
     route: '/resources/skills',
+  },
+  {
+    name: 'document-in-older-version',
+    domain: 'library',
+    description:
+      'vendor-policy-v3.pdf is attached to no configuration now, but an older version of with-skill has it: "None now · kept by an older version of with-skill", and Delete is disabled with the reason.',
+    route: '/resources/documents',
   },
   {
     name: 'mcp-test-failed',
@@ -497,7 +540,15 @@ export const SCENARIOS: ScenarioEntry[] = [
   {
     name: 'sandbox-failed',
     domain: 'system',
-    description: '2 of the 15 sandbox isolation checks fail; the selftest command to re-run them.',
+    description:
+      '2 of the 16 sandbox isolation checks fail (15 trial checks and the verifier container); the selftest command to re-run them.',
+    route: '/system',
+  },
+  {
+    name: 'sandbox-verifier-refused',
+    domain: 'system',
+    description:
+      "The 16th isolation check fails: docker-guard refuses the verifier container's spec, so execution is disabled at worker start rather than at the first load or score (Phase 5b question 3).",
     route: '/system',
   },
   {

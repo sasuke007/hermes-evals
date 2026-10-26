@@ -73,8 +73,16 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+// no-suite-yaml is read twice on every load; the wait between is suite-loader-retry.spec.ts's.
 const loader = (loaderVersion = LOADER_VERSION) =>
-  new SuiteLoader({ db: t.db, blobs: store, suitesDir, logger, loaderVersion });
+  new SuiteLoader({
+    db: t.db,
+    blobs: store,
+    suitesDir,
+    logger,
+    loaderVersion,
+    suiteYamlRetryMs: 0,
+  });
 
 /** Loads one directory and checks the result against the shared contract. */
 async function load(path: string, l = loader()): Promise<SuiteReloadEntry> {

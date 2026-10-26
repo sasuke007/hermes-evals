@@ -7,7 +7,8 @@ import {
   splitLead,
   statisticsReading,
 } from '../readings';
-import { EXPERIMENT_IDS, getComparison } from '@/api/experiments';
+import { getComparison } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import type { ComparisonView } from '@/api/types/experiments';
 import { useScenario } from '@/stores/__tests__/scenarioEnv';
 

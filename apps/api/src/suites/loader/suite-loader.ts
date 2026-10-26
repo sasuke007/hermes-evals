@@ -23,9 +23,15 @@
  * order, and a directory that no longer fits is not loaded by that pass (an
  * `error` entry saying to reload it on its own, with nothing recorded, so
  * its last version stays). The start-up pass is not a job and has no budget.
+ *
+ * A folder read without its suite.yaml is read once more, 2 s later, before
+ * it is recorded: a folder deleted on the host stays listed, empty, for
+ * about a second through macOS file sharing (Phase 5b question 20), and the
+ * second read finds it gone (missing) rather than broken.
  */
 import { lstat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { PinoLogger } from 'nestjs-pino';
 import {
   DIRECTORY_KEY_PATTERN,
@@ -55,7 +61,7 @@ import {
   type DirectoryOutcome,
   type PersistDeps,
 } from './persist.js';
-import { readSuiteDirectory, type LoadedSuite } from './read-suite.js';
+import { isSuiteYamlNotFound, readSuiteDirectory, type LoadedSuite } from './read-suite.js';
 import { comparePaths, isHiddenName, listSuitesDir } from './walk.js';
 import { locatedError, toErrorView } from './yaml-source.js';
 
@@ -72,7 +78,12 @@ export interface SuiteLoaderOptions {
   /** Interpreter for verifier scripts. */
   python?: string;
   now?: () => Date;
+  /** How long before a folder read without its suite.yaml is read again; SUITE_YAML_RETRY_MS by default. */
+  suiteYamlRetryMs?: number;
 }
+
+/** The wait before a folder read without its suite.yaml is read again (macOS file sharing keeps a deleted one about 1 s). */
+export const SUITE_YAML_RETRY_MS = 2000;
 
 const KEY_RULE = "must start with a letter or digit and use only letters, digits, '.', '_' and '-'";
 
@@ -326,6 +337,7 @@ export class SuiteLoader {
     tx: AppTx,
     path: string,
     budget: PassBudget | undefined,
+    retried = false,
   ): Promise<DirectoryLoad> {
     const failed = async (message: string): Promise<DirectoryLoad> => ({
       outcome: await persistError(tx, this.persist, path, directoryError(message)),
@@ -347,6 +359,10 @@ export class SuiteLoader {
       now: this.persist.now,
       ...(budget ? { selfCheckBudgetS: Math.max(0, budget.budgetS - budget.usedS) } : {}),
     });
+    if (!retried && isSuiteYamlNotFound(read)) {
+      await sleep(this.options.suiteYamlRetryMs ?? SUITE_YAML_RETRY_MS);
+      return this.loadLocked(tx, path, budget, true);
+    }
     if ('deferred' in read) {
       // Nothing ran and nothing is recorded: the directory keeps what it had.
       const error = directoryError(

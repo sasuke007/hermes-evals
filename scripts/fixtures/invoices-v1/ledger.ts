@@ -37,6 +37,12 @@ export interface Task {
   reads: string[];
   /** Whether the baseline mock answers with the trap answer (else with the reference). */
   baselineTrapped: boolean;
+  /**
+   * The answer is picked from the task's own data (invoice numbers, a
+   * vendor total equal to one invoice's amount), so task.yaml gets
+   * `self_check.answers_from_fixtures: true` (../answers-from-fixtures.ts).
+   */
+  answersFromFixtures?: true;
 }
 
 export const SEED = 20261026;

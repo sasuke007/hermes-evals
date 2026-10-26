@@ -24,6 +24,7 @@ import {
   SCORER_TYPES,
   SKILL_LOADING_MODES,
   TRAJECTORY_MODES,
+  type NetworkOrigin,
 } from '../vocab.js';
 import { countView, isoTimeView, rateView, secondsView, sha256View, usdView } from './common.js';
 import { ExperimentConfigRefSchema } from './experiments.js';
@@ -68,7 +69,10 @@ export const ExecutionErrorViewSchema = z.object({
   meta: z.string().nullable(),
   /** Longer explanation of what the agent was doing and what to try. */
   explanation: z.string().nullable(),
-  /** The last lines of stderr (at most 40), and how many lines the full log has. */
+  /**
+   * The last lines of stderr (at most 40), and how many lines the full log
+   * has; "Full log" reads the whole stderr.log (AttemptStderr, ./run-output.ts).
+   */
   stderrTail: z.object({ lines: z.array(z.string()).max(40), totalLines: countView }),
   exitCode: z.number().int().nullable(),
 });
@@ -222,13 +226,27 @@ export type TimelineNetwork = z.infer<typeof TimelineNetworkSchema>;
 /** Row kinds drawn from egress's connection log; each carries `network`. */
 const NETWORK_ROW_KINDS: readonly TimelineEventKind[] = ['network', 'refused'];
 
+/**
+ * Whose a timeline row is: the agent's, or Hermes's own background request
+ * (drawn neutral, tagged "Hermes background"). The view's spelling of the
+ * stored NETWORK_ORIGINS (vocab.ts), mapped by TIMELINE_ORIGIN_OF.
+ */
+export const TIMELINE_ORIGINS = ['agent', 'hermes-background'] as const;
+export type TimelineOrigin = (typeof TIMELINE_ORIGINS)[number];
+
+/** A network event's stored origin as a timeline row's origin. */
+export const TIMELINE_ORIGIN_OF = {
+  agent: 'agent',
+  hermes_background: 'hermes-background',
+} as const satisfies Record<NetworkOrigin, TimelineOrigin>;
+
 /** One row of EventTimeline and one tick of TimelineScrubber. */
 export const TimelineEventSchema = z
   .object({
     seq,
     kind: TimelineEventKindSchema,
     /** `hermes-background` for Hermes's own requests (drawn neutral, tagged). */
-    origin: z.enum(['agent', 'hermes-background']),
+    origin: z.enum(TIMELINE_ORIGINS),
     /** Milliseconds since the attempt started; pages show "+00:04.2". */
     atMs: countView,
     title: z.string(),
@@ -243,7 +261,11 @@ export const TimelineEventSchema = z
     input: z.string().nullable(),
     output: z.string().nullable(),
     outputChars: countView.nullable(),
-    /** Output cut by the runtime at 5,000 characters. */
+    /**
+     * Output cut at the timeline's window for the row
+     * (timelineOutputLimit in ./run-output.ts: 20,000 characters for an MCP
+     * tool's result, 5,000 for any other tool's), and marked so.
+     */
     truncated: z.boolean(),
     /** Free text for text, final, network and platform rows. */
     text: z.string().nullable(),

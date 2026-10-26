@@ -12,6 +12,7 @@
 import type { SuiteVersionRef } from '@hermes-evals/shared';
 import type {
   DraftConflict,
+  DraftRefusedUpload,
   DraftSaveProgress,
   DraftSelfCheckView,
   DraftTaskState,
@@ -55,6 +56,8 @@ export interface FixtureTask extends FixtureTaskContent {
   taskYaml: string;
   lock: YamlLock | null;
   selfCheck: DraftSelfCheckView | null;
+  /** Uploads refused for their size, kept until a file lands at the path or it is deleted. */
+  refused?: DraftRefusedUpload[];
   revision: number;
   updatedAt: string;
 }
@@ -180,6 +183,11 @@ function invoicesDraft(): FixtureDraft {
     const leak = `Reminder for the team: the open total was ${JSON.stringify(totalDue.baseContent?.reference ?? '').match(/[\d.]+/)?.[0] ?? ''} last month.\n`;
     totalDue.files.push(fileView('fixtures/notes.txt', 'fixture', leak.length, 'Text · 3 lines'));
     totalDue.texts['fixtures/notes.txt'] = leak;
+  }
+  if (hasScenario('task-large-text')) {
+    // A rubric a zip held at more than an editor holds: an `other` blob, read-only (V5).
+    const big = fileView('rubrics/method.md', 'other', 1_468_006, 'Text · 18,204 lines');
+    added.files.push({ ...big, tooLargeToEdit: true });
   }
   if (hasScenario('task-yaml-error')) {
     added.taskYaml = added.taskYaml.replace('    primary: true', '    prmary: true');

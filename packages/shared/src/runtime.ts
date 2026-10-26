@@ -37,3 +37,24 @@ export const HERMES_TOOLSETS = [
 
 /** Toolsets a new configuration starts with. */
 export const DEFAULT_TOOLSETS = ['file', 'terminal'] as const;
+
+/**
+ * Hosts Hermes contacts by itself rather than for the agent, as the
+ * platform has seen them (Phase 7): the credits-seed pricing fetch every
+ * `nous` run makes to inference-api.nousresearch.com (plan 8.2, spike I10),
+ * and the requests to hermes-agent.nousresearch.com and
+ * raw.githubusercontent.com that Phase 5 saw refused (Phase 5 section 6.2).
+ * Egress labels a connection or call to one of them with origin
+ * `hermes_background` (NETWORK_ORIGINS), and the inspector draws it neutral.
+ * Egress keeps its own copy of the list, since it does not depend on this
+ * package. Lower case; compare host names lower-cased.
+ */
+export const HERMES_BACKGROUND_HOSTS = [
+  'inference-api.nousresearch.com',
+  'hermes-agent.nousresearch.com',
+  'raw.githubusercontent.com',
+] as const;
+
+/** Whether `host` (any case, no port) is one of HERMES_BACKGROUND_HOSTS. */
+export const isHermesBackgroundHost = (host: string): boolean =>
+  (HERMES_BACKGROUND_HOSTS as readonly string[]).includes(host.toLowerCase());

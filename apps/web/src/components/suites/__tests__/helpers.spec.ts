@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ScorerType } from '@hermes-evals/shared';
 import type { SuiteListRow, TextDiffLine } from '@/api/types/suites';
 import { suiteListFixture } from '@/fixtures/suites';
+import { diffFileRows } from '../diffFiles';
 import { diffCaption, foldRows, sideBySide } from '../diffRows';
 import {
   changePhrases,
@@ -240,5 +241,42 @@ describe('suite wording', () => {
     expect(formatJson({ duplicates: [['INV-0988', 'INV-1131']], total: 1.5 })).toBe(
       '{\n  "duplicates": [\n    ["INV-0988", "INV-1131"]\n  ],\n  "total": 1.5\n}',
     );
+  });
+});
+
+describe('diffFileRows: a side the loader never recorded (Phase 5b question 9)', () => {
+  const notRecorded = {
+    sizeBytes: null,
+    sha256: null,
+    notRecorded: 'loaded_before_phase_5b' as const,
+  };
+  const recorded = { sizeBytes: 47, sha256: 'ab'.repeat(32) };
+  const rowsOf = (before: typeof recorded | typeof notRecorded, change: 'changed' | 'unchanged') =>
+    diffFileRows({
+      files: [
+        { path: 'reference.json', change, before, after: change === 'changed' ? recorded : before },
+      ],
+      prompt: [],
+      taskYaml: [],
+      referenceChanged: change === 'changed',
+      allAdded: false,
+    }).find((r) => r.path === 'reference.json')!;
+
+  it('says "not recorded" for the older side of a changed file', () => {
+    expect(rowsOf(notRecorded, 'changed')).toEqual({
+      path: 'reference.json',
+      change: 'changed',
+      size: 'not recorded → 47 B',
+      from: 'not recorded',
+      to: 'abababa',
+    });
+  });
+
+  it('says "not recorded" for both size and hash of an unchanged file', () => {
+    expect(rowsOf(notRecorded, 'unchanged')).toMatchObject({
+      size: 'not recorded',
+      from: null,
+      to: 'not recorded',
+    });
   });
 });

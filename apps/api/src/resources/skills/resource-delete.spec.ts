@@ -3,7 +3,10 @@
  * section 6.1) over HTTP, on PGlite and a temporary DATA_DIR: an unused one
  * goes with 204; one any configuration version names stays, with a 409 that
  * names those configurations; a configuration saved with it between the
- * check and the delete is caught by migration 0009's guard.
+ * check and the delete is caught by migration 0009's guard. The rows say
+ * the same up front (`inUse` and `inUseBy`, Phase 7): every configuration
+ * any version of which names the resource, once each, the list the 409
+ * names.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,6 +15,7 @@ import type { INestApplication } from '@nestjs/common';
 import {
   DocumentRowSchema,
   ResourceInUseBodySchema,
+  SkillDetailSchema,
   SkillRowSchema,
   SkillUploadValidationSchema,
 } from '@hermes-evals/shared';
@@ -79,7 +83,9 @@ describe('DELETE /api/resources/skills/:id', () => {
       (await http().get('/api/resources/skills').expect(200)).body,
     );
     expect(row!.usedBy).toEqual([]);
+    expect(row).toMatchObject({ inUse: true, inUseBy: [{ configurationId, name: 'with-skill' }] });
     const res = await http().delete(`/api/resources/skills/${id}`).expect(409);
+    expect(ResourceInUseBodySchema.parse(res.body).usedBy).toEqual(row!.inUseBy);
     expect(ResourceInUseBodySchema.parse(res.body)).toEqual({
       statusCode: 409,
       message:
@@ -108,15 +114,43 @@ describe('DELETE /api/resources/documents/:id', () => {
     const id = await storeDocument();
     const a = await seedConfiguration(t.db, 'docs-b', [{ documentIds: [id] }]);
     const b = await seedConfiguration(t.db, 'docs-a', [{ documentIds: [id] }]);
+    const [row] = DocumentRowSchema.array().parse(
+      (await http().get('/api/resources/documents').expect(200)).body,
+    );
     const res = await http().delete(`/api/resources/documents/${id}`).expect(409);
     const body = ResourceInUseBodySchema.parse(res.body);
     expect(body.usedBy).toEqual([
       { configurationId: b, name: 'docs-a' },
       { configurationId: a, name: 'docs-b' },
     ]);
+    expect(row).toMatchObject({ inUse: true, inUseBy: body.usedBy });
     expect(body.message).toMatch(
       /^document vendor-policy\.md is part of a saved version of docs-a and docs-b,/,
     );
+  });
+
+  it('refuses one an older configuration version keeps, though no latest version attaches it', async () => {
+    const id = await storeDocument();
+    // dropped-doc removed it in v2, so "Attached to" is empty, but v1 keeps it.
+    const configurationId = await seedConfiguration(t.db, 'dropped-doc', [
+      { documentIds: [id] },
+      {},
+    ]);
+    const [row] = DocumentRowSchema.array().parse(
+      (await http().get('/api/resources/documents').expect(200)).body,
+    );
+    expect(row).toMatchObject({
+      attachedTo: [],
+      inUse: true,
+      inUseBy: [{ configurationId, name: 'dropped-doc' }],
+    });
+    const res = await http().delete(`/api/resources/documents/${id}`).expect(409);
+    expect(ResourceInUseBodySchema.parse(res.body).usedBy).toEqual(row!.inUseBy);
+    expect(
+      DocumentRowSchema.array().parse(
+        (await http().get('/api/resources/documents').expect(200)).body,
+      ),
+    ).toHaveLength(1);
   });
 
   it('answers 409 when a configuration is saved with it between the check and the delete', async () => {
@@ -137,5 +171,45 @@ describe('DELETE /api/resources/documents/:id', () => {
       response: { statusCode: 409, usedBy: [{ name: 'late' }] },
     });
     expect(await t.db.select().from(documents).where(eq(documents.id, id))).toHaveLength(1);
+  });
+});
+
+describe('inUse on skill and document rows', () => {
+  it('is false with an empty list for a resource no configuration version names', async () => {
+    const skillId = await storeSkill();
+    await storeDocument();
+    const [skill] = SkillRowSchema.array().parse(
+      (await http().get('/api/resources/skills').expect(200)).body,
+    );
+    const [document] = DocumentRowSchema.array().parse(
+      (await http().get('/api/resources/documents').expect(200)).body,
+    );
+    expect(skill).toMatchObject({ inUse: false, inUseBy: [] });
+    expect(document).toMatchObject({ inUse: false, inUseBy: [] });
+    const detail = SkillDetailSchema.parse(
+      (await http().get(`/api/resources/skills/${skillId}`).expect(200)).body,
+    );
+    expect(detail).toMatchObject({ inUse: false, inUseBy: [] });
+  });
+
+  it('names a configuration once however many of its versions name the resource', async () => {
+    const id = await storeSkill();
+    const both = await seedConfiguration(t.db, 'both-versions', [
+      { skillIds: [id] },
+      { skillIds: [id] },
+    ]);
+    const latest = await seedConfiguration(t.db, 'added-later', [{}, { skillIds: [id] }]);
+    const detail = SkillDetailSchema.parse(
+      (await http().get(`/api/resources/skills/${id}`).expect(200)).body,
+    );
+    const links = [
+      { configurationId: latest, name: 'added-later' },
+      { configurationId: both, name: 'both-versions' },
+    ];
+    expect(detail).toMatchObject({ inUse: true, inUseBy: links, usedBy: links });
+    const [row] = SkillRowSchema.array().parse(
+      (await http().get('/api/resources/skills').expect(200)).body,
+    );
+    expect(row!.inUseBy).toEqual(links);
   });
 });

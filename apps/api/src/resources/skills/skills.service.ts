@@ -28,7 +28,12 @@ import { DB } from '../../database/db.provider.js';
 import { skills } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
 import { StorageService } from '../../storage/storage.service.js';
-import { deleteUnused, latestConfigurationLinks } from './configuration-links.js';
+import {
+  anyVersionConfigurationLinks,
+  deleteUnused,
+  inUseFields,
+  latestConfigurationLinks,
+} from './configuration-links.js';
 import { uploadFileName } from './format.js';
 import {
   MAX_SKILL_MD_BYTES,
@@ -77,7 +82,15 @@ async function syncDir(dir: string): Promise<void> {
   }
 }
 
-export function toSkillRow(row: SkillRecord, usedBy: ConfigurationLink[]): SkillRow {
+/**
+ * `usedBy` follows the configurations' latest versions; `inUseBy` every
+ * version, which is what keeps a skill from being deleted.
+ */
+export function toSkillRow(
+  row: SkillRecord,
+  usedBy: ConfigurationLink[],
+  inUseBy: ConfigurationLink[],
+): SkillRow {
   return {
     id: row.id,
     name: row.name,
@@ -88,6 +101,7 @@ export function toSkillRow(row: SkillRecord, usedBy: ConfigurationLink[]): Skill
     unpackedBytes: row.sizeBytes,
     uploadedAt: row.uploadedAt.toISOString(),
     usedBy,
+    ...inUseFields(inUseBy),
   };
 }
 
@@ -210,7 +224,7 @@ export class SkillsService {
       { skillId: row.id, name: row.name, version: row.version, contentHash: row.contentHash },
       'stored skill',
     );
-    return toSkillRow(row, []);
+    return toSkillRow(row, [], []);
   }
 
   /** Every stored skill version, by name and newest version first. */
@@ -219,8 +233,11 @@ export class SkillsService {
       .select()
       .from(skills)
       .orderBy(asc(skills.name), desc(skills.uploadedAt), asc(skills.id));
-    const links = await latestConfigurationLinks(this.db, 'skillIds');
-    return rows.map((row) => toSkillRow(row, links.get(row.id) ?? []));
+    const [links, naming] = await Promise.all([
+      latestConfigurationLinks(this.db, 'skillIds'),
+      anyVersionConfigurationLinks(this.db, 'skillIds'),
+    ]);
+    return rows.map((row) => toSkillRow(row, links.get(row.id) ?? [], naming.get(row.id) ?? []));
   }
 
   async count(): Promise<number> {
@@ -232,14 +249,15 @@ export class SkillsService {
   async detail(id: string): Promise<SkillDetail> {
     const row = await this.get(id);
     const root = await this.storedTree(row);
-    const [files, skillMd, links] = await Promise.all([
+    const [files, skillMd, links, naming] = await Promise.all([
       listSkillFiles(root),
       readSkillFile(root, 'SKILL.md'),
       latestConfigurationLinks(this.db, 'skillIds', [row.id]),
+      anyVersionConfigurationLinks(this.db, 'skillIds', [row.id]),
     ]);
     const text = skillMd.content ?? '';
     return {
-      ...toSkillRow(row, links.get(row.id) ?? []),
+      ...toSkillRow(row, links.get(row.id) ?? [], naming.get(row.id) ?? []),
       files: files.map((f) => ({ path: f.path, sizeBytes: f.size, kind: f.kind })),
       skillMd: splitFrontMatter(text) ?? { frontMatter: '', body: text },
     };

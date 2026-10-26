@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
 import { AUTHORING_LIMITS } from '@hermes-evals/shared';
-import type { RejectedFile, UploadItem } from '@/stores/draftTaskTools';
+import { OVER_LIMIT_REASON, type RejectedFile, type UploadItem } from '@/stores/draftTaskTools';
 import { formatBytes } from '@/lib/format';
 import EditorNote from '../editors/EditorNote.vue';
 import { droppedFiles, type DroppedFile } from './dropFiles';
@@ -10,7 +10,8 @@ import { droppedFiles, type DroppedFile } from './dropFiles';
  * Where files are added to a task (Components 5, FileDropZone): a 1px dashed box, 88px high,
  * "Drop files or a folder, or browse", up to 25 MB per file; accent while something is
  * dragged over it ("Drop to add to workspace files"). Each upload shows under it with a thin
- * bar and Cancel; a file over the limit is refused before it is sent, and says so. A .zip is
+ * bar and Cancel; a file over the limit is refused before it is sent, and says so, also after
+ * a reload, since the API keeps the refusal (a row without its size). A .zip is
  * added as one file: unpacking it ("Unpack into workspace files") is not offered.
  */
 const props = withDefaults(
@@ -64,7 +65,7 @@ function progressText(loaded: number, total: number): string {
   return `${scale === 1 ? part : part.toFixed(1).replace(/\.0$/, '')} of ${whole}`;
 }
 
-const OVER_LIMIT = 'The limit is 25 MB per file.';
+const OVER_LIMIT = OVER_LIMIT_REASON;
 
 function browse(): void {
   if (!props.disabled) input.value?.click();
@@ -168,8 +169,9 @@ function browse(): void {
     >
       <template #lead
         ><code>{{ file.name }}</code
-        ><template v-if="file.reason === OVER_LIMIT">
+        ><template v-if="file.reason === OVER_LIMIT && file.sizeBytes !== null">
           is {{ formatBytes(file.sizeBytes) }}. {{ file.reason }}</template
+        ><template v-else-if="file.reason === OVER_LIMIT"> is over {{ limit }}.</template
         ><template v-else> was not added.</template></template
       >
       <span class="text-text-2">{{

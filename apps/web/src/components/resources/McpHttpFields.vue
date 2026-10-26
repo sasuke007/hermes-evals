@@ -8,7 +8,8 @@ import McpFormRow from './McpFormRow.vue';
 
 /**
  * The http row of the MCP server form: the URL and the header names, each with the variable
- * egress reads its value from, and the note that the run never sees those values.
+ * egress reads its value from and an optional prefix ("Bearer "), and the note that the run
+ * never sees those values.
  */
 withDefaults(defineProps<{ errors?: Partial<Record<string, string>>; idPrefix: string }>(), {
   errors: () => ({}),
@@ -39,6 +40,10 @@ const secretsTab = { name: ROUTE_NAMES.resourcesTab, params: { tab: 'secrets' } 
         <p v-if="errors.headers" :id="`${idPrefix}-headers-error`" class="text-12 text-fail-text">
           {{ errors.headers }}
         </p>
+        <span class="text-12 text-text-3" data-testid="prefix-hint"
+          >An optional prefix, such as <code>Bearer</code>, is written before the value, so
+          <code>.env</code> holds the raw token.</span
+        >
         <div
           class="flex items-start gap-8 rounded-4 border border-border bg-surface-2 px-10 py-8"
           role="note"

@@ -7,6 +7,7 @@
 import type { JsonValue, ReadinessRule } from '@hermes-evals/shared';
 import type {
   DraftFileView,
+  DraftRefusedUpload,
   DraftSelfCheckView,
   MentionedFile,
   ReadinessRuleResult,
@@ -28,6 +29,8 @@ export interface ReadinessInput {
   /** Other task keys of the draft (a rename onto one is refused). */
   otherKeys: string[];
   now: string;
+  /** Uploads refused for their size, kept on the task (Phase 5b question 11). */
+  refused?: readonly DraftRefusedUpload[];
 }
 
 export const code = (s: string) => `\`${s}\``;

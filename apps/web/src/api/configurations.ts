@@ -8,6 +8,7 @@
  * src/fixtures/configurations.ts (src/api/README.md).
  */
 import {
+  CONFIG_FIELDS,
   ConfigDiffSchema,
   ConfigurationDetailSchema,
   ConfigurationDraftSchema,
@@ -25,22 +26,16 @@ import type {
   ConfigurationSaveResult,
 } from './types/configurations';
 import { apiGet, apiSend } from './client';
-import { apiMode, fixture, fixtureFailure, hasScenario, notFound, withQuery } from './source';
 import {
-  CONFIG_FIELDS,
-  CONFIG_VERSIONS,
-  configDiffFixture,
-  configurationsFixture,
-  configVersionIn,
-  DUPLICATED_FROM,
-  draftFixture,
-  findConfigVersion,
-  formOptionsFixture,
-  versionRef,
-  type ConfigName,
-} from '@/fixtures/configurations';
-import { configurationUsageFixture } from '@/fixtures/experiments';
-import { ulid } from '@/fixtures/suites';
+  apiMode,
+  fixture,
+  fixtureFailure,
+  fixtureWorld,
+  hasScenario,
+  notFound,
+  withQuery,
+} from './source';
+import type { ConfigName } from '@/fixtures/configurations';
 
 export { CONFIG_FIELDS };
 
@@ -53,13 +48,16 @@ const segment = (id: string): string => encodeURIComponent(id);
 export function listConfigurations(): Promise<ConfigurationListRow[]> {
   if (apiMode === 'live') return apiGet('/configurations', ConfigurationListRowSchema.array());
   return fixture(
-    () =>
-      configurationsFixture(noConfigurations(), hasScenario).map((latest) => ({
+    ({ configurations, experiments }) =>
+      configurations.configurationsFixture(noConfigurations(), hasScenario).map((latest) => ({
         id: latest.configurationId,
         name: latest.name,
         createdAt: latest.createdAt,
         latest,
-        usedInExperiments: configurationUsageFixture(hasScenario, latest.configurationId).length,
+        usedInExperiments: experiments.configurationUsageFixture(
+          hasScenario,
+          latest.configurationId,
+        ).length,
       })),
     { request: 'GET /api/configurations' },
   );
@@ -77,7 +75,9 @@ export function getConfiguration(id: string, version?: number): Promise<Configur
   if (apiMode === 'live') return apiGet(path, ConfigurationDetailSchema);
   const request = `GET /api${path}`;
   return fixture(
-    () => {
+    ({ configurations, experiments }) => {
+      const { configDiffFixture, configVersionIn, DUPLICATED_FROM, findConfigVersion, versionRef } =
+        configurations;
       const latest = noConfigurations() ? undefined : findConfigVersion(id, hasScenario);
       if (!latest || (version !== undefined && version !== latest.version)) {
         throw notFound(
@@ -96,7 +96,7 @@ export function getConfiguration(id: string, version?: number): Promise<Configur
         versions: [latest],
         duplicatedFrom: source ? versionRef(source) : null,
         differsFromSource: source ? configDiffFixture([source, latest]).differing : [],
-        usedIn: configurationUsageFixture(hasScenario, latest.configurationId),
+        usedIn: experiments.configurationUsageFixture(hasScenario, latest.configurationId),
       };
     },
     { request },
@@ -110,13 +110,13 @@ export function diffConfigurations(versionIds: string[]): Promise<ConfigDiff> {
   }
   const request = 'GET /api/configurations/diff';
   return fixture(
-    () => {
+    ({ configurations }) => {
       const versions = versionIds.map((v) => {
-        const found = findConfigVersion(v, hasScenario);
+        const found = configurations.findConfigVersion(v, hasScenario);
         if (!found) throw notFound(request, `configuration version ${v}`);
         return found;
       });
-      return configDiffFixture(versions);
+      return configurations.configDiffFixture(versions);
     },
     { request },
   );
@@ -131,7 +131,7 @@ export function getConfigurationFormOptions(): Promise<ConfigurationFormOptions>
   if (apiMode === 'live') {
     return apiGet('/configurations/form-options', ConfigurationFormOptionsSchema);
   }
-  return fixture(() => formOptionsFixture(noConfigurations()), {
+  return fixture((w) => w.configurations.formOptionsFixture(noConfigurations()), {
     request: 'GET /api/configurations/form-options',
   });
 }
@@ -169,16 +169,17 @@ export function getConfigurationDraft(
         ? `GET /api/configurations/${id}/draft`
         : 'GET /api/configurations/new-draft';
   return fixture(
-    () => {
-      if (mode === 'new' || !id) return draftFixture('new', null);
-      const source = noConfigurations() ? undefined : findConfigVersion(id, hasScenario);
+    ({ configurations, experiments }) => {
+      if (mode === 'new' || !id) return configurations.draftFixture('new', null);
+      const source = noConfigurations()
+        ? undefined
+        : configurations.findConfigVersion(id, hasScenario);
       if (!source) throw notFound(request, `configuration ${id}`);
-      const draft = draftFixture(mode, source);
+      const draft = configurations.draftFixture(mode, source);
       if (mode === 'edit') {
-        draft.experimentsKeepingVersion = configurationUsageFixture(
-          hasScenario,
-          source.configurationId,
-        ).map((u) => ({ id: u.experimentId, name: u.experimentName }));
+        draft.experimentsKeepingVersion = experiments
+          .configurationUsageFixture(hasScenario, source.configurationId)
+          .map((u) => ({ id: u.experimentId, name: u.experimentName }));
       }
       return draft;
     },
@@ -192,7 +193,7 @@ export function getConfigurationDraft(
  * the page routes to the detail. A taken name is a 409; a field the API
  * refuses is a 400 with its issue (ApiError.issueFor('name')).
  */
-export function saveConfiguration(
+export async function saveConfiguration(
   input: ConfigurationInput,
   id?: string,
 ): Promise<ConfigurationSaveResult> {
@@ -202,8 +203,10 @@ export function saveConfiguration(
       : apiSend('POST', '/configurations', input, ConfigurationSaveResultSchema);
   }
   const request = id ? `PUT /api/configurations/${id}` : 'POST /api/configurations';
-  const existing = id ? findConfigVersion(id) : undefined;
-  const clash = Object.values(CONFIG_VERSIONS).find(
+  const { configurations, suites } = await fixtureWorld();
+  const { ulid } = suites;
+  const existing = id ? configurations.findConfigVersion(id) : undefined;
+  const clash = Object.values(configurations.CONFIG_VERSIONS).find(
     (c) => c.name === input.name.trim() && c.configurationId !== existing?.configurationId,
   );
   if (clash) {

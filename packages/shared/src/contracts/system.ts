@@ -21,7 +21,12 @@ export type SandboxCheck = z.infer<typeof SandboxCheckSchema>;
 
 export const SandboxStatusSchema = z.object({
   proven: z.boolean(),
-  /** The 15 isolation checks in their fixed order. */
+  /**
+   * The isolation checks in their fixed order: the trial container's 15,
+   * then (from Phase 7, Phase 5b question 3) one that starts a verifier
+   * container through docker-guard, so a guard that refuses the verifier
+   * spec shows at worker start rather than at the first load or score.
+   */
   checks: z.array(SandboxCheckSchema),
   /** ISO 8601 time of the self-test. */
   checkedAt: isoTimeView,

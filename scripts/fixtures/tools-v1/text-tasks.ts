@@ -228,6 +228,7 @@ Which distinct valid IBANs appear in \`payouts.log\`? List each one once, in ele
       text: 'I listed every IBAN the log mentions; I had no way to run the mod-97 test on them.',
       answer: { ibans: [...found].sort() },
     },
+    answersFromFixtures: true,
   };
 }
 

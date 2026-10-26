@@ -7,67 +7,72 @@
  * request it receives (GET /__requests) so a test can see exactly what
  * Hermes sent, and which script answered.
  *
- *   MOCK_PORT     default 8090
- *   MOCK_MODEL    model id it serves (default mock/scripted)
- *   MOCK_STEPS    JSON array of { "tool": name, "arguments": {...} } | { "content": "..." }
- *   MOCK_SCRIPTS  optional JSON array of { "match": "...", "steps": [...] }. The
- *                 first script whose `match` occurs anywhere in the request's
- *                 messages (system prompt, skills and tool results included)
- *                 plays its steps; with none matching, MOCK_STEPS plays. This
- *                 is how two configurations get different answers from one
- *                 mock: match a phrase only one arm's skill or document holds.
- *                 Match on text present from the first call, or the script can
- *                 change mid-run when a tool result first contains the phrase.
+ *   MOCK_PORT          default 8090
+ *   MOCK_MODEL         model id it serves (default mock/scripted)
+ *   MOCK_STEPS         JSON array of { "tool": name, "arguments": {...} } | { "content": "..." }
+ *   MOCK_SCRIPTS       optional JSON array of { "match": "...", "steps": [...] },
+ *                      for short overrides
+ *   MOCK_SCRIPTS_FILE  optional file holding such an array, or a directory of
+ *                      `*.json` files that each hold one (mock-scripts.ts);
+ *                      Compose mounts the file or directory you name
  *
- * Run as a script (`node dist/mock-model.js`) it listens; imported, it only
- * exports the pieces, so the unit test starts its own server.
+ * The first script, MOCK_SCRIPTS's then the file's, whose `match` occurs
+ * anywhere in the request's messages (system prompt, skills and tool results
+ * included) plays its steps; with none matching, MOCK_STEPS plays. This is
+ * how two configurations get different answers from one mock: match a phrase
+ * only one arm's skill or document holds. Match on text present from the
+ * first call, or the script can change mid-run when a tool result first
+ * contains the phrase.
+ *
+ * Run as a script (`node dist/mock-model.js`) it listens; with
+ * `--print-scripts` it prints the scripts it would play, as one JSON array,
+ * and exits (what the smoke tests check). Imported, it only exports the
+ * pieces, so the unit test starts its own server.
  */
 import { realpathSync } from 'node:fs';
 import http, { type Server, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
 import { parseTarget } from './handler.js';
+import {
+  parseJson,
+  readScriptsFile,
+  ScriptsSchema,
+  StepsSchema,
+  type MockScript,
+  type MockStep,
+} from './mock-scripts.js';
 
-const StepSchema = z.union([
-  z.object({ tool: z.string().min(1), arguments: z.record(z.string(), z.unknown()) }),
-  z.object({ content: z.string() }),
-]);
-const StepsSchema = z.array(StepSchema).min(1);
-const ScriptsSchema = z.array(z.object({ match: z.string().min(1), steps: StepsSchema }));
-
-export type MockStep = z.infer<typeof StepSchema>;
-export type MockScript = z.infer<typeof ScriptsSchema>[number];
+export type { MockScript, MockStep } from './mock-scripts.js';
 
 export interface MockModelOptions {
   /** The model id /models lists and responses carry when the request names none. */
   model: string;
   /** Played when no script matches (MOCK_STEPS). */
   steps: MockStep[];
-  /** Tried in order (MOCK_SCRIPTS); empty when unset. */
+  /** Tried in order: MOCK_SCRIPTS's, then MOCK_SCRIPTS_FILE's; empty when neither is set. */
   scripts: MockScript[];
+  /** Where the scripts came from, for the start log; absent when options are built by hand. */
+  loaded?: { variable: number; file: { path: string; files: number; scripts: number } | null };
 }
 
 const DEFAULT_STEPS = '[{"content":"Done."}]';
 
-/** Reads one JSON variable against its schema; a bad value stops the mock with its name. */
-function parseVariable<T>(name: string, raw: string, schema: z.ZodType<T>): T {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    throw new Error(`${name} is not valid JSON`);
-  }
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new Error(`${name} is invalid: ${z.prettifyError(parsed.error)}`);
-  return parsed.data;
-}
-
-/** The mock's settings from its environment. Throws, naming the variable, on a bad value. */
+/** The mock's settings from its environment. Throws, naming the variable or file, on a bad value. */
 export function mockModelOptions(env: NodeJS.ProcessEnv): MockModelOptions {
+  const overrides = env.MOCK_SCRIPTS
+    ? parseJson('MOCK_SCRIPTS', env.MOCK_SCRIPTS, ScriptsSchema)
+    : [];
+  const file = env.MOCK_SCRIPTS_FILE ? readScriptsFile(env.MOCK_SCRIPTS_FILE) : null;
   return {
     model: env.MOCK_MODEL ?? 'mock/scripted',
-    steps: parseVariable('MOCK_STEPS', env.MOCK_STEPS ?? DEFAULT_STEPS, StepsSchema),
-    scripts: env.MOCK_SCRIPTS ? parseVariable('MOCK_SCRIPTS', env.MOCK_SCRIPTS, ScriptsSchema) : [],
+    steps: parseJson('MOCK_STEPS', env.MOCK_STEPS ?? DEFAULT_STEPS, StepsSchema),
+    scripts: [...overrides, ...(file?.scripts ?? [])],
+    loaded: {
+      variable: overrides.length,
+      file: file
+        ? { path: file.path, files: file.files.length, scripts: file.scripts.length }
+        : null,
+    },
   };
 }
 
@@ -274,9 +279,57 @@ function isEntryPoint(): boolean {
   }
 }
 
+/** The start line: the port and where the scripts came from. */
+export function startMessage(port: number, options: MockModelOptions): string {
+  const loaded = options.loaded;
+  const from = loaded
+    ? [
+        `${loaded.variable} from MOCK_SCRIPTS`,
+        ...(loaded.file
+          ? [
+              `${loaded.file.scripts} from ${loaded.file.files} file${loaded.file.files === 1 ? '' : 's'} at ${loaded.file.path}`,
+            ]
+          : []),
+      ].join(', ')
+    : 'given by the caller';
+  return `mock model listening on ${port} · ${options.scripts.length} scripts (${from})`;
+}
+
+const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/**
+ * `--print-scripts`: the scripts the mock would play, MOCK_SCRIPTS's then
+ * MOCK_SCRIPTS_FILE's, as one JSON array on one line (exit 0), or why they
+ * cannot be read (exit 1).
+ */
+export function printScripts(env: NodeJS.ProcessEnv): {
+  code: 0 | 1;
+  stdout: string;
+  stderr: string;
+} {
+  try {
+    return { code: 0, stdout: `${JSON.stringify(mockModelOptions(env).scripts)}\n`, stderr: '' };
+  } catch (err) {
+    return { code: 1, stdout: '', stderr: `mock model: ${messageOf(err)}\n` };
+  }
+}
+
 if (isEntryPoint()) {
+  if (process.argv.includes('--print-scripts')) {
+    const printed = printScripts(process.env);
+    process.stdout.write(printed.stdout);
+    process.stderr.write(printed.stderr);
+    process.exit(printed.code);
+  }
+  let options: MockModelOptions;
+  try {
+    options = mockModelOptions(process.env);
+  } catch (err) {
+    process.stderr.write(`mock model: ${messageOf(err)}\n`);
+    process.exit(1);
+  }
   const port = Number(process.env.MOCK_PORT ?? 8090);
-  const server = createMockModelServer(mockModelOptions(process.env));
-  server.listen(port, '0.0.0.0', () => process.stdout.write(`mock model listening on ${port}\n`));
+  const server = createMockModelServer(options);
+  server.listen(port, '0.0.0.0', () => process.stdout.write(`${startMessage(port, options)}\n`));
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 }

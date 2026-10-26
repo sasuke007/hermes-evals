@@ -16,8 +16,9 @@
  * - the cross-checks: every path a check reads resolves in the reference;
  *   every file the prompt mentions is in the workspace (or the expected
  *   workspace, or the home seeds); no text fixture contains a reference leaf
- *   value of 4 or more characters; file checks have an expected workspace,
- *   and home checks an expected home.
+ *   value of 4 or more characters (unless `self_check.answers_from_fixtures`
+ *   says the answer is picked from them); file checks have an expected
+ *   workspace, and home checks an expected home.
  *
  * Every loader issue lands on a row (readiness-issues.ts), so a task with no
  * problem loads valid but for its self-checks. Problems never block saving:
@@ -28,7 +29,9 @@ import {
   DIRECTORY_KEY_MESSAGE,
   DIRECTORY_KEY_PATTERN,
   READINESS_RULES,
+  refusedUploadMessage,
   summariseReadiness,
+  type DraftRefusedUpload,
   type ReadinessIssue,
   type ReadinessRule,
   type ReadinessRuleResult,
@@ -41,6 +44,7 @@ import { parseYamlSource, positionOf } from '../loader/yaml-source.js';
 import { folderReader, layoutOf } from './draft-folder.js';
 import type { DraftTaskFolder } from './materialise.js';
 import {
+  ANSWERS_FROM_FIXTURES,
   codeList,
   describeValue,
   locateMentions,
@@ -50,7 +54,7 @@ import {
   referenceLeaves,
   referenceReads,
 } from './readiness-cross.js';
-import { mapIssue, type MappedIssue } from './readiness-issues.js';
+import { mapIssue, targetOfUpload, type MappedIssue } from './readiness-issues.js';
 import { selfCheckRows } from './readiness-self-check.js';
 
 /** What the rules need beyond the task's own files. */
@@ -63,6 +67,8 @@ export interface ReadinessContext {
   renamedFrom: string | null;
   /** A blob's bytes, for the leak rule (text fixtures) and the mentioned-files rule. */
   readBlob: (sha256: string) => Promise<Buffer>;
+  /** Uploads refused for their size, kept on the task: a file-limits problem each. */
+  refusedUploads?: readonly DraftRefusedUpload[];
   /**
    * The task's last worker self-check, with the content hash it ran on. Rows
    * 12 and 13 show it while it matches the task's content, and `pending`
@@ -230,8 +236,11 @@ export async function evaluateReadiness(
     );
   }
 
-  // Rule 10: reference values in text fixtures.
-  if (analysis.reference !== undefined) {
+  // Rule 10: reference values in text fixtures, unless task.yaml says the
+  // answer is picked from the task's own data (Phase 5b question 1).
+  const selfCheck = isRecord(raw.self_check) ? raw.self_check : {};
+  const answersFromFixtures = selfCheck.answers_from_fixtures === true;
+  if (analysis.reference !== undefined && !answersFromFixtures) {
     const leaves = referenceLeaves(analysis.reference);
     const fixtures: { path: string; text: string }[] = [];
     if (leaves.length > 0) {
@@ -251,12 +260,17 @@ export async function evaluateReadiness(
     }
   }
 
+  // Rule 11: uploads refused for their size stay reported (Phase 5b question 11).
+  for (const upload of context.refusedUploads ?? []) {
+    const target = targetOfUpload(upload.kind, upload.path);
+    extra('file_limits', 'problem', target, refusedUploadMessage(upload));
+  }
+
   // Rows 12 and 13.
   const folders = {
     expectedWorkspace: layout.expectedDir !== null,
     expectedHome: layout.expectedHomeDir !== null,
   };
-  const selfCheck = isRecord(raw.self_check) ? raw.self_check : {};
   const negativeControl =
     typeof selfCheck.negative_control === 'boolean'
       ? selfCheck.negative_control
@@ -334,6 +348,8 @@ export async function evaluateReadiness(
       }
       case 'mentioned_files':
         return pass(mentionsPresent(mentioned));
+      case 'reference_leak':
+        return pass(answersFromFixtures ? ANSWERS_FROM_FIXTURES : '');
       case 'self_check':
         return yamlBroken ? pending(waitsOnYaml) : checkRows.selfCheck;
       case 'negative_control':

@@ -128,6 +128,7 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['post', '/api/experiments/{id}/runs/rescore'],
   ['get', '/api/runs/{id}'],
   ['get', '/api/runs/{id}/events'],
+  ['get', '/api/runs/{id}/attempts/{n}/stderr'],
   ['post', '/api/runs/{id}/rescore'],
   ['post', '/api/runs/{id}/retry'],
   ['post', '/api/runs/{id}/cancel'],
@@ -308,6 +309,7 @@ describe('the API document', () => {
     expect(json('get', '/api/experiments/{id}/runs')).toEqual(ref('RunListResult'));
     expect(json('get', '/api/runs/{id}')).toEqual(ref('RunDetail'));
     expect(json('get', '/api/runs/{id}/events')).toEqual(ref('RunEventsPage'));
+    expect(json('get', '/api/runs/{id}/attempts/{n}/stderr')).toEqual(ref('AttemptStderr'));
     expect(json('post', '/api/runs/{id}/retry')).toEqual(ref('RunActionResult'));
     expect(json('post', '/api/experiments/{id}/runs/retry')).toEqual(ref('BulkRunActionResult'));
     expect(json('post', '/api/runs/{id}/rescore')).toEqual(ref('RescoreRunResult'));

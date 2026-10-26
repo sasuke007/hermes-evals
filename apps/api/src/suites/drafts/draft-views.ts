@@ -190,9 +190,27 @@ export const draftKeys = (stored: StoredDraft): string[] =>
   stored.tasks.filter((t) => t.state !== 'unchanged').map((t) => t.key);
 
 /**
+ * Whether the draft and the folder's current version agree on a task they
+ * both touched (Phase 5b question 6): both removed it, or both made it the
+ * same bytes under the same key (the loader's content hash, which the draft
+ * task keeps). Either choice in Combine would give the same task, so it
+ * needs none. A rename made on both sides still asks.
+ */
+function bothAgree(
+  task: DraftTaskDbRow,
+  baseKey: string | null,
+  current: ReadonlyMap<string, TaskRow>,
+): boolean {
+  if (task.state === 'removed') return !current.has(baseKey ?? task.key);
+  if (baseKey !== null && baseKey !== task.key) return false;
+  const now = current.get(task.key);
+  return now !== undefined && task.contentHash !== null && now.contentHash === task.contentHash;
+}
+
+/**
  * The conflict of an edit draft whose folder's current version is no longer
  * its base (SA.12): what the current version changed against the base, and
- * the tasks both sides changed. Null while the base is current.
+ * the tasks both sides changed differently. Null while the base is current.
  */
 export function draftConflict(
   input: Pick<DraftViewInput, 'stored' | 'base' | 'current'>,
@@ -204,13 +222,14 @@ export function draftConflict(
   const touched = new Set([...diskChanges.added, ...diskChanges.removed, ...diskChanges.changed]);
   const baseById = new Map(base.tasks.map((t) => [t.id, t]));
   const keys = draftKeys(input.stored);
+  const currentByKey = new Map(current.tasks.map((t) => [t.key, t]));
   const overlap = input.stored.tasks
     .filter((t) => t.state !== 'unchanged')
-    .filter(
-      (t) =>
-        touched.has(t.key) ||
-        (t.baseTaskId !== null && touched.has(baseById.get(t.baseTaskId)?.key ?? '')),
-    )
+    .filter((t) => {
+      const baseKey = t.baseTaskId === null ? null : (baseById.get(t.baseTaskId)?.key ?? null);
+      const both = touched.has(t.key) || (baseKey !== null && touched.has(baseKey));
+      return both && !bothAgree(t, baseKey, currentByKey);
+    })
     .map((t) => t.key);
   return {
     cause,

@@ -9,6 +9,8 @@ export default mergeConfig(
       environment: 'jsdom',
       // Component tests run on fixtures; a test that needs live mode stubs VITE_API_MODE.
       env: { VITE_API_MODE: 'fixtures' },
+      // The data layer imports the fixture world dynamically; load it before the tests.
+      setupFiles: ['./src/__tests__/setup.ts'],
       // A page test's first mount compiles the page and its lazy routes, which takes seconds
       // when the whole repository's tests run at once (turbo runs the api's alongside).
       testTimeout: 20_000,

@@ -14,7 +14,9 @@
  * Scenarios that change a run (see scenarios.ts): cancelled, multi-attempt,
  * disk-limit, token-cap, timeout-silent, provider-lapsed, verdict-updated,
  * no-worker; memory-files (per_vendor's memory files and home seeds, from
- * home.ts) and skills-on-demand (with-skill's launch without -s).
+ * home.ts) and skills-on-demand (with-skill's launch without -s);
+ * hermes-background and mcp-http (rows from ./inspector-timeline.ts), and
+ * stderr-long and stderr-missing (Full log, ./inspector-logs.ts).
  */
 import type { JsonValue } from '@hermes-evals/shared';
 import type {
@@ -46,6 +48,8 @@ import {
   runsOf,
 } from './experiments';
 import { homeArtifactsFor, homeArtifactText, homeSeedsFor } from './home';
+import { jsonMatchEvidence } from './inspector-evidence';
+import { withScenarioRows } from './inspector-timeline';
 import { MCP_INVOICE_DB, SKILL_INVOICE_METHOD } from './resources';
 import { runNeeds } from './runs';
 import {
@@ -642,8 +646,9 @@ const judgeCost = (t: { input: number; output: number }) =>
 /**
  * The scorer's own detail behind a score, as GET /runs/:id carries it: the
  * judge's call for llm_judge, the counted calls for trajectory_match, the
- * matched keys or items for json_match. A failed json_match misses the
- * element perturb() drops, the last one.
+ * matched keys or items for json_match, key by key (jsonMatchEvidence in
+ * ./inspector-evidence.ts). A failed json_match misses the element perturb()
+ * drops, the last one.
  */
 function evidenceFor(
   k: { key: string; type: ScoreRowView['type']; status: ScoreRowView['status'] },
@@ -690,28 +695,11 @@ function evidenceFor(
       mode: null,
     };
   } else if (k.type === 'json_match' && (k.status === 'passed' || k.status === 'failed')) {
-    const path = typeof params.path === 'string' ? params.path : '';
-    const items = Array.isArray(expected);
-    const keys = expected !== null && typeof expected === 'object' && !items;
-    const names = keys ? Object.keys(expected) : [];
-    const total = items ? expected.length : keys ? names.length : 1;
-    const missed = items
-      ? `${path}[${total - 1}]`
-      : keys
-        ? `${path}.${names[names.length - 1]}`
-        : path;
-    const sampleMiss = sample && items;
-    evidence.jsonMatch = {
-      unit: items ? 'items' : keys ? 'keys' : 'value',
-      matched: k.status === 'passed' ? total : sampleMiss ? 0 : total - 1,
-      total,
-      mismatches:
-        k.status === 'passed'
-          ? []
-          : sampleMiss
-            ? Array.from({ length: total }, (_, i) => `${path}[${i}]`)
-            : [missed],
-    };
+    const path = typeof params.path === 'string' ? params.path : null;
+    const reference = expected ?? null;
+    const sampleMiss = sample && Array.isArray(reference);
+    const answer = k.status === 'passed' ? reference : sampleMiss ? [] : perturb(reference);
+    evidence.jsonMatch = jsonMatchEvidence(reference, answer, path);
   }
   return evidence;
 }
@@ -1301,6 +1289,7 @@ export function runDetailFixture(active: Active, runId: string): RunDetail | nul
   else if (run.status === 'queued') events = [];
   else if (run.status === 'running') events = runningTimeline().slice(0, 6);
   else events = genericTimeline(seed, run);
+  if (!sample) events = withScenarioRows(active, run.config, events);
   const attempts = attemptsFor(seed, run);
   return {
     id: run.id,

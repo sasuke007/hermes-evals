@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
-import { EXPERIMENT_IDS, getExperiment } from '@/api/experiments';
+import { getExperiment } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import FailedPanel from '@/components/overview/FailedPanel.vue';
 import { routes } from '@/router';
 import { useScenario } from '@/stores/__tests__/scenarioEnv';

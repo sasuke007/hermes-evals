@@ -6,7 +6,9 @@
  *
  * Deleting one (Phase 5 section 6.1) looks at every version instead: a
  * version keeps what it was saved with, so a skill or document any version
- * names stays, and migration 0009's guard refuses its deletion too.
+ * names stays, and migration 0009's guard refuses its deletion too. The
+ * rows say so up front (`inUse` and `inUseBy`, Phase 7), so the pages
+ * disable Delete with the same list the 409 would name.
  */
 import { ConflictException } from '@nestjs/common';
 import type { ConfigurationLink, ResourceInUseBody } from '@hermes-evals/shared';
@@ -50,6 +52,46 @@ export async function latestConfigurationLinks(
     }
   }
   return links;
+}
+
+/**
+ * Maps each resource id to the configurations any of whose versions lists it
+ * in `column` (the row's `inUseBy`, Phase 7), sorted by configuration name.
+ * With `ids`, only those resources are looked up. A configuration appears
+ * once however many of its versions name the resource.
+ */
+export async function anyVersionConfigurationLinks(
+  db: AppDb,
+  column: ResourceIdColumn,
+  ids?: readonly string[],
+): Promise<Map<string, ConfigurationLink[]>> {
+  const links = new Map<string, ConfigurationLink[]>();
+  if (ids?.length === 0) return links;
+  const referenced = configurationVersions[column];
+  const rows = await db
+    .select({ id: configurations.id, name: configurations.name, ids: referenced })
+    .from(configurations)
+    .innerJoin(configurationVersions, eq(configurationVersions.configurationId, configurations.id))
+    .where(ids ? arrayOverlaps(referenced, [...ids]) : sql`cardinality(${referenced}) > 0`)
+    .orderBy(asc(configurations.name), asc(configurations.id));
+  for (const row of rows) {
+    for (const id of new Set(row.ids)) {
+      const list = links.get(id) ?? [];
+      if (!list.some((link) => link.configurationId === row.id)) {
+        list.push({ configurationId: row.id, name: row.name });
+      }
+      links.set(id, list);
+    }
+  }
+  return links;
+}
+
+/** The fields every skill and document row carries: whether any configuration version names it. */
+export function inUseFields(inUseBy: ConfigurationLink[]): {
+  inUse: boolean;
+  inUseBy: ConfigurationLink[];
+} {
+  return { inUse: inUseBy.length > 0, inUseBy };
 }
 
 /** The configurations any version of which lists the resource in `column`, by name. */

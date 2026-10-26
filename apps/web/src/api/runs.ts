@@ -7,6 +7,7 @@
  * src/fixtures/runs.ts and inspector.ts (src/api/README.md).
  */
 import {
+  AttemptStderrSchema,
   BulkRescoreResultSchema,
   BulkRunActionResultSchema,
   RescoreRunResultSchema,
@@ -17,6 +18,7 @@ import {
   TablePreviewSchema,
 } from '@hermes-evals/shared';
 import type {
+  AttemptStderr,
   BulkRescoreResult,
   BulkRunActionResult,
   RescoreRunResult,
@@ -28,22 +30,16 @@ import type {
 } from './types/runs';
 import type { TablePreview } from './types/suites';
 import { API_BASE, apiGet, apiGetText, apiSend, type TextStart } from './client';
-import { apiMode, fixture, fixtureFailure, hasScenario, notFound, withQuery } from './source';
-import { findSeed } from '@/fixtures/experiments';
 import {
-  artifactPreviewFixture,
-  artifactTextFixture,
-  findRun,
-  runDetailFixture,
-  runEventsFixture,
-} from '@/fixtures/inspector';
-import {
-  bulkRescoreFixture,
-  bulkRetryFixture,
-  rescoreRunFixture,
-  runListFixture,
-  runNeeds,
-} from '@/fixtures/runs';
+  apiMode,
+  fixture,
+  fixtureFailure,
+  fixtureWorld,
+  hasScenario,
+  notFound,
+  withQuery,
+  type FixtureWorld,
+} from './source';
 
 /** GET /experiments/:id/runs with filters and sort (mirrored in the page URL). */
 export function listRuns(experimentId: string, filters: RunFilters = {}): Promise<RunListResult> {
@@ -60,10 +56,10 @@ export function listRuns(experimentId: string, filters: RunFilters = {}): Promis
   if (apiMode === 'live') return apiGet(path, RunListResultSchema);
   const request = `GET /api/experiments/${experimentId}/runs`;
   return fixture(
-    () => {
-      const seed = findSeed(hasScenario, experimentId);
+    (w) => {
+      const seed = w.experiments.findSeed(hasScenario, experimentId);
       if (!seed) throw notFound(request, `experiment ${experimentId}`);
-      return runListFixture(seed, filters);
+      return w.runs.runListFixture(seed, filters);
     },
     { request },
   );
@@ -74,8 +70,8 @@ export function getRun(runId: string): Promise<RunDetail> {
   if (apiMode === 'live') return apiGet(`/runs/${runId}`, RunDetailSchema);
   const request = `GET /api/runs/${runId}`;
   return fixture(
-    () => {
-      const detail = runDetailFixture(hasScenario, runId);
+    (w) => {
+      const detail = w.inspector.runDetailFixture(hasScenario, runId);
       if (!detail) throw notFound(request, `run ${runId}`);
       return detail;
     },
@@ -94,8 +90,8 @@ export function listRunEvents(runId: string, after = 0): Promise<RunEventsPage> 
   }
   const request = `GET /api/runs/${runId}/events`;
   return fixture(
-    () => {
-      const page = runEventsFixture(hasScenario, runId, after);
+    (w) => {
+      const page = w.inspector.runEventsFixture(hasScenario, runId, after);
       if (!page) throw notFound(request, `run ${runId}`);
       return page;
     },
@@ -110,7 +106,7 @@ export function getArtifactPreview(
 ): Promise<TablePreview | null> {
   const path = `/runs/${runId}/artifacts/${artifactId}/preview`;
   if (apiMode === 'live') return apiGet(path, TablePreviewSchema.nullable());
-  return fixture(() => artifactPreviewFixture(hasScenario, runId, artifactId), {
+  return fixture((w) => w.inspector.artifactPreviewFixture(hasScenario, runId, artifactId), {
     request: `GET ${API_BASE}${path}`,
   });
 }
@@ -141,9 +137,9 @@ export function getArtifactText(
   if (apiMode === 'live') return apiGetText(path, maxBytes);
   const request = `GET ${API_BASE}${path}`;
   return fixture(
-    () => {
+    (w) => {
       // The fixtures store tables, not bytes: a CSV artifact reads back as its rows.
-      const content = artifactTextFixture(hasScenario, runId, artifactId);
+      const content = w.inspector.artifactTextFixture(hasScenario, runId, artifactId);
       if (!content) throw notFound(request, `content of artifact ${artifactId}`);
       return content;
     },
@@ -151,12 +147,36 @@ export function getArtifactText(
   );
 }
 
+/**
+ * GET /runs/:id/attempts/:n/stderr: the attempt's whole stderr.log, for the error banner's
+ * "Full log" (Phase 5 section 6.1). A log over ATTEMPT_STDERR_MAX_BYTES comes back as its
+ * end, marked `truncated`; 404 when no log is stored for the attempt (it is running, wrote
+ * nothing, or ended before the worker kept full logs).
+ */
+export function getAttemptStderr(runId: string, attempt: number): Promise<AttemptStderr> {
+  const path = `/runs/${runId}/attempts/${attempt}/stderr`;
+  if (apiMode === 'live') return apiGet(path, AttemptStderrSchema);
+  const request = `GET ${API_BASE}${path}`;
+  return fixture(
+    (w) => {
+      const log = w.inspectorLogs.attemptStderrFixture(hasScenario, runId, attempt);
+      if (!log) throw notFound(request, `stderr.log of attempt ${attempt} of run ${runId}`);
+      return AttemptStderrSchema.parse(log);
+    },
+    { request },
+  );
+}
+
 /** Reasons a model-needing action is refused while Nous Portal is not connected. */
-function providerRefusal(runId: string, action: 'rescore' | 'retry'): string | null {
+function providerRefusal(
+  w: FixtureWorld,
+  runId: string,
+  action: 'rescore' | 'retry',
+): string | null {
   if (!hasScenario('nous-not-connected')) return null;
-  const found = findRun(hasScenario, runId);
+  const found = w.inspector.findRun(hasScenario, runId);
   if (!found) return null;
-  const { judgeKeys } = runNeeds(found.run);
+  const { judgeKeys } = w.runs.runNeeds(found.run);
   if (action === 'rescore' && judgeKeys.length) {
     return `Re-score needs Nous Portal for the ${judgeKeys.join(' and ')} judge: Nous Portal is not connected.`;
   }
@@ -169,30 +189,31 @@ function providerRefusal(runId: string, action: 'rescore' | 'retry'): string | n
  * re-executes. The run stays `scored` and its current result stays current
  * until the new generation publishes; a re-score already pending is joined.
  */
-export function rescoreRun(runId: string): Promise<RescoreRunResult> {
+export async function rescoreRun(runId: string): Promise<RescoreRunResult> {
   if (apiMode === 'live') {
     return apiSend('POST', `/runs/${runId}/rescore`, {}, RescoreRunResultSchema);
   }
   const request = `POST /api/runs/${runId}/rescore`;
-  const refusal = providerRefusal(runId, 'rescore');
+  const refusal = providerRefusal(await fixtureWorld(), runId, 'rescore');
   if (refusal) return fixtureFailure(request, 409, refusal);
   return fixture(
-    () => {
-      const found = findRun(hasScenario, runId);
+    (w) => {
+      const found = w.inspector.findRun(hasScenario, runId);
       if (!found) throw notFound(request, `run ${runId}`);
-      return rescoreRunFixture(runId);
+      return w.runs.rescoreRunFixture(runId);
     },
     { request },
   );
 }
 
 /** POST /runs/:id/retry: re-executes an execution_error run in a fresh trial container. */
-export function retryRun(runId: string): Promise<RunActionResult> {
+export async function retryRun(runId: string): Promise<RunActionResult> {
   if (apiMode === 'live') return apiSend('POST', `/runs/${runId}/retry`, {}, RunActionResultSchema);
   const request = `POST /api/runs/${runId}/retry`;
-  const refusal = providerRefusal(runId, 'retry');
+  const w = await fixtureWorld();
+  const refusal = providerRefusal(w, runId, 'retry');
   if (refusal) return fixtureFailure(request, 409, refusal);
-  const found = findRun(hasScenario, runId);
+  const found = w.inspector.findRun(hasScenario, runId);
   if (found && found.run.status !== 'execution_error') {
     return fixtureFailure(request, 409, `run is ${found.run.status}, not execution_error`);
   }
@@ -211,8 +232,8 @@ export function cancelRun(runId: string): Promise<RunActionResult> {
     return apiSend('POST', `/runs/${runId}/cancel`, {}, RunActionResultSchema);
   const request = `POST /api/runs/${runId}/cancel`;
   return fixture(
-    () => {
-      if (!findRun(hasScenario, runId)) throw notFound(request, `run ${runId}`);
+    (w) => {
+      if (!w.inspector.findRun(hasScenario, runId)) throw notFound(request, `run ${runId}`);
       return { runId, status: 'cancelled' as const, attempt: null };
     },
     { request },
@@ -227,10 +248,10 @@ export function rescoreRuns(experimentId: string, runIds: string[]): Promise<Bul
   }
   const request = `POST /api/experiments/${experimentId}/runs/rescore`;
   return fixture(
-    () => {
-      const seed = findSeed(hasScenario, experimentId);
+    (w) => {
+      const seed = w.experiments.findSeed(hasScenario, experimentId);
       if (!seed) throw notFound(request, `experiment ${experimentId}`);
-      return bulkRescoreFixture(seed, runIds, hasScenario('bulk-refused'));
+      return w.runs.bulkRescoreFixture(seed, runIds, hasScenario('bulk-refused'));
     },
     { request },
   );
@@ -244,10 +265,10 @@ export function retryRuns(experimentId: string, runIds: string[]): Promise<BulkR
   }
   const request = `POST /api/experiments/${experimentId}/runs/retry`;
   return fixture(
-    () => {
-      const seed = findSeed(hasScenario, experimentId);
+    (w) => {
+      const seed = w.experiments.findSeed(hasScenario, experimentId);
       if (!seed) throw notFound(request, `experiment ${experimentId}`);
-      return bulkRetryFixture(seed, runIds, hasScenario('bulk-refused'));
+      return w.runs.bulkRetryFixture(seed, runIds, hasScenario('bulk-refused'));
     },
     { request },
   );

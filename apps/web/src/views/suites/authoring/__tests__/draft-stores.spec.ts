@@ -3,10 +3,11 @@
  * world: autosave after a pause, one write at a time, the form and task.yaml following each
  * other and the form locking on a task.yaml error (plan 12.4), a rename stored only once it
  * is a free folder name, a failed write kept with Try again, Try it after each write, the
- * self-check's no-worker state, and the 25 MB refusal before any byte is sent.
+ * self-check's no-worker state, and the 25 MB refusal, shown at once and kept by the API.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { AUTHORING_LIMITS } from '@hermes-evals/shared';
 import * as api from '@/api/drafts';
 import { resetDraftFixtures } from '@/api/drafts-fixtures';
 import { setScenario } from '@/api/__tests__/scenario';
@@ -158,11 +159,11 @@ describe('Try it, self-check and uploads', () => {
     expect(tools.selfCheckState).toBe('offline');
   });
 
-  it('refuses a file over 25 MB before sending it', async () => {
-    await openTask();
+  it('refuses a file over 25 MB at once, and the API keeps the refusal (Phase 5b #11)', async () => {
+    const task = await openTask();
     const tools = useDraftTaskToolsStore();
-    const big = new File(['x'], 'ledger-2025.parquet');
-    Object.defineProperty(big, 'size', { value: 31.2 * 1024 * 1024 });
+    const limit = AUTHORING_LIMITS.suiteMaxFileBytes;
+    const big = new File([new Uint8Array(limit + 4096)], 'ledger-2025.parquet');
     await tools.upload([{ file: big, path: big.name }], 'fixture');
     expect(tools.rejected).toEqual([
       {
@@ -170,9 +171,53 @@ describe('Try it, self-check and uploads', () => {
         kind: 'fixture',
         sizeBytes: big.size,
         reason: 'The limit is 25 MB per file.',
+        path: 'fixtures/ledger-2025.parquet',
       },
     ]);
     expect(tools.uploads).toEqual([]);
+    expect(task.detail?.files.map((f) => f.path)).not.toContain('fixtures/ledger-2025.parquet');
+
+    // A reload reads the refusal back from the API's readiness, without its size.
+    await task.reload();
+    const row = task.detail!.readiness.rules.find((r) => r.rule === 'file_limits')!;
+    expect(row).toMatchObject({
+      status: 'problem',
+      message: '`ledger-2025.parquet` is over 25 MB.',
+      target: { section: 'workspace', field: 'fixtures/ledger-2025.parquet' },
+    });
+    tools.reset();
+    expect(tools.refusals).toEqual([
+      {
+        name: 'ledger-2025.parquet',
+        kind: 'fixture',
+        sizeBytes: null,
+        reason: 'The limit is 25 MB per file.',
+        path: 'fixtures/ledger-2025.parquet',
+      },
+    ]);
+
+    // Dismissing it deletes the path, which drops the API's record.
+    await tools.dismissRejected('ledger-2025.parquet');
+    expect(tools.refusals).toEqual([]);
+    await task.reload();
+    expect(task.detail!.readiness.rules.find((r) => r.rule === 'file_limits')!.status).toBe(
+      'passed',
+    );
+  });
+
+  it('keeps a stored file when its bigger replacement is dismissed', async () => {
+    const task = await openTask();
+    const tools = useDraftTaskToolsStore();
+    const small = new File(['a,b\n'], 'ledger.csv');
+    await tools.upload([{ file: small, path: small.name }], 'fixture');
+    const big = new File([new Uint8Array(AUTHORING_LIMITS.suiteMaxFileBytes + 1)], 'ledger.csv');
+    await tools.upload([{ file: big, path: big.name }], 'fixture');
+    await task.reload();
+    tools.reset();
+    expect(tools.refusals.map((r) => r.path)).toEqual(['fixtures/ledger.csv']);
+    await tools.dismissRejected('ledger.csv');
+    expect(tools.refusals).toEqual([]);
+    expect(task.detail?.files.map((f) => f.path)).toContain('fixtures/ledger.csv');
   });
 
   it('adds a dropped file into the folder it was dropped in', async () => {

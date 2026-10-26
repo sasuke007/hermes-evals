@@ -3,17 +3,21 @@
  * first (the same temp-file, fsync and rename path as every blob), then a
  * file row; rename or move; delete; and reads of any file, verifier scripts
  * included, which the editor shows read-only. Every write under `verify/`
- * is refused (R7): code reaches a draft only through a confirmed zip.
+ * is refused (R7): code reaches a draft only through a confirmed zip. An
+ * upload refused for its size is kept on the task (recordRefused) until a
+ * file is stored at its path or the path is deleted.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  AUTHORING_LIMITS,
   DraftFilePathSchema,
-  HOME_MEMORIES_DIR,
   HOME_SEED_PATHS,
   isVerifyPath,
   TASK_HOME_DIR,
   type DraftFileUploadFields,
+  type DraftRefusedUpload,
   type DraftTaskDetail,
+  type DraftUploadKind,
   type MoveDraftFileRequest,
   type TablePreview,
 } from '@hermes-evals/shared';
@@ -24,7 +28,7 @@ import { uploadFileName } from '../../resources/skills/format.js';
 import type { UploadedFileRef } from '../../resources/skills/multipart-upload.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { badRequest, notFound } from '../http-errors.js';
-import { FIXTURES_DIR, PROMPT_MD, REFERENCE_JSON, TASK_YAML } from '../loader/limits.js';
+import { PROMPT_MD, REFERENCE_JSON, TASK_YAML } from '../loader/limits.js';
 import { tablePreview, tabularFormatOf } from '../views/table.js';
 import { draftFileKind, folderFiles, layoutOf } from './draft-folder.js';
 import { requireDraft } from './draft-reads.js';
@@ -33,6 +37,7 @@ import { DraftTasksService } from './draft-tasks.service.js';
 import { conflict, DraftWriter } from './draft-writer.js';
 import type { DraftFileRef } from './materialise.js';
 import { applyForm, formOf } from './task-form.js';
+import { uploadTarget, withoutRefusalAt, withRefusal } from './upload-target.js';
 
 /** A file of a draft task to send: its bytes as a stream, its name and size. */
 export interface DraftFileDownload {
@@ -92,41 +97,12 @@ export class DraftFilesService {
     await this.writer.write(folder, undefined, async (ctx) => {
       const task = ctx.task(key);
       const current = folderOf(ctx.stored, task);
-      const layout = layoutOf(current.taskYaml);
-      let taskYaml = current.taskYaml;
-      let path: string;
-      switch (fields.kind) {
-        case 'fixture':
-          path = `${FIXTURES_DIR}/${name}`;
-          break;
-        case 'home_seed': {
-          const seed = name.startsWith(`${HOME_MEMORIES_DIR}/`)
-            ? name
-            : `${HOME_MEMORIES_DIR}/${name}`;
-          path = `${TASK_HOME_DIR}/${seed}`;
-          if (!(HOME_SEED_PATHS as readonly string[]).includes(path)) {
-            throw badRequest(
-              `a home seed is ${HOME_SEED_PATHS.map((p) => p.slice(5)).join(' or ')}`,
-            );
-          }
-          break;
-        }
-        case 'expected':
-          path = `${layout.expectedDir ?? 'expected'}/${name}`;
-          if (layout.expectedDir === null)
-            taskYaml = this.withFolder(current.taskYaml, 'expectedWorkspace', 'expected');
-          break;
-        case 'expected_home': {
-          const inHome = name.startsWith(`${HOME_MEMORIES_DIR}/`)
-            ? name
-            : `${HOME_MEMORIES_DIR}/${name}`;
-          path = `${layout.expectedHomeDir ?? 'expected_home'}/${inHome}`;
-          if (layout.expectedHomeDir === null)
-            taskYaml = this.withFolder(current.taskYaml, 'expectedHome', 'expected_home');
-          break;
-        }
-      }
-      path = checkedPath(path);
+      const target = uploadTarget(fields.kind, name, layoutOf(current.taskYaml));
+      const taskYaml =
+        target.names === null
+          ? current.taskYaml
+          : this.withFolder(current.taskYaml, target.names.field, target.names.dir);
+      const path = checkedPath(target.path);
       const others = folderFiles(current).filter((f) => f.path !== path || f.ref === null);
       const hit = clash(
         path,
@@ -138,9 +114,36 @@ export class DraftFilesService {
         ...current.files.filter((f) => f.path !== path),
         { path, kind, sha256: ref.sha256, size: ref.size },
       ];
-      await ctx.change(task, { taskYaml, files });
+      const refusedUploads = withoutRefusalAt(task.refusedUploads, path);
+      await ctx.change(task, { taskYaml, files, refusedUploads });
     });
     return this.tasks.detail(folder, key);
+  }
+
+  /**
+   * Keeps on the task an upload of `kind` named `name` that was refused for
+   * its size (413), so readiness reports it after a reload (Phase 5b
+   * question 11); a later refusal at the same path replaces it. Throws as an
+   * upload would for a path, task or draft it would refuse.
+   */
+  async recordRefused(
+    folder: string,
+    key: string,
+    upload: { kind: DraftUploadKind; name: string; sizeBytes: number | null },
+  ): Promise<void> {
+    refuseVerify(upload.name);
+    await this.writer.write(folder, undefined, async (ctx) => {
+      const task = ctx.task(key);
+      const layout = layoutOf(folderOf(ctx.stored, task).taskYaml);
+      const refusal: DraftRefusedUpload = {
+        path: checkedPath(uploadTarget(upload.kind, upload.name, layout).path),
+        kind: upload.kind,
+        sizeBytes: upload.sizeBytes,
+        limitBytes: AUTHORING_LIMITS.suiteMaxFileBytes,
+        refusedAt: ctx.now.toISOString(),
+      };
+      await ctx.change(task, { refusedUploads: withRefusal(task.refusedUploads, refusal) });
+    });
   }
 
   /** PATCH …/tasks/:key/files/:path: Rename, or a move into another folder. */
@@ -172,7 +175,7 @@ export class DraftFilesService {
         throw badRequest(`home/ holds only ${HOME_SEED_PATHS.join(' and ')}`);
       }
       const files = current.files.map((f) => (f.path === from ? { ...f, path: to, kind } : f));
-      await ctx.change(task, { files });
+      await ctx.change(task, { files, refusedUploads: withoutRefusalAt(task.refusedUploads, to) });
     });
     return this.tasks.detail(folder, key);
   }
@@ -193,8 +196,15 @@ export class DraftFilesService {
         await ctx.change(task, { rubrics });
         return;
       }
-      if (!current.files.some((f) => f.path === path)) throw notFound(`file ${path} in ${key}`);
-      await ctx.change(task, { files: current.files.filter((f) => f.path !== path) });
+      // Deleting the path of a refused upload dismisses the refusal (Phase 5b question 11).
+      const refusedUploads = withoutRefusalAt(task.refusedUploads, path);
+      const files = current.files.filter((f) => f.path !== path);
+      if (
+        files.length === current.files.length &&
+        refusedUploads.length === task.refusedUploads.length
+      )
+        throw notFound(`file ${path} in ${key}`);
+      await ctx.change(task, { files, refusedUploads });
     });
     return this.tasks.detail(folder, key);
   }

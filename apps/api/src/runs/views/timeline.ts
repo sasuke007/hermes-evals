@@ -17,7 +17,7 @@
  * the whole attempt, so an inspector polling every second reads only what
  * is new.
  */
-import type { TimelineEvent } from '@hermes-evals/shared';
+import { timelineOutputLimit, type TimelineEvent } from '@hermes-evals/shared';
 import { parseMcpToolName } from '../../execution/stream-json.js';
 import { platformRow } from './platform-rows.js';
 import type { EventRecord } from './rows.js';
@@ -34,8 +34,18 @@ import {
   type Refusal,
 } from './timeline-rows.js';
 
-/** Hermes cuts every tool output at this many characters and appends "...". */
+/**
+ * Hermes's stream-json emitter cuts every tool output it writes to stdout at
+ * this many characters and appends "..." (`_TOOL_OUTPUT_CAP` in
+ * hermes_cli/stream_json.py at 4d04303), whatever the model was given. So a
+ * row's output is never longer than this plus 3 as stored, MCP results
+ * included, until the worker reads outputs from elsewhere.
+ */
 export const TOOL_OUTPUT_LIMIT = 5_000;
+
+/** An output as Hermes's emitter leaves one it cut: TOOL_OUTPUT_LIMIT characters and "...". */
+const cutByHermes = (output: string): boolean =>
+  output.length === TOOL_OUTPUT_LIMIT + 3 && output.endsWith('...');
 
 export interface TimelineContext extends NetworkContext {
   /** Epoch ms the attempt started; atMs counts from here. */
@@ -184,14 +194,23 @@ function toolCall(
   };
 }
 
+/**
+ * Fills a tool row from its result. The row keeps the timeline's window of
+ * the output (Phase 6 question 13: 20,000 characters of an MCP tool's
+ * result, 5,000 of any other tool's, timelineOutputLimit), with
+ * `outputChars` the whole length as stored, and is marked `truncated` when
+ * it is cut there or arrived cut by Hermes.
+ */
 function completeCall(call: ToolCall, seq: number, ts: number, p: Payload): void {
-  const output = outputText(p['output']);
+  const whole = outputText(p['output']);
   const reported = p['duration_ms'];
   const event = call.row.event;
+  const limit = timelineOutputLimit({ server: event.server });
+  const cut = whole !== null && whole.length > limit;
   event.running = false;
-  event.output = output;
-  event.outputChars = output?.length ?? null;
-  event.truncated = (output?.length ?? 0) > TOOL_OUTPUT_LIMIT;
+  event.output = whole !== null && cut ? whole.slice(0, limit) : whole;
+  event.outputChars = whole?.length ?? null;
+  event.truncated = whole !== null && (cut || cutByHermes(whole));
   event.error = p['is_error'] === true;
   event.durationMs =
     typeof reported === 'number' && Number.isSafeInteger(reported) && reported >= 0

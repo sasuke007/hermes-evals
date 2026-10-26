@@ -65,8 +65,12 @@ describe('RunInspectorDrawer: the board run (dup_invoices · baseline · rep 3)'
     );
     // json_match with mismatches opens its evidence: "0 of 2 items match".
     expect(answer.get('[data-testid="evidence-toggle"]').text()).toContain('0 of 2 items match');
-    expect(outcome.get('[data-testid="score-evidence"]').text()).toContain(
-      'duplicates[0] does not match the reference',
+    // Key by key since Phase 7: each reference item with what the answer had there.
+    expect(spaced(outcome.get('[data-testid="json-match-table"]'))).toBe(
+      '✗ [0] does not match expected ["INV-0988", "INV-1131"], missing from the answer ✗ [1] does not match expected ["INV-1042", "INV-1107"], missing from the answer',
+    );
+    expect(squash(outcome.get('[data-testid="json-match-caption"]').text())).toBe(
+      'Compared at duplicates against the reference, item by item. The score is the share of items that match.',
     );
     expect(squash(outcome.text())).toContain(
       "Each check is scored on its own; there is no combined total. The primary check, answer, is this run's result.",

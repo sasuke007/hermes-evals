@@ -55,6 +55,7 @@ export const BLANK_FORM: TaskForm = {
   expectedWorkspace: null,
   expectedHome: null,
   negativeControl: null,
+  answersFromFixtures: null,
 };
 
 /** The keys the form has a field for, by section. */
@@ -63,7 +64,7 @@ const KEYS = {
   limits: ['max_turns', 'run_budget_seconds', 'toolsets_needed'],
   answer: ['format', 'path'],
   check: ['key', 'type', 'primary', 'params'],
-  self_check: ['expected_workspace', 'expected_home', 'negative_control'],
+  self_check: ['expected_workspace', 'expected_home', 'negative_control', 'answers_from_fixtures'],
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -199,6 +200,11 @@ function formOfValue(raw: unknown): TaskForm {
       ['self_check', 'negative_control'],
       'negative_control',
     ),
+    answersFromFixtures: flag(
+      selfCheck.answers_from_fixtures,
+      ['self_check', 'answers_from_fixtures'],
+      'answers_from_fixtures',
+    ),
   };
 }
 
@@ -275,9 +281,11 @@ function selfCheckOf(
     ['expected_workspace', form.expectedWorkspace, old?.expectedWorkspace],
     ['expected_home', form.expectedHome, old?.expectedHome],
     ['negative_control', form.negativeControl, old?.negativeControl],
+    ['answers_from_fixtures', form.answersFromFixtures, old?.answersFromFixtures],
   ] as const;
   for (const [key, value, before] of fields) {
-    if (old !== undefined && value === before) continue;
+    // A form sent without answersFromFixtures leaves the file's value as it is.
+    if (value === undefined || (old !== undefined && value === before)) continue;
     if (value === null) delete out[key];
     else out[key] = value;
   }
@@ -334,7 +342,9 @@ export function applyForm(current: string | null, form: TaskForm): string {
   const selfCheckChanged =
     form.expectedWorkspace !== old.expectedWorkspace ||
     form.expectedHome !== old.expectedHome ||
-    form.negativeControl !== old.negativeControl;
+    form.negativeControl !== old.negativeControl ||
+    (form.answersFromFixtures !== undefined &&
+      form.answersFromFixtures !== old.answersFromFixtures);
   if (selfCheckChanged) {
     const selfCheck = selfCheckOf(isRecord(next.self_check) ? next.self_check : {}, form, old);
     if (Object.keys(selfCheck).length > 0) next.self_check = selfCheck;

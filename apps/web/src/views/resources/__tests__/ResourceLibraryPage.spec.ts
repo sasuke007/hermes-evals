@@ -252,20 +252,21 @@ describe('Documents tab', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Delete vendor-policy-v3.pdf');
   });
 
-  it('disables Delete while a configuration has the document, and quotes a 409', async () => {
+  it('disables Delete while a configuration version has the document, and quotes a 409', async () => {
     const { store } = await page('documents');
     const [doc] = store.documentRows;
+    const links = [{ configurationId: 'cfg_1', name: 'with-docs' }];
     store.documents.byId = {
-      [doc!.id]: { ...doc!, attachedTo: [{ configurationId: 'cfg_1', name: 'with-docs' }] },
+      [doc!.id]: { ...doc!, attachedTo: links, inUse: true, inUseBy: links },
     };
     await flushPromises();
     const del = w!.get('button[aria-label="Delete vendor-policy-v3.pdf"]');
     expect(del.attributes('disabled')).toBeDefined();
     expect(del.attributes('title')).toBe(
-      'Attached to 1 configuration. Remove it from with-docs first.',
+      'Part of a saved version of with-docs. A configuration version keeps the document it was saved with, so it cannot be deleted.',
     );
 
-    // Dropped from the latest version but kept by an older one: the API refuses.
+    // A row read before a configuration saved it: the API refuses all the same.
     store.documents.byId = { [doc!.id]: doc! };
     const refusal =
       'document vendor-policy-v3.pdf is part of a saved version of with-docs, and a configuration version keeps what it was saved with, so it cannot be deleted';
@@ -285,6 +286,18 @@ describe('Documents tab', () => {
     expect(alert.text()).toContain('Could not delete. The document is kept.');
     expect(alert.text()).toContain(refusal);
     expect(w!.findAll('[data-testid="document-row"]')).toHaveLength(1);
+  });
+
+  it('keeps Delete disabled when only an older configuration version has it (Phase 5b #8)', async () => {
+    await page('documents', 'document-in-older-version');
+    const row = w!.get('[data-testid="document-row"]');
+    expect(flat('[data-testid="kept-by"]')).toBe('kept by an older version of with-skill');
+    expect(row.text()).toContain('None now');
+    const del = w!.get('button[aria-label="Delete vendor-policy-v3.pdf"]');
+    expect(del.attributes('disabled')).toBeDefined();
+    expect(del.attributes('aria-description')).toBe(
+      'Part of a saved version of with-skill. A configuration version keeps the document it was saved with, so it cannot be deleted.',
+    );
   });
 
   it('is one drop target when empty', async () => {
@@ -318,7 +331,7 @@ describe('MCP servers tab', () => {
     expect(cells(1)).toEqual([
       'vendor-api',
       'http',
-      'https://vendor-api.example.com/mcp · header Authorization',
+      'https://vendor-api.example.com/mcp · header Authorization ("Bearer " + value)',
       'all tools',
       '23 Oct 10:12',
       '0',

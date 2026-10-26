@@ -31,15 +31,17 @@
 #
 # The stack needs the mock model (profile `test`) with the scripts in
 # scripts/phase3-mock-scripts.json, and the LLM judge pointed at it. Compose
+# mounts the file or directory MOCK_SCRIPTS_FILE names into the mock, and
 # reads these from the shell before .env, so no file changes:
 #
-#   MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase3-mock-scripts.json")) + json.load(open("scripts/phase2-mock-scripts.json"))))')" \
+#   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
 #     docker compose --profile test up -d
 #
-# (both script files, so scripts/phase2-smoke.sh passes on the same stack).
-# The mock plays the first script whose `match` occurs in a request's
-# messages, so the order matters. The judge's three come first, because the
+# (every scripts/*mock-scripts.json, in name order, so the other smoke tests
+# pass on the same stack). The mock plays the first script whose `match`
+# occurs in a request's messages, so the order within this file matters.
+# The judge's three come first, because the
 # judge's request holds the task prompt too: one matches a sentence only
 # smoke-a's final reply holds (an agent's own requests never hold its final
 # reply, so only the judge grading smoke-a sees it) and answers 0.92; one
@@ -315,10 +317,10 @@ if [ "$DOCKER" = 1 ]; then
   else
     fail 'migration 0006: scores accept text_match' "migrations ${MIGRATIONS:-?} · CHECK '$CHECKDEF'"
   fi
-  if dc exec -T mock-model printenv MOCK_SCRIPTS 2>/dev/null | grep -q 'Smoke rubric LEDGER-JUDGE'; then
-    pass 'the mock model has scripts/phase3-mock-scripts.json' 'MOCK_SCRIPTS matches "Smoke rubric LEDGER-JUDGE", ...'
+  if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'Smoke rubric LEDGER-JUDGE' >/dev/null; then
+    pass 'the mock model has scripts/phase3-mock-scripts.json' 'its scripts match "Smoke rubric LEDGER-JUDGE", ...'
   else
-    fail 'the mock model has scripts/phase3-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS)'
+    fail 'the mock model has scripts/phase3-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
   fi
 else
   skip 'judge settings, keys, workers row, migration, mock scripts' 'docker compose not reachable here (or SMOKE_DOCKER=0)'
@@ -647,9 +649,19 @@ if [ "$DOCKER" = 1 ] && [ -n "$EXP" ]; then
   check_file 'evidence.text: each phrase and the pattern, found or not' "$WORK/scores.json" \
     "[(i['kind'], i['found']) for i in $(sx A_LEDGER fee_rule)['evidence']['text']['items']] == [('phrase', True), ('phrase', True), ('pattern', True)] and [(i['label'], i['found']) for i in $(sx B_LEDGER fee_rule)['evidence']['text']['items']] == [('late fee', True), ('30 days', False), ('\\\\d+(\\\\.\\\\d+)?% per month', False)]" \
     "' '.join('{}={}'.format(i['label'], i['found']) for i in $(sx B_LEDGER fee_rule)['evidence']['text']['items'])"
-  check_file 'evidence.json_match: 5 of 5 keys, then 4 of 5 (status)' "$WORK/scores.json" \
-    "$(sx A_LEDGER record)['evidence']['json_match'] == {'unit': 'keys', 'matched': 5, 'total': 5, 'mismatches': []} and $(sx B_LEDGER record)['evidence']['json_match'] == {'unit': 'keys', 'matched': 4, 'total': 5, 'mismatches': ['status']}" \
-    "json.dumps($(sx B_LEDGER record)['evidence']['json_match'])"
+  # json_match's evidence key by key (Phase 7): the compared path, the counts,
+  # the mismatch paths, and each key with both sides and whether it matched.
+  # Entries are compared sorted by path, since the reference reaches the
+  # scorer with its keys in Postgres's order. test/phase3-smoke.spec.ts
+  # derives both from the real scorer, this script's reference and the mock's
+  # two replies.
+  export JSON_MATCH_A='{"path":"record","unit":"keys","matched":5,"total":5,"mismatches":[],"entries":[{"path":"currency","expected":"EUR","observed":"EUR","match":true},{"path":"due","expected":"2026-11-30","observed":"2026-11-30","match":true},{"path":"invoices","expected":3,"observed":3,"match":true},{"path":"status","expected":"open","observed":"open","match":true},{"path":"vendor","expected":"Acme","observed":"Acme","match":true}]}'
+  export JSON_MATCH_B='{"path":"record","unit":"keys","matched":4,"total":5,"mismatches":["status"],"entries":[{"path":"currency","expected":"EUR","observed":"EUR","match":true},{"path":"due","expected":"2026-11-30","observed":"2026-11-30","match":true},{"path":"invoices","expected":3,"observed":3,"match":true},{"path":"status","expected":"open","observed":"paid","match":false},{"path":"vendor","expected":"Acme","observed":"Acme","match":true}]}'
+  # jm EXPR: the evidence of EXPR's score row, its entries sorted by path.
+  jm() { printf "(lambda j: dict(j, entries=sorted(j['entries'], key=lambda e: e['path'])))(%s['evidence']['json_match'])" "$1"; }
+  check_file 'evidence.json_match: key by key, 5 of 5, then 4 of 5 (status)' "$WORK/scores.json" \
+    "$(jm "$(sx A_LEDGER record)") == json.loads(env['JSON_MATCH_A']) and $(jm "$(sx B_LEDGER record)") == json.loads(env['JSON_MATCH_B'])" \
+    "'{matched} of {total} at {path}, mismatches {mismatches}'.format_map($(sx B_LEDGER record)['evidence']['json_match'])"
   # verifier_script is 2 since Phase 6, which passes --home <dir> as well.
   check_file 'scorer versions on the rows: llm_judge 2, trajectory_match 2, verifier_script 2, text_match 1' "$WORK/scores.json" \
     "{x['type']: x['version'] for x in d} == {'numeric_tolerance': 1, 'json_match': 1, 'exact_match': 1, 'text_match': 1, 'file_check': 1, 'trajectory_match': 2, 'llm_judge': 2, 'verifier_script': 2}" \

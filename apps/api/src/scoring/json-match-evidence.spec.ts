@@ -6,9 +6,17 @@ import { scoreJsonMatch } from './json-match.js';
 const match = (params: Record<string, unknown>, observed: JsonValue, expected: JsonValue) =>
   scoreJsonMatch(JsonMatchParamsSchema.parse(params), observed, expected);
 
-/** The stored evidence, parsed as the run views read it. */
-const evidenceOf = (params: Record<string, unknown>, observed: JsonValue, expected: JsonValue) =>
-  ScoreEvidenceSchema.parse(match(params, observed, expected).evidence).json_match;
+/**
+ * The stored evidence's counts and mismatch paths (Part B), parsed as the
+ * run views read it. Its `path` and `entries` (Phase 7) are covered by
+ * json-match-entries.spec.ts.
+ */
+const evidenceOf = (params: Record<string, unknown>, observed: JsonValue, expected: JsonValue) => {
+  const evidence = ScoreEvidenceSchema.parse(match(params, observed, expected).evidence).json_match;
+  if (!evidence) return evidence;
+  const { unit, matched, total, mismatches } = evidence;
+  return { unit, matched, total, mismatches };
+};
 
 describe('json_match evidence on objects', () => {
   const reference: JsonValue = {

@@ -633,7 +633,7 @@ check 'GET /system/workers' 200 \
 
 request GET /system/sandbox
 check 'GET /system/sandbox' 200 \
-  'd["proven"] and len(d["checks"]) == 15 and all(c["passed"] for c in d["checks"])' \
+  'd["proven"] and len(d["checks"]) == 16 and all(c["passed"] for c in d["checks"])' \
   '"proven · {}/{} checks passed · {} · {} at {}".format(sum(c["passed"] for c in d["checks"]), len(d["checks"]), d["revision"], d["trigger"], d["checkedAt"])'
 
 request GET /resources/counts

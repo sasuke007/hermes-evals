@@ -8,6 +8,7 @@
  */
 import { ConflictException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
+import type { DraftRefusedUpload } from '@hermes-evals/shared';
 import type { DraftSelfCheckRecord } from '../../database/schema/index.js';
 import { suiteDrafts, suiteDraftTasks } from '../../database/schema/index.js';
 import type { AppDb, AppTx } from '../../database/types.js';
@@ -71,6 +72,8 @@ export interface TaskChange {
   removed?: boolean;
   restoredFromTaskId?: string | null;
   selfCheck?: DraftSelfCheckRecord | null;
+  /** Uploads refused for their size, which readiness reports (Phase 5b question 11). */
+  refusedUploads?: readonly DraftRefusedUpload[];
 }
 
 export interface WriteContext {
@@ -171,7 +174,10 @@ export class DraftWriter {
     const evaluate = async (
       id: string | null,
       folder: DraftTaskFolder,
-      row: Pick<DraftTaskDbRow, 'baseTaskId' | 'restoredFromTaskId' | 'selfCheck'>,
+      row: Pick<
+        DraftTaskDbRow,
+        'baseTaskId' | 'restoredFromTaskId' | 'selfCheck' | 'refusedUploads'
+      >,
       removed: boolean,
     ) =>
       evaluateTask({
@@ -182,6 +188,7 @@ export class DraftWriter {
         restoredFrom: await restoredTask(row.restoredFromTaskId),
         removed,
         selfCheck: row.selfCheck,
+        refusedUploads: row.refusedUploads,
         readBlob,
         now: () => now,
       });
@@ -213,10 +220,11 @@ export class DraftWriter {
             ? change.restoredFromTaskId
             : task.restoredFromTaskId;
         const removed = change.removed ?? task.state === 'removed';
+        const refusedUploads = [...(change.refusedUploads ?? task.refusedUploads)];
         const evaluated = await evaluate(
           task.id,
           folder,
-          { baseTaskId: task.baseTaskId, restoredFromTaskId, selfCheck },
+          { baseTaskId: task.baseTaskId, restoredFromTaskId, selfCheck, refusedUploads },
           removed,
         );
         const [row] = await tx
@@ -232,6 +240,7 @@ export class DraftWriter {
             contentHash: evaluated.contentHash,
             readiness: evaluated.readiness,
             selfCheck,
+            refusedUploads,
             revision: task.revision + 1,
             updatedAt: now,
           })
@@ -264,6 +273,7 @@ export class DraftWriter {
           baseTaskId: options.baseTaskId ?? null,
           restoredFromTaskId: options.restoredFromTaskId ?? null,
           selfCheck: options.selfCheck ?? null,
+          refusedUploads: [],
         };
         const evaluated = await evaluate(null, folder, row0, false);
         const [row] = await tx

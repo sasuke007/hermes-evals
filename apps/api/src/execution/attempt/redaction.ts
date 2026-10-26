@@ -38,6 +38,15 @@ export class Redactor {
     ]);
   }
 
+  /**
+   * Characters of the longest form a value is matched in: a text cut from a
+   * longer one is redacted whole once it starts this many characters before
+   * the part that is kept (StderrCapture.logEnd).
+   */
+  get longestForm(): number {
+    return this.forms.reduce((max, form) => Math.max(max, form.length), 0);
+  }
+
   /** Whether `text` holds any value, in any form matched. */
   holdsValue(text: string): boolean {
     return this.forms.some((form) => text.includes(form));

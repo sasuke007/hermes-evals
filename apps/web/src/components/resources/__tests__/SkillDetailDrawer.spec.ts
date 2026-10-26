@@ -112,14 +112,25 @@ describe('Skill detail', () => {
     );
   });
 
-  it('disables Delete while a configuration uses the skill, saying who (board tooltip)', async () => {
+  it('disables Delete while a configuration version names the skill, saying which', async () => {
     await drawer();
     const del = w!.get('[data-testid="delete-skill"]');
     expect(del.text()).toBe('Delete');
     expect(del.attributes('disabled')).toBeDefined();
     expect(del.attributes('title')).toBe(
-      'Used by 1 configuration. Remove it from with-skill first.',
+      'Part of a saved version of with-skill. A configuration version keeps the skill it was saved with, so it cannot be deleted.',
     );
+  });
+
+  it('says when only an older configuration version keeps the skill (Phase 5b #8)', async () => {
+    const { store } = await drawer();
+    const detail = store.skillDetails[SKILL_INVOICE_METHOD_ID]!.value!;
+    store.skillDetails[SKILL_INVOICE_METHOD_ID]!.value = { ...detail, usedBy: [] };
+    await flushPromises();
+    expect(w!.get('[data-testid="skill-meta"]').text().replace(/\s+/g, ' ')).toMatch(
+      /not used by any configuration now · kept by an older version of with-skill$/,
+    );
+    expect(w!.get('[data-testid="delete-skill"]').attributes('disabled')).toBeDefined();
   });
 
   it('deletes an unused skill after confirming in place, then closes', async () => {

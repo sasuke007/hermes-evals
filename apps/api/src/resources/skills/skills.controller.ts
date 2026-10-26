@@ -85,7 +85,8 @@ export class SkillsController {
   @ApiNotFoundResponse({ description: 'No such skill' })
   @ApiJsonResponse(ResourceInUseBodySchema, {
     status: 409,
-    description: 'A configuration version names the skill: the configurations in `usedBy`',
+    description:
+      "A configuration version names the skill: the configurations in `usedBy` (the row's `inUseBy`)",
   })
   remove(@Param('id') id: string): Promise<void> {
     return this.skills.remove(id);

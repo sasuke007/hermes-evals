@@ -38,27 +38,17 @@ import {
   apiMode,
   fixture,
   fixtureFailure,
+  fixtureWorld,
   hasScenario,
   livePath,
   notFound,
   withQuery,
+  type FixtureWorld,
 } from './source';
-import { comparisonFixture } from '@/fixtures/comparison';
-import {
-  duplicateDraftFixture,
-  estimateFixture,
-  EXPERIMENT_IDS,
-  experimentDetailFixture,
-  experimentListRowFixture,
-  experimentSeeds,
-  type ExperimentSeed,
-  findSeed,
-  newExperimentOptionsFixture,
-} from '@/fixtures/experiments';
-import { suiteStateFrom } from '@/fixtures/suites';
+import type { ExperimentSeed } from '@/fixtures/experiments';
 
-function seedOrThrow(request: string, id: string): ExperimentSeed {
-  const seed = findSeed(hasScenario, id);
+function seedOrThrow(w: FixtureWorld, request: string, id: string): ExperimentSeed {
+  const seed = w.experiments.findSeed(hasScenario, id);
   if (!seed) throw notFound(request, `experiment ${id}`);
   return seed;
 }
@@ -66,9 +56,13 @@ function seedOrThrow(request: string, id: string): ExperimentSeed {
 /** GET /experiments: newest first. */
 export function listExperiments(): Promise<ExperimentListRow[]> {
   if (apiMode === 'live') return apiGet('/experiments', ExperimentListRowSchema.array());
-  return fixture(() => experimentSeeds(hasScenario).map(experimentListRowFixture), {
-    request: 'GET /api/experiments',
-  });
+  return fixture(
+    ({ experiments }) =>
+      experiments.experimentSeeds(hasScenario).map(experiments.experimentListRowFixture),
+    {
+      request: 'GET /api/experiments',
+    },
+  );
 }
 
 /** GET /experiments/:id: header, frozen snapshot, progress, feed, verdicts and aggregates. */
@@ -76,7 +70,11 @@ export function getExperiment(id: string): Promise<ExperimentDetail> {
   if (apiMode === 'live') return apiGet(`/experiments/${id}`, ExperimentDetailSchema);
   const request = `GET /api/experiments/${id}`;
   return fixture(
-    () => experimentDetailFixture(seedOrThrow(request, id), suiteStateFrom(hasScenario)),
+    (w) =>
+      w.experiments.experimentDetailFixture(
+        seedOrThrow(w, request, id),
+        w.suites.suiteStateFrom(hasScenario),
+      ),
     { request },
   );
 }
@@ -94,7 +92,9 @@ export function getComparison(id: string, query: ComparisonQuery = {}): Promise<
   });
   if (apiMode === 'live') return apiGet(path, ComparisonViewSchema);
   const request = `GET /api/experiments/${id}/comparison`;
-  return fixture(() => comparisonFixture(seedOrThrow(request, id), query), { request });
+  return fixture((w) => w.comparison.comparisonFixture(seedOrThrow(w, request, id), query), {
+    request,
+  });
 }
 
 /**
@@ -105,7 +105,7 @@ export function getComparison(id: string, query: ComparisonQuery = {}): Promise<
  */
 export function getNewExperimentOptions(): Promise<NewExperimentOptions> {
   if (apiMode === 'live') return apiGet('/experiments/new-options', NewExperimentOptionsSchema);
-  return fixture(() => newExperimentOptionsFixture(hasScenario), {
+  return fixture((w) => w.experiments.newExperimentOptionsFixture(hasScenario), {
     request: 'GET /api/experiments/new-options',
   });
 }
@@ -125,17 +125,21 @@ export function estimateExperiment(query: EstimateQuery): Promise<ExperimentEsti
     budget: query.budgetS,
   });
   if (apiMode === 'live') return apiGet(path, ExperimentEstimateViewSchema);
-  return fixture(() => estimateFixture(newExperimentOptionsFixture(hasScenario), query), {
-    request: 'GET /api/experiments/estimate',
-  });
+  return fixture(
+    ({ experiments }) =>
+      experiments.estimateFixture(experiments.newExperimentOptionsFixture(hasScenario), query),
+    {
+      request: 'GET /api/experiments/estimate',
+    },
+  );
 }
 
 /**
  * The launch 409's message when a chosen configuration's MCP servers name variables that are
  * not set (Phase 6 S7), worded as the API words it, or null: the fixture options say which.
  */
-function missingSecretsRefusal(input: LaunchExperimentInput): string | null {
-  const options = newExperimentOptionsFixture(hasScenario).configurations;
+function missingSecretsRefusal(w: FixtureWorld, input: LaunchExperimentInput): string | null {
+  const options = w.experiments.newExperimentOptionsFixture(hasScenario).configurations;
   const chosen = [input.baselineVersionId, ...input.candidateVersionIds].flatMap(
     (id) => options.find((c) => c.versionId === id) ?? [],
   );
@@ -153,7 +157,9 @@ function missingSecretsRefusal(input: LaunchExperimentInput): string | null {
  * loaded; 400 with issues per field. The form keeps its values. In fixtures a
  * launch opens the running sample experiment.
  */
-export function launchExperiment(input: LaunchExperimentInput): Promise<LaunchExperimentResult> {
+export async function launchExperiment(
+  input: LaunchExperimentInput,
+): Promise<LaunchExperimentResult> {
   if (apiMode === 'live') {
     return apiSend('POST', '/experiments', input, LaunchExperimentResultSchema);
   }
@@ -168,9 +174,10 @@ export function launchExperiment(input: LaunchExperimentInput): Promise<LaunchEx
       'configuration with-skill changed since you opened this form (now v2)',
     );
   }
-  const unset = missingSecretsRefusal(input);
+  const w = await fixtureWorld();
+  const unset = missingSecretsRefusal(w, input);
   if (unset) return fixtureFailure(request, 409, unset);
-  return fixture({ id: EXPERIMENT_IDS.mcpVsBaseline }, { request, latencyMs: 600 });
+  return fixture({ id: w.experiments.EXPERIMENT_IDS.mcpVsBaseline }, { request, latencyMs: 600 });
 }
 
 /** POST /experiments/:id/pause: stops dispatching; in-flight runs finish. */
@@ -180,8 +187,8 @@ export function pauseExperiment(id: string): Promise<ExperimentActionResult> {
   }
   const request = `POST /api/experiments/${id}/pause`;
   return fixture(
-    () => {
-      seedOrThrow(request, id);
+    (w) => {
+      seedOrThrow(w, request, id);
       return { id, status: 'paused' as const };
     },
     { request },
@@ -192,7 +199,7 @@ export function pauseExperiment(id: string): Promise<ExperimentActionResult> {
  * POST /experiments/:id/resume. A spend-ceiling pause needs a higher ceiling
  * (`spendCeilingUsd`); a provider pause needs the provider connected.
  */
-export function resumeExperiment(
+export async function resumeExperiment(
   id: string,
   options: { spendCeilingUsd?: number } = {},
 ): Promise<ExperimentActionResult> {
@@ -200,7 +207,7 @@ export function resumeExperiment(
     return apiSend('POST', `/experiments/${id}/resume`, options, ExperimentActionResultSchema);
   }
   const request = `POST /api/experiments/${id}/resume`;
-  const seed = findSeed(hasScenario, id);
+  const seed = (await fixtureWorld()).experiments.findSeed(hasScenario, id);
   if (seed?.pauseReason === 'spend_ceiling') {
     const ceiling = seed.spendCeilingUsd ?? 0;
     if (options.spendCeilingUsd === undefined || options.spendCeilingUsd <= ceiling) {
@@ -215,8 +222,8 @@ export function resumeExperiment(
     return fixtureFailure(request, 409, 'Nous Portal is not connected');
   }
   return fixture(
-    () => {
-      seedOrThrow(request, id);
+    (w) => {
+      seedOrThrow(w, request, id);
       return { id, status: 'running' as const };
     },
     { request },
@@ -230,8 +237,8 @@ export function cancelExperiment(id: string): Promise<ExperimentActionResult> {
   }
   const request = `POST /api/experiments/${id}/cancel`;
   return fixture(
-    () => {
-      seedOrThrow(request, id);
+    (w) => {
+      seedOrThrow(w, request, id);
       return { id, status: 'completed' as const };
     },
     { request },
@@ -245,8 +252,8 @@ export function retryFailedRuns(id: string): Promise<ExperimentActionResult> {
   }
   const request = `POST /api/experiments/${id}/retry-failed`;
   return fixture(
-    () => {
-      seedOrThrow(request, id);
+    (w) => {
+      seedOrThrow(w, request, id);
       return { id, status: 'running' as const };
     },
     { request },
@@ -263,7 +270,10 @@ export function duplicateExperiment(id: string): Promise<NewExperimentDraft> {
     return apiSend('POST', `/experiments/${id}/duplicate`, {}, NewExperimentDraftSchema);
   }
   const request = `POST /api/experiments/${id}/duplicate`;
-  return fixture(() => duplicateDraftFixture(hasScenario, seedOrThrow(request, id)), { request });
+  return fixture(
+    (w) => w.experiments.duplicateDraftFixture(hasScenario, seedOrThrow(w, request, id)),
+    { request },
+  );
 }
 
 /**
@@ -277,5 +287,3 @@ export function experimentEventsPath(id: string): string | null {
 }
 export const EXPERIMENT_EVENT_NAMES = EXPERIMENT_EVENT_TYPES;
 export { ExperimentEventSchema };
-
-export { EXPERIMENT_IDS };

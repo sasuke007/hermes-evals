@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ScoreEvidenceView } from '@/api/types/runs';
 import { formatCount, formatUsd } from '@/lib/format';
 import { formatEventDuration, formatTokensInOut } from './inspectorFormat';
+import { JSON_MATCH_ROWS_SHOWN, jsonMatchCaption, jsonMatchRows } from './jsonMatchRows';
+import RichSentence from './RichSentence.vue';
 
 /**
  * What a scorer recorded behind a score (Phase 3 and 4: ScoreRowView.evidence), drawn in
  * the score's evidence expander (RunInspectorStates › JSON match with partial credit):
- * json_match's mismatches key by key, text_match's phrases found or not, what
+ * json_match key by key with both values (or, on a row stored before Phase 7, the
+ * mismatches' paths), text_match's phrases found or not, what
  * trajectory_match counted, the LLM judge's model, calls, tokens and grading cost, and the
  * timeline events the score points at (each one a button that opens it in the timeline).
  */
@@ -15,6 +18,14 @@ const props = defineProps<{ evidence: ScoreEvidenceView }>();
 const emit = defineEmits<{ seek: [seq: number] }>();
 
 const json = computed(() => props.evidence.jsonMatch);
+const rows = computed(() => (json.value ? jsonMatchRows(json.value) : []));
+/** A long table shows its first rows and every mismatch until Show all. */
+const showAll = ref(false);
+watch(json, () => (showAll.value = false));
+const tableRows = computed(() =>
+  showAll.value ? rows.value : rows.value.filter((r, i) => !r.match || i < JSON_MATCH_ROWS_SHOWN),
+);
+const hiddenRows = computed(() => rows.value.length - tableRows.value.length);
 const text = computed(() => props.evidence.text);
 const trajectory = computed(() => props.evidence.trajectory);
 const judge = computed(() => props.evidence.judge);
@@ -38,7 +49,37 @@ const callLog = computed(() =>
   <div class="flex flex-col gap-8 text-12 leading-18" data-testid="score-evidence">
     <template v-if="json">
       <div
-        v-if="json.mismatches.length || json.unit !== 'value'"
+        v-if="tableRows.length"
+        class="grid grid-cols-[18px_minmax(0,220px)_minmax(0,1fr)] items-baseline gap-x-10 gap-y-4"
+        data-testid="json-match-table"
+      >
+        <template v-for="(row, i) in tableRows" :key="i">
+          <span :class="row.match ? 'text-pass-text' : 'text-fail-text'" aria-hidden="true">{{
+            row.match ? '✓' : '✗'
+          }}</span>
+          <span class="font-mono break-words" :class="{ 'font-semibold': !row.match }"
+            >{{ row.label
+            }}<span class="sr-only">{{ row.match ? ' matches' : ' does not match' }}</span></span
+          >
+          <span class="break-words" :class="row.match ? 'text-text-2' : 'text-fail-text'">{{
+            row.note
+          }}</span>
+        </template>
+      </div>
+      <button
+        v-if="hiddenRows > 0"
+        type="button"
+        class="linkbtn self-start text-12"
+        data-testid="json-match-show-all"
+        @click="showAll = true"
+      >
+        Show all {{ formatCount(rows.length) }} {{ unitWord(json.unit, rows.length) }} ({{
+          formatCount(hiddenRows)
+        }}
+        more that match)
+      </button>
+      <div
+        v-if="!rows.length && (json.mismatches.length || json.unit !== 'value')"
         class="grid grid-cols-[18px_minmax(0,1fr)] items-baseline gap-x-10 gap-y-4"
       >
         <template v-for="path in json.mismatches" :key="path">
@@ -56,17 +97,9 @@ const callLog = computed(() =>
           >
         </template>
       </div>
-      <span class="text-text-3">
-        <template v-if="json.unit === 'keys'"
-          >Compared against the reference key by key. The score is the share of keys that
-          match.</template
-        >
-        <template v-else-if="json.unit === 'items'"
-          >Compared against the reference item by item. The score is the share of items that
-          match.</template
-        >
-        <template v-else>Compared with the reference as one value.</template>
-      </span>
+      <span class="text-text-3" data-testid="json-match-caption"
+        ><RichSentence :text="jsonMatchCaption(json)"
+      /></span>
     </template>
 
     <template v-if="text">

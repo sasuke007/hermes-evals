@@ -20,7 +20,10 @@
  * verifier compares with computed values, and `prompt.md` for the two tasks
  * whose prompt states the day the fixtures are built around. Written by
  * hand, and never touched here: suite.yaml, task.yaml, the other prompts,
- * the verifier scripts and disputed's rubric.
+ * the verifier scripts and disputed's rubric; but for one key of task.yaml,
+ * `self_check.answers_from_fixtures: true`, which the three tasks whose
+ * answer is picked from the ledger (overdue_list, dup_invoices, per_vendor)
+ * get (../answers-from-fixtures.ts): their task.yaml is written too.
  *
  * The base ledger (ledger.ts baseLedger): 48 invoices, six for each of
  * eight vendors, in EUR. Each task copies it and plants one trap:
@@ -62,6 +65,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { markedTaskYaml } from './answers-from-fixtures.ts';
 import {
   creditNotes,
   currencyMix,
@@ -186,6 +190,7 @@ function main(): void {
     }
     for (const [path, content] of task.files) write(folder, path, content);
     write(folder, 'reference.json', jsonFile(task.reference));
+    if (task.answersFromFixtures) write(folder, 'task.yaml', markedTaskYaml(SUITE, task.key));
   }
   write(root, MOCK_SCRIPTS, jsonFile(mockScripts(tasks)));
   if (values.traps) {

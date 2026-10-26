@@ -299,7 +299,12 @@ describe('CheckPicker', () => {
 
   it('marks and disables the current type in replace mode', () => {
     const w = mount(CheckPicker, {
-      props: { mode: 'replace', checkKey: 'answer', currentType: 'json_match', hasScripts: true },
+      props: {
+        mode: 'replace',
+        checkKey: 'answer',
+        currentType: 'json_match',
+        scripts: ['check_summary.py'],
+      },
     });
     expect(w.get('h2').text()).toBe('Change answer to…');
     expect(w.get('[data-type="json_match"]').attributes('aria-disabled')).toBe('true');

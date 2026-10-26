@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { EXPERIMENT_IDS } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import { listRuns } from '@/api/runs';
 import { setScenario } from '@/api/__tests__/scenario';
 import type { RunRow } from '@/api/types/runs';

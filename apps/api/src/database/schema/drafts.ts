@@ -28,6 +28,7 @@ import {
   HOME_SEED_PATHS,
   type DraftFileKind,
   type DraftOrigin,
+  type DraftRefusedUpload,
   type DraftSaveProgress,
   type DraftTaskState,
   type SelfCheck,
@@ -35,6 +36,7 @@ import {
 } from '@hermes-evals/shared';
 import {
   createdAt,
+  emptyJsonArray,
   emptyJsonObject,
   id,
   isRelativePath,
@@ -79,6 +81,14 @@ export const suiteDrafts = pgTable(
     description: text('description'),
     /** When the user ticked "I trust these scripts" for a zip that holds verifier scripts (R7). */
     scriptsTrustedAt: tstz('scripts_trusted_at'),
+    /**
+     * A zip draft's suite.yaml exactly as the zip held it (Phase 5b question
+     * 17, migration 0010), so the save patches only the fields the draft
+     * changed into it and its comments and folding survive (V5). Null for
+     * every other origin, whose suite.yaml is the live file (`edit`) or
+     * written anew (`empty`, `copy`), and for a zip draft made before 0010.
+     */
+    suiteYaml: storableText('suite_yaml'),
     /** Set while a save-suite-draft job runs; writes are refused until it is cleared or stale. */
     saveStartedAt: tstz('save_started_at'),
     /** The save's step as the worker reports it (SaveSteps). */
@@ -110,6 +120,7 @@ export const suiteDrafts = pgTable(
       'suite_drafts_scripts_trusted_ck',
       sql`${t.scriptsTrustedAt} is null or ${t.origin} = 'zip'`,
     ),
+    check('suite_drafts_suite_yaml_ck', sql`${t.suiteYaml} is null or ${t.origin} = 'zip'`),
     check(
       'suite_drafts_save_progress_ck',
       sql`${t.saveProgress} is null or ${t.saveStartedAt} is not null`,
@@ -156,6 +167,14 @@ export const suiteDraftTasks = pgTable(
     contentHash: text('content_hash'),
     readiness: jsonValue<TaskReadiness>('readiness'),
     selfCheck: jsonValue<DraftSelfCheckRecord>('self_check'),
+    /**
+     * Uploads refused for their size (Phase 5b question 11, migration 0010),
+     * DraftRefusedUploadSchema each, so the readiness rule `file_limits`
+     * still reports them after a reload. Nothing of the file is stored.
+     */
+    refusedUploads: jsonValue<DraftRefusedUpload[]>('refused_uploads')
+      .notNull()
+      .default(emptyJsonArray),
     revision: integer('revision').notNull().default(0),
     updatedAt: tstz('updated_at').notNull().defaultNow(),
   },
@@ -178,6 +197,7 @@ export const suiteDraftTasks = pgTable(
       sql`${t.contentHash} is null or ${isSha256(t.contentHash)}`,
     ),
     check('suite_draft_tasks_rubrics_ck', sql`jsonb_typeof(${t.rubrics}) = 'object'`),
+    check('suite_draft_tasks_refused_uploads_ck', sql`jsonb_typeof(${t.refusedUploads}) = 'array'`),
     check('suite_draft_tasks_revision_ck', sql`${t.revision} >= 0`),
   ],
 );

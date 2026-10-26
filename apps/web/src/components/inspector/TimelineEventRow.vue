@@ -10,6 +10,7 @@ import {
   networkLine,
   outputNote,
 } from './inspectorFormat';
+import { isNeutralRow, rowTitle } from './neutralRows';
 
 /**
  * One row of EventTimeline (RunInspector › Timeline; Components 2 › TimelineEventRow): the
@@ -17,8 +18,9 @@ import {
  * tag) or title and a one-line summary, an error flag and the duration. Expanding a tool call
  * shows its input and output verbatim; a text, network or platform row shows its text. A
  * connection the sandbox refused during the agent's call hangs under it as a red sub-row; a
- * refusal of Hermes's own background request is a neutral row tagged "Hermes background".
- * A cancel ends the timeline as a dashed marker.
+ * request of Hermes's own in the background is a neutral row tagged "Hermes background",
+ * refused or not, and an MCP server's 405 to the event-stream GET is a neutral "MCP event
+ * stream not offered · vendor-directory · 405". A cancel ends the timeline as a dashed marker.
  */
 const props = defineProps<{ event: TimelineEvent; open: boolean }>();
 const emit = defineEmits<{ toggle: [] }>();
@@ -26,6 +28,8 @@ const emit = defineEmits<{ toggle: [] }>();
 const look = computed(() => eventLook(props.event));
 const network = computed(() => props.event.kind === 'network' || props.event.kind === 'refused');
 const background = computed(() => props.event.origin === 'hermes-background');
+const neutral = computed(() => isNeutralRow(props.event));
+const title = computed(() => rowTitle(props.event));
 const detailId = computed(() => `ri-event-${props.event.seq}`);
 const wrapClass = computed(() => {
   if (props.event.running) return 'bg-run-soft';
@@ -70,17 +74,20 @@ const CODE =
           <span
             class="font-mono text-12 whitespace-nowrap"
             :class="network ? 'font-normal text-text-2' : 'font-semibold'"
-            >{{ event.title }}</span
+            data-testid="event-title"
+            >{{ title }}</span
           >
           <span
             v-if="background"
             class="inline-flex h-18 items-center rounded-3 bg-surface-3 px-6 text-11 whitespace-nowrap text-text-2"
             >Hermes background</span
           >
-          <span class="truncate font-mono text-12 text-text-2">{{ event.summary }}</span>
+          <span class="truncate font-mono text-12 text-text-2" data-testid="event-summary">{{
+            event.summary
+          }}</span>
         </span>
         <span class="text-12 font-semibold text-fail-text">{{
-          event.error && !background ? 'error' : ''
+          event.error && !neutral ? 'error' : ''
         }}</span>
         <span
           class="text-right font-mono text-12"

@@ -177,6 +177,13 @@ export function mentionsPresent(files: readonly MentionedFile[]): string {
 /** Shortest leaf value worth looking for: a 3-character value turns up anywhere. */
 const MIN_LEAK_CHARS = 4;
 
+/**
+ * Rule 10's passed row when task.yaml sets `self_check.answers_from_fixtures:
+ * true`: the answer is picked from the task's data, so nothing is searched.
+ */
+export const ANSWERS_FROM_FIXTURES =
+  'Not searched: `answers_from_fixtures` says the answer is picked from the workspace files.';
+
 /** `a.b`, `a[0]`, `a["Fjord Software"]`: the path of a leaf, as Task diff writes paths. */
 function childPath(path: string, key: string | number): string {
   if (typeof key === 'number') return `${path}[${key}]`;

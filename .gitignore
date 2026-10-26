@@ -5,6 +5,8 @@ coverage/
 *.log
 # Suite fixtures are data, whatever their extension (tools-v1's extract_ibans/fixtures/payouts.log).
 !/suites/**/*.log
+# So are test fixtures: Hermes's logs/mcp-stderr.log as the MCP test handler's specs read it.
+!/apps/**/__fixtures__/**/*.log
 .env
 .env.*
 !.env.example

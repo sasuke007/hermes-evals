@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import type { JsonDiffEntry, TextDiffLine } from '@/api/types/suites';
 import BaseTag from '@/components/ui/BaseTag.vue';
 import { MISSING } from '@/lib/format';
-import type { FileChange, FileRow } from './diffFiles';
+import { NOT_RECORDED, type FileChange, type FileRow } from './diffFiles';
 import { diffCaption, sideBySide } from './diffRows';
 import SideBySideDiff from './SideBySideDiff.vue';
 import { inlineJson } from './suiteFormat';
@@ -83,16 +83,25 @@ const showReference = computed(() => referenceRows.value !== null || props.refer
               >
             </td>
             <td class="font-mono text-12">{{ f.path }}</td>
-            <td class="text-right font-mono text-12" :class="{ 'text-text-3': f.size === MISSING }">
+            <td
+              class="text-right font-mono text-12"
+              :class="{ 'text-text-3': f.size === MISSING || f.size === NOT_RECORDED }"
+            >
               {{ f.size }}
             </td>
             <td>
               <span v-if="f.to" class="inline-flex items-center gap-6">
                 <template v-if="f.from">
-                  <BaseTag>{{ f.from }}</BaseTag>
+                  <span v-if="f.from === NOT_RECORDED" class="text-12 text-text-3">{{
+                    NOT_RECORDED
+                  }}</span>
+                  <BaseTag v-else>{{ f.from }}</BaseTag>
                   <span class="text-text-3" aria-hidden="true">→</span>
                 </template>
-                <BaseTag>{{ f.to }}</BaseTag>
+                <span v-if="f.to === NOT_RECORDED" class="text-12 text-text-3">{{
+                  NOT_RECORDED
+                }}</span>
+                <BaseTag v-else>{{ f.to }}</BaseTag>
               </span>
               <span v-else class="text-text-3">{{ MISSING }}</span>
             </td>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { McpServerInput } from '@hermes-evals/shared';
-import { globToRegExp, hermesMcpEntry, toolOffered } from './hermes-config.js';
+import { egressRouteHeaders, globToRegExp, hermesMcpEntry, toolOffered } from './hermes-config.js';
 
 const stdio: McpServerInput = {
   name: 'invoice-db',
@@ -51,6 +51,34 @@ describe('hermesMcpEntry', () => {
       timeout: 30,
     });
     expect(JSON.stringify(entry)).not.toContain('VENDOR_API_TOKEN');
+    // The definition's prefix is egress's to add, never the trial's (Phase 7).
+    const prefixed = hermesMcpEntry({
+      ...stdio,
+      transport: 'http',
+      command: null,
+      args: [],
+      envNames: [],
+      url: 'https://vendor-api.example.com/mcp',
+      headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Token ' }],
+      include: [],
+    });
+    expect(prefixed.headers).toEqual({ Authorization: 'Bearer ${HERMES_EVALS_ATTEMPT_TOKEN}' });
+    expect(JSON.stringify(prefixed)).not.toContain('Token ');
+  });
+});
+
+describe('egressRouteHeaders (Phase 7)', () => {
+  it('gives egress each header, its variable and its prefix when there is one', () => {
+    expect(
+      egressRouteHeaders([
+        { header: 'Authorization', env: 'VENDOR_DIRECTORY_TOKEN', prefix: 'Bearer ' },
+        { header: 'X-Tenant', env: 'VENDOR_TENANT' },
+      ]),
+    ).toEqual([
+      { header: 'Authorization', env: 'VENDOR_DIRECTORY_TOKEN', prefix: 'Bearer ' },
+      { header: 'X-Tenant', env: 'VENDOR_TENANT' },
+    ]);
+    expect(egressRouteHeaders([{ header: 'X-Key', env: 'K' }])[0]).not.toHaveProperty('prefix');
   });
 });
 

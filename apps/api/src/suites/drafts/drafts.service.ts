@@ -253,6 +253,7 @@ export class SuiteDraftsService implements DraftImportPort {
         origin: 'zip',
         versionLabel: draft.versionLabel,
         description: draft.description,
+        suiteYaml: draft.suiteYaml,
         scriptsTrustedAt: draft.scriptsTrusted ? new Date() : null,
       },
       async (ctx) => {

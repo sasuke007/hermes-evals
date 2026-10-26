@@ -17,14 +17,14 @@ Two rules for the whole walk:
    scripts/flows-setup.sh
    ```
 
-   It writes the suite `suites/zz-smoke-flows-<stamp>` (seven tasks: `north`, `south`, `east`, `west`, `open_eur`, `cobalt`, `late_fees`), the skill zip Flow A uploads, and `mock-scripts.json` for the mock, and prints `names.txt`: the suite, the skill zip's path, the three configuration names, the MCP server name and its tool. It calls no API.
+   It writes the suite `suites/zz-smoke-flows-<stamp>` (seven tasks: `north`, `south`, `east`, `west`, `open_eur`, `cobalt`, `late_fees`), the skill zip Flow A uploads, and `mock-scripts.json` for the mock, and prints `names.txt`: the suite, the skill zip's path, the three configuration names, the MCP server name and its tools. It calls no API.
 
 2. Make sure `.env` has `INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv` (from `.env.example`): the sample MCP server in Flow C reads its invoices from it.
 
-3. Start the stack with the mock and its scripts (Compose reads `MOCK_SCRIPTS` from the shell before `.env`, so no file changes):
+3. Start the stack with the mock and its scripts. Compose mounts the file `MOCK_SCRIPTS_FILE` names into the mock and reads the variable from the shell before `.env`, so no file changes. `<out>` is `data/flows-<stamp>` in the repository, a path Docker can mount on Colima and Docker Desktop:
 
    ```bash
-   MOCK_SCRIPTS="$(cat <out>/mock-scripts.json)" docker compose --profile test up -d
+   MOCK_SCRIPTS_FILE=<out>/mock-scripts.json docker compose --profile test up -d
    ```
 
    The worker loads the new suite at start. If the stack was already up, use Suites › Reload all from disk instead.
@@ -39,7 +39,7 @@ Board FlowA. Proves: a skill upload, two configurations that differ only in that
 
 | #   | Where                | Do                                                                                                                                                                                    | Expect                                                                                                                                                                                                                                                                                                     |
 | --- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | System               | Read the page.                                                                                                                                                                        | Model access lists every provider ("Custom endpoint" needs no key for the mock); Sandbox "Isolation proven · 15 of 15 checks"; Hermes `hermes-agent v0.22.4 @ 4d04303` (7 characters); one worker online. The board starts from an empty install with Nous connected; skip that part.                      |
+| 1   | System               | Read the page.                                                                                                                                                                        | Model access lists every provider ("Custom endpoint" needs no key for the mock); Sandbox "Isolation proven · 16 of 16 checks"; Hermes `hermes-agent v0.22.4 @ 4d04303` (7 characters); one worker online. The board starts from an empty install with Nous connected; skip that part.                      |
 | 2   | Resources › Skills   | Upload skill, choose the setup's zip.                                                                                                                                                 | "Step 2 of 2 · review", "Valid skill · nothing stored yet", SKILL.md, name, version 1.0.0, description, files, content hash.                                                                                                                                                                               |
 | 3   | Upload dialog        | Confirm upload.                                                                                                                                                                       | The dialog closes; the new row is scrolled into view and flashes for 2 s (rows are ordered by name).                                                                                                                                                                                                       |
 | 4   | Configurations › New | Name `<stamp>-baseline`, model `mock/scripted`, provider `custom`, base URL `http://mock-model:8090/v1`, toolsets file and terminal, memory off, max turns 10, time budget 120. Save. | The detail "… v1 · latest", "Saved as version 1.", provider `custom http://mock-model:8090/v1`, "No added skills".                                                                                                                                                                                         |
@@ -129,6 +129,7 @@ curl -s -X POST -H 'Content-Type: application/json' -H 'X-Requested-With: flows'
   --data '{"path":"./suites/zz-smoke-flows-<stamp>"}' http://localhost:3000/api/suites/reload
 curl -s -X POST -H 'Content-Type: application/json' -H 'X-Requested-With: flows' \
   --data '{"path":"./suites/zz-smoke-flow-e-<stamp>"}' http://localhost:3000/api/suites/reload
-docker compose up -d                                  # from a shell without MOCK_SCRIPTS
+docker compose up -d                                  # from a shell without MOCK_SCRIPTS_FILE
 docker compose --profile test rm -sf mock-model
+rm -rf data/flows-<stamp>
 ```

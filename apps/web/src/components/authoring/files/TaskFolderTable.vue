@@ -15,8 +15,9 @@ import { folderActions, folderDetail, folderTotal, type FileAction } from './fil
  * folder grouped by who can see it, Visible to the agent, Hidden from the agent (hatched
  * rows) and Other files, so the isolation boundary reads at a glance. Each row has its
  * chip, size, short hash and the actions its kind allows; a verifier script is "Hidden ·
- * runs in the worker · edit on disk" with View and Copy path. The board's "Download task
- * folder (.zip)" is left out: no endpoint serves one task's folder.
+ * runs in the worker · edit on disk" with View and Copy path. A text a zip held at over
+ * 1 MiB is an Other file marked read-only, with Copy path only (Phase 5b question 18). The
+ * board's "Download task folder (.zip)" is left out: no endpoint serves one task's folder.
  */
 const props = withDefaults(
   defineProps<{
@@ -133,6 +134,9 @@ const HATCH =
                     v-else-if="file.visibility === 'hidden'"
                     class="inline-flex h-20 items-center gap-5 rounded-3 bg-text px-7 text-12 font-medium whitespace-nowrap text-bg"
                     ><EyeIcon hidden :size="12" />Hidden</span
+                  >
+                  <span v-if="file.tooLargeToEdit" class="tag" data-testid="read-only"
+                    >read-only</span
                   >
                   <span v-if="file.visibility === 'other'" class="text-12 text-text-3">{{
                     folderDetail(file)

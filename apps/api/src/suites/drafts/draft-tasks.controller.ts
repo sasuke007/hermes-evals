@@ -56,6 +56,7 @@ import { streamFailure } from '../../resources/skills/http.js';
 import { attachmentDisposition, contentTypeFor } from '../views/download.js';
 import { DraftFilesService } from './draft-files.service.js';
 import { DraftTasksService } from './draft-tasks.service.js';
+import { RecordRefusedUpload } from './record-refused-upload.js';
 
 const folderPipe = new ZodValidationPipe(SuiteFolderSchema);
 const keyPipe = new ZodValidationPipe(DraftTaskKeySchema);
@@ -172,10 +173,14 @@ export class DraftTasksController {
   }
 
   @Post(':key/files')
-  @UseInterceptors(SingleFileUpload('file', AUTHORING_LIMITS.suiteMaxFileBytes))
+  // Outside the upload's own interceptor, so it sees the 413 and keeps the refusal on the task.
+  @UseInterceptors(
+    RecordRefusedUpload,
+    SingleFileUpload('file', AUTHORING_LIMITS.suiteMaxFileBytes),
+  )
   @ApiFileUpload(
     'file',
-    'A workspace, expected or home file, at most 25 MB; fields `kind` and `path`',
+    'A workspace, expected or home file, at most 25 MB; fields `kind` and `path`, sent before the file. A file over the limit answers 413 and is kept on the task as a refused upload, which readiness reports',
   )
   @ApiJsonResponse(DraftTaskDetailSchema, { status: 201, description: 'The task with the file' })
   upload(

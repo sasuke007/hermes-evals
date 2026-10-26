@@ -189,6 +189,7 @@ function storeTask(
       restoredFrom,
       removed,
       selfCheck,
+      refusedUploads: task.refusedUploads,
       readBlob: read,
       now: () => now,
     });

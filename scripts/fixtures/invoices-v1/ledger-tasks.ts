@@ -78,6 +78,7 @@ export function overdueList(base: readonly Invoice[]): Task {
     phrase: 'Which invoices are overdue today?',
     reads: ['invoices.csv'],
     baselineTrapped: false,
+    answersFromFixtures: true,
   };
 }
 
@@ -125,6 +126,7 @@ export function dupInvoices(base: readonly Invoice[]): Task {
     phrase: 'Which invoices are the same bill as another one?',
     reads: ['invoices.csv'],
     baselineTrapped: true,
+    answersFromFixtures: true,
   };
 }
 
@@ -169,6 +171,7 @@ export function perVendor(base: readonly Invoice[]): Task {
     phrase: 'How much do we owe each vendor on its unpaid invoices?',
     reads: ['invoices.csv'],
     baselineTrapped: true,
+    answersFromFixtures: true,
   };
 }
 

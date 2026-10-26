@@ -2,7 +2,7 @@
 
 This document walks through everything a user can do in the UI. For each feature it shows what the user does, which API calls the web app makes, what the API writes to Postgres, which jobs it queues, and what the worker, docker-guard, egress and the trial container do with them.
 
-It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of truth), the design canvas, and the code as it stands on 26 Oct 2026 (Phase 5b). Where those three disagree, or where something is not decided, the flow says so and the point is collected in [section 19, Open points](#19-open-points-found-while-writing-this).
+It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of truth), the design canvas, and the code as it stands on 27 Oct 2026 (Phase 7). Where those three disagree, or where something is not decided, the flow says so and the point is collected in [section 19, Open points](#19-open-points-found-while-writing-this).
 
 ## How to read this
 
@@ -332,13 +332,13 @@ Notes:
 
 ## 5. System page
 
-Status: **Built** against the API (Phase 5; `docs/phases/phase-5.md`): model access, secrets, sandbox and workers. The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1).
+Status: **Built** against the API (Phase 5; `docs/phases/phase-5.md`): model access, secrets, sandbox and workers. The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1); since Phase 7 it has a 16th check, a verifier container (`docs/phases/phase-7.md`).
 
 The page has four sections:
 
 - **Model access**: one row per provider `GET /providers` lists, with the configurations that use each.
 - **Secrets**: each name, set or not set, and the MCP servers that read it (`GET /resources/secrets`).
-- **Sandbox**: whether isolation is proven, with the 15 checks.
+- **Sandbox**: whether isolation is proven, with the 16 checks.
 - **Workers**: one row per worker.
 
 ### 5.1 Worker start and the isolation proof
@@ -372,6 +372,9 @@ sequenceDiagram
   T-->>WK: 15 check results on stdout
   WK->>G: stop, remove probe
   WK->>E: remove probe token
+  WK->>G: create + start one verifier container, as scoring does (the 16th check, Phase 7)
+  G->>G: check it against the verifier policy: network none, read-only, uid 10000
+  Note over WK,G: its probe scores 1 only with no route out, uid 10000 and inputs it cannot write
   alt every check passed
     WK->>WK: state isolated, start taking execute-run jobs
   else any check failed
@@ -387,7 +390,7 @@ sequenceDiagram
   end
 ```
 
-What the user sees: "Isolation proven · 15 of 15 checks · checked 2 min ago at worker start", the Hermes revision and image digest, and a collapsible list of the 15 checks. If a check fails, a red banner names it, and New experiment says that runs cannot start until it passes.
+What the user sees: "Isolation proven · 16 of 16 checks · checked 2 min ago at worker start", the Hermes revision and image digest, and a collapsible list of the 16 checks; the last, "a verifier container starts through docker-guard", reads "no network, uid 10000, inputs read-only · 0.6 s". If a check fails, a red banner names it, and New experiment says that runs cannot start until it passes.
 
 The same checks can be run by hand: `docker compose run --rm --no-deps worker node dist/sandbox-cli.js selftest`.
 
@@ -524,7 +527,7 @@ flowchart TD
 
 ## 8. Suites and tasks
 
-Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5); home seeds, the expected home and home checks in the format, the loader and Task detail, and all 12 `invoices-v1` tasks (Phase 6; `docs/phases/phase-6.md`); the four capability suites `mcp-v1`, `memory-v1`, `knowledge-v1` and `tools-v1`, so the suite list holds five suites (Phase 6b; `docs/phases/phase-6b.md`); authoring in the UI, Reload all as one job per directory, and verifier scripts in their own containers (Phase 5b; `docs/phases/phase-5b.md`).
+Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5); home seeds, the expected home and home checks in the format, the loader and Task detail, and all 12 `invoices-v1` tasks (Phase 6; `docs/phases/phase-6.md`); the four capability suites `mcp-v1`, `memory-v1`, `knowledge-v1` and `tools-v1`, so the suite list holds five suites (Phase 6b; `docs/phases/phase-6b.md`); authoring in the UI, Reload all as one job per directory, and verifier scripts in their own containers (Phase 5b; `docs/phases/phase-5b.md`); the authoring follow-ups of Phase 5b (Phase 7; `docs/phases/phase-7.md`).
 
 Suites are folders under `./suites`, edited on disk with any editor or in the web app (sections 8.3 to 8.11). It shows what was loaded, whether every task passes its own self-check, and every version. The repository ships five: `invoices-v1` (12 tasks), `mcp-v1`, `memory-v1` and `knowledge-v1` (8 each) and `tools-v1` (6), each measuring one thing a configuration can vary. Each `suite.yaml` description names the experiment that measures it (Suite detail shows it), and the skills and documents its arms need are in `samples/` (plan 18.3). Since Phase 5b suites can be created and edited in the UI: edits go into a draft, and saving writes the same files and loads them as a reload does (plan section 4.6).
 
@@ -590,11 +593,13 @@ flowchart TD
   D["Directory vanished"] --> MS["outcome missing: releases the suite name"]
 ```
 
+A folder read without its suite.yaml is read once more, after 2 s and under the same lock, before the load records it (Phase 7): on Colima and Docker Desktop the VM's file sharing can show a just-deleted folder for about a second, which used to record "suite.yaml not found" until the next reload. A folder still gone then reads `missing`.
+
 After a load, **nothing reads `./suites` again**. Trials, verifiers, judges and the fixture endpoint read blobs by hash. So an edit on disk can never change an experiment that already exists.
 
 ### 8.2 Browsing suites and tasks
 
-Status: **Built** (the API in Phase 1, the pages in Phase 5); since Phase 5b the list's last change is the one that created the version shown, task diffs list the root files' sizes and hashes and line diffs of small text files, and Task detail lists the experiments of every version of the task.
+Status: **Built** (the API in Phase 1, the pages in Phase 5); since Phase 5b the list's last change is the one that created the version shown, task diffs list the root files' sizes and hashes and line diffs of small text files, and Task detail lists the experiments of every version of the task; since Phase 7 a version loaded before Phase 5b, which has no record of its reference.json, shows "not recorded" for that file's size and hash.
 
 | User action                           | Call                                               | What the API reads                                                                                                                                                                             |
 | ------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -663,22 +668,22 @@ flowchart TD
 
 ### 8.4 Authoring: drafts and the task editor
 
-Status: **Built** (Phase 5b; boards SA.3 to SA.8 and SA.13).
+Status: **Built** (Phase 5b; boards SA.3 to SA.8 and SA.13); refused uploads kept in readiness, texts too large to edit, `answers_from_fixtures` and the script-first CheckPicker since Phase 7.
 
 A draft records its base version and every file of the folder: the texts the forms edit verbatim (`task.yaml`, `prompt.md`, `reference.json`, rubrics), every other file as a blob with its kind (fixture, expected, expected_home, home_seed, verifier, other). A draft of a folder on disk is built from its current version in the database (the API has no suites mount), with every task `unchanged`.
 
-| User action                                                 | Call                                                             | What happens                                                                                                                                     |
-| ----------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Suite detail › Add task, Edit details, a row's Edit         | `POST /suites/:suite/draft` (201 new, 200 the open one)          | a draft on the folder's current version, every task `unchanged`; the draft page is `/suites/:suite/draft`                                        |
-| Add task › Blank task, Duplicate a task…, copy from a suite | `POST /suites/:suite/draft/tasks`                                | new draft tasks; a duplicated or copied task carries its files' blobs (a copied verifier check its `verify/` folder)                             |
-| Edit details (label, description), drag a row               | `PATCH /suites/:suite/draft` (Edit details debounced 500 ms)     | the label, the description, or the order written to suite.yaml at save                                                                           |
-| Edit the Form, prompt, reference or task.yaml tab           | `PUT /suites/:suite/draft/tasks/:key` (debounced 400 ms)         | stored at once; task.yaml is patched through the `yaml` Document API, so comments and formatting survive; readiness runs again                   |
-| Drop files on Workspace, Expected or Home files             | `POST …/tasks/:key/files` (multipart `file`, `kind`, `path`)     | the file goes to the blob store first (temp file, fsync, rename), then the draft names it; over 25 MB is refused before sending (413 in the API) |
-| Rename, move or delete a file                               | `PATCH` / `DELETE …/tasks/:key/files/:path`                      | any path under `verify/` is refused (400): scripts are code, edited on disk or brought by a trusted zip (section 8.10)                           |
-| View a verifier script                                      | `GET …/tasks/:key/files/:path`                                   | the source, read-only, with its path, hash and Copy path                                                                                         |
-| Try it on an answer check                                   | `POST …/tasks/:key/try` `{ key, reply }`                         | extraction and that check's scorer, in the API, on the pasted reply or the reference; nothing is stored and no model is called                   |
-| Remove a task, Undo, Revert                                 | `DELETE …/tasks/:key`, `PUT { removed: false }`, `POST …/revert` | a base task is marked removed (its folder goes at save), an added one dropped; Revert puts the base version's files back                         |
-| Discard the draft                                           | `DELETE /suites/:suite/draft`                                    | 204, after "Discard this draft? Nothing on disk changes."; nothing on disk changes                                                               |
+| User action                                                 | Call                                                             | What happens                                                                                                                                                                                                                   |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Suite detail › Add task, Edit details, a row's Edit         | `POST /suites/:suite/draft` (201 new, 200 the open one)          | a draft on the folder's current version, every task `unchanged`; the draft page is `/suites/:suite/draft`                                                                                                                      |
+| Add task › Blank task, Duplicate a task…, copy from a suite | `POST /suites/:suite/draft/tasks`                                | new draft tasks; a duplicated or copied task carries its files' blobs (a copied verifier check its `verify/` folder)                                                                                                           |
+| Edit details (label, description), drag a row               | `PATCH /suites/:suite/draft` (Edit details debounced 500 ms)     | the label, the description, or the order written to suite.yaml at save                                                                                                                                                         |
+| Edit the Form, prompt, reference or task.yaml tab           | `PUT /suites/:suite/draft/tasks/:key` (debounced 400 ms)         | stored at once; task.yaml is patched through the `yaml` Document API, so comments and formatting survive; readiness runs again                                                                                                 |
+| Drop files on Workspace, Expected or Home files             | `POST …/tasks/:key/files` (multipart `file`, `kind`, `path`)     | the file goes to the blob store first (temp file, fsync, rename), then the draft names it; over 25 MB the web sends only its first 25 MB and one byte, the API answers 413 and records the refusal on the draft task (Phase 7) |
+| Rename, move or delete a file                               | `PATCH` / `DELETE …/tasks/:key/files/:path`                      | any path under `verify/` is refused (400): scripts are code, edited on disk or brought by a trusted zip (section 8.10)                                                                                                         |
+| View a verifier script                                      | `GET …/tasks/:key/files/:path`                                   | the source, read-only, with its path, hash and Copy path                                                                                                                                                                       |
+| Try it on an answer check                                   | `POST …/tasks/:key/try` `{ key, reply }`                         | extraction and that check's scorer, in the API, on the pasted reply or the reference; nothing is stored and no model is called                                                                                                 |
+| Remove a task, Undo, Revert                                 | `DELETE …/tasks/:key`, `PUT { removed: false }`, `POST …/revert` | a base task is marked removed (its folder goes at save), an added one dropped; Revert puts the base version's files back                                                                                                       |
+| Discard the draft                                           | `DELETE /suites/:suite/draft`                                    | 204, after "Discard this draft? Nothing on disk changes."; nothing on disk changes                                                                                                                                             |
 
 ```mermaid
 sequenceDiagram
@@ -707,6 +712,13 @@ sequenceDiagram
 The form and task.yaml are never sent together, so each tab follows the other; a task.yaml the form cannot hold (an unknown key, a value of the wrong type, two primaries) locks the form under a banner, and a form sent meanwhile answers 409. A rename is sent only once the key is a free folder name. A failed write is kept, with "draft · not saved" and Try again. Leaving the editor while an upload runs asks first ("1 upload is still running. Leave anyway?").
 
 The readiness rules, in the order the panel lists them: key and summary; task.yaml is valid; one primary check; check settings; reference.json parses; every check path resolves in the reference; file checks have an expected workspace (and home checks an expected home); the prompt asks for the answer block; files the prompt mentions exist; no text fixture holds a reference value of 4 or more characters; files within the limits; the self-check; the negative control. Problems never block saving: a task with problems is saved as invalid, as on disk.
+
+Since Phase 7:
+
+- **An upload refused for its size** stays on the draft task, so "Files are within limits" reports "`ledger-2025.parquet` is over 25 MB." after a reload too. It goes when a file is stored or moved to that path, on Dismiss (`DELETE …/files/:path`, which answers 200 even with no file there) and on Revert; Review and save does not count a task whose only problem it is as invalid.
+- **A task whose answer is picked from its own data** (an invoice number from `invoices.csv`) can say so: the toggle "The answer is picked from these files" under the workspace files, shown while the leak warning is up or the setting is on, writes `self_check.answers_from_fixtures: true`, and the leak rule then passes with "Not searched: `answers_from_fixtures` says the answer is picked from the workspace files." The seven committed tasks the rule flagged carry it.
+- **A text over 1 MiB from a zip** (task.yaml, prompt.md, reference.json) stays a file the editor shows read-only: "Over 1 MiB of text, too large to edit here · read-only, kept as is".
+- **Add check › Verifier script asks for its script first** (SA.7): the card holds a Script select of the files under `verify/`, starting on the task's only Python file, or empty; picking the card with none chosen says "Choose the script first." and focuses the select.
 
 ### 8.5 Authoring: a self-check in the worker
 
@@ -765,7 +777,7 @@ sequenceDiagram
 
 Status: **Built** (Phase 5b; boards SA.11, SaveSteps and Flow E step 7).
 
-**Review and save** (`/suites/:suite/save`, `GET /suites/:suite/draft/review`) lists each change with its diff, every file the save writes, and each changed task's readiness; tasks with problems are named ("Save with 1 invalid task?"). **Save as vN** sends `save-suite-draft` and waits. The draft is claimed while it runs: other writes answer 409 and the page shows the steps (staging, loading, self-checks, moving).
+**Review and save** (`/suites/:suite/save`, `GET /suites/:suite/draft/review`) lists each change with its diff, every file the save writes, and each changed task's readiness; tasks with problems are named ("Save with 1 invalid task?"); a task whose only problem is an upload refused for its size is not counted, since no file is left behind (Phase 7). **Save as vN** sends `save-suite-draft` and waits. The draft is claimed while it runs: other writes answer 409 and the page shows the steps (staging, loading, self-checks, moving).
 
 ```mermaid
 sequenceDiagram
@@ -806,13 +818,13 @@ sequenceDiagram
   A-->>W: "v7 saved · 1 added · 12 tasks, 12 valid", and New experiment on v7
 ```
 
-What staging copies: a file is the draft's to decide when the draft holds it or the base version stored it; every other entry of the live folder (`verify/`, a README, notes, hidden files, links) is copied untouched. A save that fails after the first rename puts the live folder back. A save that outlasts `SUITE_RELOAD_TIMEOUT_S` answers 504 and goes on; the draft page shows its steps until it ends.
+What staging copies: a file is the draft's to decide when the draft holds it or the base version stored it; every other entry of the live folder (`verify/`, a README, notes, hidden files, links) is copied untouched. Since Phase 7 the staging folder is fsynced, every file and then every folder, before the first rename, and `SUITES_DIR` after the second, so a saved version survives a crash of the machine. A save that fails after the first rename puts the live folder back. A save that outlasts `SUITE_RELOAD_TIMEOUT_S` answers 504 and goes on; the draft page shows its steps until it ends.
 
 ### 8.7 Authoring: a conflict, and Combine
 
 Status: **Built** (Phase 5b; board SA.12).
 
-A draft on v6 can find the folder moved on: a reload created v7 (shown as soon as the draft opens), or files were edited on disk and not reloaded (found by the save, which loads them as v7 first). The draft bar turns amber, names the new version, when it was loaded, its changes and the tasks both sides changed, and asks for one choice per such task.
+A draft on v6 can find the folder moved on: a reload created v7 (shown as soon as the draft opens), or files were edited on disk and not reloaded (found by the save, which loads them as v7 first). The draft bar turns amber, names the new version, when it was loaded, its changes and the tasks both sides changed, and asks for one choice per such task. Since Phase 7 a task both sides agree on is not asked about: one both removed, or one both changed to the same bytes under the same key; a rename made the same way on both sides still asks.
 
 ```mermaid
 flowchart TD
@@ -857,7 +869,7 @@ Status: **Built** (Phase 5b; boards SA.3 and SA.10).
 
 ### 8.10 Authoring: a suite from a .zip
 
-Status: **Built** (Phase 5b; board SA.10, plan R7).
+Status: **Built** (Phase 5b; board SA.10, plan R7); the root-files note, the scripts panel's two counts, a zip's suite.yaml kept and large texts read-only since Phase 7.
 
 ```mermaid
 sequenceDiagram
@@ -872,7 +884,7 @@ sequenceDiagram
   A->>A: index checks before reading, no links, absolute paths or .., at most 20,000 entries,<br/>no file over 25 MB, depth 12, no paths that differ only in case, nothing encrypted
   A->>A: suite.yaml, folder names and every task.yaml checked with the loader's rules
   A->>B: stream the files into the blob store, analyse each task, no code runs
-  A-->>W: the suite, its tasks (worker-only checks "self-check not run"),<br/>every verify/ file with path, size and SHA-256, a free name if the name is taken, and a token
+  A-->>W: the suite, its tasks (worker-only checks "self-check not run"),<br/>every verify/ file with path, size, SHA-256 and whether a check runs it,<br/>the root files other than suite.yaml, a free name if the name is taken, and a token
   W->>W: "This suite contains code", Import disabled until "I trust these scripts" is ticked
   U->>W: ticks, Import as a draft
   W->>A: POST /suites/import with the token, the name and trustScripts true
@@ -885,6 +897,8 @@ sequenceDiagram
 ```
 
 A refused zip shows its reasons in the board's words, such as "The zip has a symbolic link at …", "… points outside the suite.", "suite.yaml: version_label is required." or "Over 20,000 files.". A taken name offers Import as a new suite named `<name>-copy`, or Open the existing suite. A zip without scripts shows no panel. Copy of a suite needs no tick: its scripts are already on disk.
+
+Since Phase 7: the panel counts "3 files under `verify/` · 2 scripts a check runs" and marks each row "run by a check" or "file"; files at the zip's root other than suite.yaml are named in a note ("`README.md` at the suite root is not imported: a draft keeps `suite.yaml` and the task folders only."); the draft keeps the zip's suite.yaml text, and the save patches only the name, label, description and task order into it, so its comments and folding survive; and a task text over 1 MiB stays a read-only file (section 8.4).
 
 ### 8.11 Flow E: from nothing to a first experiment
 
@@ -931,7 +945,7 @@ The experiment on v1 runs like any other: it is pinned to v1, and a later save c
 
 ## 9. Resources: skills, documents, MCP servers, secrets
 
-Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2); the four tabs against the real API (Phase 5); deleting an unused skill or document, and a passing Test start of an unsaved MCP form kept when it is saved (Phase 5b).
+Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2); the four tabs against the real API (Phase 5); deleting an unused skill or document, and a passing Test start of an unsaved MCP form kept when it is saved (Phase 5b); Delete disabled while any configuration version names the skill or document, and an http header pair's prefix (Phase 7).
 
 Resources are the building blocks configurations point at. Every resource version is immutable once a configuration uses it.
 
@@ -970,7 +984,7 @@ Skill detail (`GET /resources/skills/:id/files/:path`, `GET /resources/skills/:i
 
 `POST /resources/documents` (50 MB cap) stores the content in the blob store by sha256 and inserts a `documents` row. Documents attach to configurations only. At run time they are copied into the workspace under `docs/`, and the artifact list later marks them unchanged or modified.
 
-**Delete** (Phase 5b). `DELETE /resources/skills/:id` and `DELETE /resources/documents/:id` remove a skill or document that no configuration version names, and answer 204. One that a version names stays, because a configuration version keeps what it was saved with: 409 with the configurations in `usedBy`, which the confirmation quotes. Migration 0009's guard catches a configuration saved between the check and the delete, so both never commit. The skill tree and the blob stay on disk (content may be shared).
+**Delete** (Phase 5b). `DELETE /resources/skills/:id` and `DELETE /resources/documents/:id` remove a skill or document that no configuration version names, and answer 204. One that a version names stays, because a configuration version keeps what it was saved with: 409 with the configurations in `usedBy`, which the confirmation quotes. Migration 0009's guard catches a configuration saved between the check and the delete, so both never commit. The skill tree and the blob stay on disk (content may be shared). Since Phase 7 each skill and document row carries `inUse` and `inUseBy`, the configurations any of whose versions name it, so Delete is disabled before it is pressed, with "Part of a saved version of with-skill. A configuration version keeps the skill it was saved with, so it cannot be deleted."; a document kept only by an older version says so in its Attached to cell ("kept by an older version of …").
 
 ### 9.3 Define and test an MCP server
 
@@ -987,7 +1001,7 @@ sequenceDiagram
   participant T as Throwaway trial
   participant E as Egress
 
-  U->>W: name 'invoice-db', stdio: command + env NAMES<br/>or http: URL + header ← variable NAME pairs (never values)
+  U->>W: name 'invoice-db', stdio: command + env NAMES<br/>or http: URL + header ← variable NAME pairs, each with an optional prefix (never values)
   W->>A: POST /resources/mcp-servers
   alt a name is a platform variable or credential, or used by both transports
     A-->>W: 400, issue on the env names field:<br/>'DATABASE_URL is a platform variable or credential, it never enters a trial'
@@ -1025,11 +1039,13 @@ Editing rules:
 
 The form says, per transport, what the agent can read. Under a stdio server's environment variables, an amber caution: "This server runs inside each run's container. The agent can read these values. Use scoped or throwaway values." Under an http server's header names: "Egress adds these headers to each request on the way to the server. The run never sees their values." Section 9.4 explains why.
 
+**A header's prefix** (Phase 7). A pair is a header name, an optional prefix and a variable name: `Authorization`, `Bearer `, `VENDOR_DIRECTORY_TOKEN`. Egress sends the prefix and then the variable's value, so `.env` holds the raw key; typing `Bearer` stores it with its space. The prefix is not a secret: the pair reads `"Bearer " + VENDOR_DIRECTORY_TOKEN` and the server's row `Authorization ("Bearer " + value)`. It is part of the definition, so adding one to a version a configuration uses makes the next version; a pair without one hashes as before.
+
 ### 9.4 Secrets
 
 Status: **Built**: the endpoint and presence reporting (Phase 1), the egress MCP gateway that adds header values (Phase 2, spike I15 passed), and the Secrets tab and the System page's secrets against the real API (Phase 5).
 
-`GET /resources/secrets` lists every name that MCP definitions reference: set or not set, its source, what references it, its exposure, and when it was last checked. Values are never shown, stored, typed or sent to the browser. A value is set by adding it to `.env` and restarting the service that reads it (`docker compose up -d egress worker`). Egress sends an http header variable's value unchanged as the whole header, so a Bearer API needs `Bearer <key>` in the variable; for the sample `vendor-directory`, `.env` holds only the token and Compose writes the prefix for egress (Phase 6). A name that is not set also blocks Launch for the configurations that use it (section 11.1).
+`GET /resources/secrets` lists every name that MCP definitions reference: set or not set, its source, what references it, its exposure, and when it was last checked. Values are never shown, stored, typed or sent to the browser. A value is set by adding it to `.env` and restarting the service that reads it (`docker compose up -d egress worker`). Egress sends an http header variable's value after the pair's prefix, if it has one (Phase 7), so `.env` holds the raw key; for the sample `vendor-directory`, `.env` holds the token, Compose gives it to egress as it is, and the definition's prefix is `Bearer `. Before Phase 7 Compose wrote the prefix into the variable for egress; a definition saved then has no prefix and gets 401 until it is saved with one (the README's upgrade section). A name that is not set also blocks Launch for the configurations that use it (section 11.1).
 
 How a value reaches a run depends on the server's transport:
 
@@ -1700,7 +1716,7 @@ sequenceDiagram
 
 ## 18. Run inspector
 
-Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3); the Memory group of home artifacts and the launch record's skill loading, home seeds and background review (Phase 6; `docs/phases/phase-6.md`).
+Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3); the Memory group of home artifacts and the launch record's skill loading, home seeds and background review (Phase 6; `docs/phases/phase-6.md`); the Full log, `json_match` evidence key by key, neutral rows for Hermes's background requests and the 405 event-stream answer, and MCP results' 20,000-character window (Phase 7; `docs/phases/phase-7.md`).
 
 A right-hand drawer over the experiment, 75% of the window, with its own route (`/experiments/:id/runs/:runId`, or `?run=` from the comparison). Esc closes it back to where it was opened.
 
@@ -1726,6 +1742,12 @@ sequenceDiagram
   W->>A: GET /runs/:id/artifacts/:artifactId/content
   A->>B: blob by hash
   A-->>W: content (CSV and text previews)
+  opt an execution error: Full log (Phase 7)
+    W->>A: GET /runs/:id/attempts/:n/stderr
+    A->>DB: the attempt's collected event, its stderr_log
+    A->>B: the redacted end of stderr.log the worker stored, up to 1 MiB
+    A-->>W: the log in place, with Download and Tail, or 404 for an attempt that ended before Phase 7
+  end
   U->>W: A/B: same task, other configuration
   W->>A: GET /runs/:id/counterpart?version=
   A-->>W: matching run (same task, repetition), or why there is none
@@ -1741,8 +1763,8 @@ The five sections and what each proves:
 
 | Section        | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | From                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| Outcome        | run status, each score key with expected vs observed and comment, or the execution error banner with category and stderr tail                                                                                                                                                                                                                                                                                                                                                                                                                                      | `scores`, `attempts`                        |
-| Timeline       | every event in order with a scrubber: model text, tool calls, network rows (allowed, refused by sandbox, Hermes background call)                                                                                                                                                                                                                                                                                                                                                                                                                                   | `run_events`                                |
+| Outcome        | run status, each score key with expected vs observed and comment (a `json_match` key as a table, key by key or item by item, "Compared at `<path>` against the reference, key by key."), or the execution error banner with category, stderr tail and **Full log** (the whole log, or its last 1 MB, in place)                                                                                                                                                                                                                                                     | `scores`, `attempts`                        |
+| Timeline       | every event in order with a scrubber: model text, tool calls (an MCP tool's result keeps 20,000 characters, any other's 5,000; Hermes's own client already cuts each at 5,000, which the row's note says), network rows (allowed, refused by sandbox; Hermes's background requests and an MCP server's 405 "MCP event stream not offered" drawn neutral, never as errors)                                                                                                                                                                                          | `run_events`                                |
 | Final response | the recorded final text with the extracted JSON block highlighted, the parsed value, and the reference beside it                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `attempts.final_text`, `evaluations.answer` |
 | Artifacts      | what the agent left in the workspace, labelled by origin, with previews; then a **Memory** group for the home's `memories/` (`home/memories/USER.md` · home seed · modified, or written by agent), shown when the run has home files, a changed file's preview open; the memory tool's empty `*.lock` files are not collected (Phase 6b)                                                                                                                                                                                                                           | `artifacts`, blobs                          |
 | Launch record  | the container (image + digest, mounts, network, limits), the exact Hermes command, `config.yaml`, inputs with hashes; each MCP secret as `<from env NAME>` with its exposure; **Skill loading** (when the run had skills: preload with `-s`, or on demand through the `skills` toolset), **Home seeds** (each `memories/X.md → /opt/data/memories/X.md` with its hash, or that `memories/` started empty) and **Background review** (`memory.nudge_interval` and `skills.creation_nudge_interval`, written the same in every run; a one-shot run starts no review) | `attempts.launch_record`                    |

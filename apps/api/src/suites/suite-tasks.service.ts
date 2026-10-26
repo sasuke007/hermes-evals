@@ -214,7 +214,7 @@ export class SuiteTasksService {
    */
   private async diffTexts(changes: readonly TaskFileChange[]): Promise<Map<string, string | null>> {
     const hashes = new Set(
-      changes.filter(isTextDiffCandidate).flatMap((c) => [c.before!.sha256, c.after!.sha256]),
+      changes.filter(isTextDiffCandidate).flatMap((c) => [c.before.sha256, c.after.sha256]),
     );
     const texts = await Promise.all(
       [...hashes].map(async (sha256): Promise<[string, string | null]> => {

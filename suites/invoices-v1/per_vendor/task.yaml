@@ -14,3 +14,5 @@ verification:
   - key: reads_ledger
     type: trajectory_match
     params: { tool: read_file, min_calls: 1 }
+self_check:
+  answers_from_fixtures: true

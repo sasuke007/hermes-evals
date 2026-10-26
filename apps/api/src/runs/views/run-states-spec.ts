@@ -100,6 +100,12 @@ export const dupScores = (
   { key: 'check', type: 'verifier_script', ...check },
 ];
 
+/** dup_invoices/baseline/4's whole stderr.log, as the runner stores it: 57 lines. */
+export const PROVIDER_STDERR_LOG = `${Array.from(
+  { length: 55 },
+  (_, i) => `hermes: turn ${i + 1}`,
+).join('\n')}\nPOST http://egress:8080/v1/chat/completions → 502\nhermes: provider error; exit 1\n`;
+
 export async function seedAllStates(db: TestDb) {
   const s = await seedRunStates(db);
   const t0 = new Date('2026-10-24T15:30:00.000Z').getTime();
@@ -266,9 +272,14 @@ export async function seedAllStates(db: TestDb) {
     1,
     new Date(providerFailure.timestamp - 22_000),
   );
+  // Its stderr.log as the runner stores it for the "Full log" (Phase 7): a blob named on collected.
+  const providerLog = await s.store.putBuffer(Buffer.from(PROVIDER_STDERR_LOG));
   await s.addEvents(provider, [
     ...recordedEvents([RECORDED_PROVIDER_FAILURE]),
-    platform(2, providerFailure.timestamp + 500, collected({ files: 1, stderr_lines: 57 })),
+    platform(2, providerFailure.timestamp + 500, {
+      ...collected({ files: 1, stderr_lines: 57 }),
+      stderr_log: { sha256: providerLog.sha256, bytes: Buffer.byteLength(PROVIDER_STDERR_LOG) },
+    }),
   ]);
   await s.end('dup_invoices/baseline/4', provider, {
     status: 'execution_error',

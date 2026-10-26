@@ -11,7 +11,13 @@ pinned trial image, with no network:
       -v "$PWD/docker/mcp:/checks:ro" -v "$PWD/scripts:/scripts:ro" \
       -v "$PWD/apps/api/test/mcp-v1:/probe:ro" \
       --entrypoint /opt/hermes/.venv/bin/python hermes-evals/trial:v0.22.4-4d04303 \
-      /probe/hermes_render_probe.py
+      /probe/hermes_render_probe.py [--renders]
+
+./render-probe.spec.ts runs it as a gated real-container spec
+(RUN_SANDBOX_TESTS=1), with --renders: then, after its checks and before
+its last line, it prints `renders <JSON>`, every rendered result as
+{tool, arguments, text}, which the spec compares byte for byte with the
+generator's model of it (./support.ts mcpMessage).
 
 It starts invoice-db over stdio and vendor-directory on loopback (with a
 throwaway token), makes every MCP call of every script through the SDK's
@@ -96,6 +102,7 @@ async def render_all() -> None:
 
 
 def main() -> int:
+    show_renders = "--renders" in sys.argv[1:]
     anyio.run(render_all)
     if len(rendered) != len(calls):
         print(f"FAIL rendered {len(rendered)} of {len(calls)} calls")
@@ -112,6 +119,12 @@ def main() -> int:
         print(f"FAIL the documents phrase {header!r} is in an MCP result")
         return 1
     print(f"ok   the documents phrase is in no MCP result ({len(rendered)} rendered)")
+    if show_renders:
+        texts = [
+            {"tool": step["tool"], "arguments": step["arguments"], "text": rendered[key(step)]}
+            for step in calls
+        ]
+        print("renders " + json.dumps(texts, ensure_ascii=False))
     print("all mcp-v1 phrase checks passed")
     return 0
 

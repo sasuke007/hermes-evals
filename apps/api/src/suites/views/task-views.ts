@@ -26,7 +26,7 @@ import {
   textFileDiffs,
   type RootFileRecord,
 } from './diff-files.js';
-import { jsonDiff, textDiff } from './diffs.js';
+import { jsonDiff, sameJson, textDiff } from './diffs.js';
 import { fixtureDisplayPath, isoTime, taskYamlDisplayPath } from './format.js';
 import { limitsOf, type SuiteRow, type TaskFileRow, type TaskRow } from './rows.js';
 import { verificationSentence } from './sentences.js';
@@ -255,6 +255,7 @@ export function taskDiff(from: PlacedTask, to: PlacedTask, extras: TaskDiffExtra
       ...rootFileChanges(
         rootFileStates(from.task, extras.rootFrom ?? []),
         rootFileStates(to.task, extras.rootTo ?? []),
+        sameJson(from.task.reference ?? null, to.task.reference ?? null),
       ),
       ...files,
     ],

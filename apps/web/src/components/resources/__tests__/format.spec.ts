@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { endpointOf, fileTreeText, joinArgs, splitArgs, toolCounts } from '../format';
+import {
+  endpointOf,
+  fileTreeText,
+  headerNamesText,
+  headerPrefixOf,
+  headerValueText,
+  joinArgs,
+  splitArgs,
+  toolCounts,
+} from '../format';
 import { parseCsv, parseInline, parseMarkdown } from '../markdown';
 import { MCP_INVOICE_DB, MCP_VENDOR_API } from '@/fixtures/resources';
 
@@ -76,5 +85,20 @@ describe('markdown subset', () => {
       ['3', '4'],
     ]);
     expect(parseCsv('a\n1\n2\n3', 2)).toEqual([['a'], ['1']]);
+  });
+
+  it("writes a header's prefix with the space a scheme needs, and shows it quoted", () => {
+    expect(headerPrefixOf('')).toBeUndefined();
+    expect(headerPrefixOf('   ')).toBeUndefined();
+    expect(headerPrefixOf('Bearer')).toBe('Bearer ');
+    expect(headerPrefixOf(' Bearer ')).toBe('Bearer ');
+    expect(headerPrefixOf('token=')).toBe('token=');
+    expect(headerPrefixOf('x'.repeat(64))).toBe('x'.repeat(64));
+    const pair = { header: 'Authorization', env: 'VENDOR_DIRECTORY_TOKEN', prefix: 'Bearer ' };
+    expect(headerValueText(pair)).toBe('"Bearer " + VENDOR_DIRECTORY_TOKEN');
+    expect(headerValueText({ header: 'X-Key', env: 'KEY' })).toBe('KEY');
+    expect(headerNamesText([pair, { header: 'X-Key', env: 'KEY' }])).toBe(
+      'Authorization ("Bearer " + value), X-Key',
+    );
   });
 });

@@ -33,30 +33,19 @@ import type {
   TaskVersionEntry,
 } from './types/suites';
 import { API_BASE, apiGet, apiSend } from './client';
-import { apiMode, fixture, hasScenario, notFound, withQuery } from './source';
-import { experimentsOnSuiteFixture, taskUsageFixture } from '@/fixtures/experiments';
-import { withHomeFiles } from '@/fixtures/home';
-import {
-  draftStateFrom,
-  missingFolderRows,
-  reloadProgressFixture,
-  suiteStateForDraft,
-} from '@/fixtures/suites-authoring';
-import {
-  fixturePreviewFixture,
-  noSuitesFrom,
-  suiteDetailFixture,
-  suiteHistoryFixture,
-  suiteListFixture,
-  suiteReloadFixture,
-  suiteStateFrom,
-  taskDetailFixture,
-  taskDiffFixture,
-  taskHistoryFixture,
-} from '@/fixtures/suites';
+import { apiMode, fixture, hasScenario, notFound, withQuery, type FixtureWorld } from './source';
+import type { SuiteState } from '@/fixtures/suites';
 
 /** The suite state of the active scenarios; a draft conflict implies the newer version on disk. */
-const state = () => suiteStateForDraft(draftStateFrom(hasScenario), suiteStateFrom(hasScenario));
+const state = ({ suites, suitesAuthoring }: FixtureWorld): SuiteState =>
+  suitesAuthoring.suiteStateForDraft(
+    suitesAuthoring.draftStateFrom(hasScenario),
+    suites.suiteStateFrom(hasScenario),
+  );
+
+/** The suite list's state, or 'none' when the scenario has no suites. */
+const listState = (w: FixtureWorld): SuiteState | 'none' =>
+  w.suites.noSuitesFrom(hasScenario) ? 'none' : state(w);
 
 /** One path segment: ids and keys are slugs today, but a segment never splits the path. */
 const seg = (value: string): string => encodeURIComponent(value);
@@ -68,9 +57,9 @@ const taskPath = (suiteId: string, key: string): string =>
 export function listSuites(): Promise<SuiteListRow[]> {
   if (apiMode === 'live') return apiGet('/suites', SuiteListRowSchema.array());
   return fixture(
-    () => [
-      ...suiteListFixture(noSuitesFrom(hasScenario) ? 'none' : state()),
-      ...(hasScenario('missing-folders') ? missingFolderRows() : []),
+    (w) => [
+      ...w.suites.suiteListFixture(listState(w)),
+      ...(hasScenario('missing-folders') ? w.suitesAuthoring.missingFolderRows() : []),
     ],
     { request: 'GET /api/suites' },
   );
@@ -81,8 +70,10 @@ export function getSuite(id: string): Promise<SuiteDetail> {
   if (apiMode === 'live') return apiGet(suitePath(id), SuiteDetailSchema);
   const request = `GET /api/suites/${id}`;
   return fixture(
-    () => {
-      const detail = noSuitesFrom(hasScenario) ? null : suiteDetailFixture(state(), id);
+    (w) => {
+      const detail = w.suites.noSuitesFrom(hasScenario)
+        ? null
+        : w.suites.suiteDetailFixture(state(w), id);
       if (!detail) throw notFound(request, `suite ${id}`);
       return detail;
     },
@@ -100,8 +91,8 @@ export function reloadSuites(path?: string): Promise<SuiteReloadResult> {
   const body: SuiteReloadRequest = path ? { path } : {};
   if (apiMode === 'live') return apiSend('POST', '/suites/reload', body, SuiteReloadResultSchema);
   return fixture(
-    () => {
-      const result = suiteReloadFixture(state());
+    (w) => {
+      const result = w.suites.suiteReloadFixture(state(w));
       return path
         ? { ...result, suites: result.suites.filter((s) => s.sourcePath === path) }
         : result;
@@ -118,9 +109,9 @@ export function reloadSuites(path?: string): Promise<SuiteReloadResult> {
 export function getReloadProgress(): Promise<SuiteReloadProgress> {
   if (apiMode === 'live') return apiGet('/suites/reload/progress', SuiteReloadProgressSchema);
   return fixture(
-    () =>
-      reloadProgressFixture(
-        suiteListFixture(noSuitesFrom(hasScenario) ? 'none' : state()).map((r) => r.path),
+    (w) =>
+      w.suitesAuthoring.reloadProgressFixture(
+        w.suites.suiteListFixture(listState(w)).map((r) => r.path),
       ),
     { request: 'GET /api/suites/reload/progress' },
   );
@@ -143,10 +134,10 @@ export function getSuiteHistory(id: string): Promise<SuiteHistoryEntry[]> {
   if (apiMode === 'live')
     return apiGet(`${suitePath(id)}/history`, SuiteHistoryEntrySchema.array());
   return fixture(
-    () =>
-      suiteHistoryFixture(state()).map((entry) => ({
+    (w) =>
+      w.suites.suiteHistoryFixture(state(w)).map((entry) => ({
         ...entry,
-        experiments: experimentsOnSuiteFixture(hasScenario, entry.suiteId),
+        experiments: w.experiments.experimentsOnSuiteFixture(hasScenario, entry.suiteId),
       })),
     { request: `GET /api/suites/${id}/history` },
   );
@@ -160,12 +151,12 @@ export function getTask(suiteId: string, key: string): Promise<TaskDetail> {
   if (apiMode === 'live') return apiGet(taskPath(suiteId, key), TaskDetailSchema);
   const request = `GET /api/suites/${suiteId}/tasks/${key}`;
   return fixture(
-    () => {
-      const detail = taskDetailFixture(state(), suiteId, key);
+    (w) => {
+      const detail = w.suites.taskDetailFixture(state(w), suiteId, key);
       if (!detail) throw notFound(request, `task ${key}`);
-      return withHomeFiles(hasScenario, {
+      return w.home.withHomeFiles(hasScenario, {
         ...detail,
-        experiments: taskUsageFixture(hasScenario, key),
+        experiments: w.experiments.taskUsageFixture(hasScenario, key),
       });
     },
     { request },
@@ -177,7 +168,7 @@ export function getTaskHistory(suiteId: string, key: string): Promise<TaskVersio
   if (apiMode === 'live') {
     return apiGet(`${taskPath(suiteId, key)}/history`, TaskVersionEntrySchema.array());
   }
-  return fixture(() => taskHistoryFixture(state(), key), {
+  return fixture((w) => w.suites.taskHistoryFixture(state(w), key), {
     request: `GET /api/suites/${suiteId}/tasks/${key}/history`,
   });
 }
@@ -200,10 +191,10 @@ export function getTaskDiff(
   }
   const request = `GET /api/suites/${suiteId}/tasks/${key}/diff`;
   return fixture(
-    () => {
-      const diff = taskDiffFixture(state(), key, againstSuiteId, suiteId);
+    (w) => {
+      const diff = w.suites.taskDiffFixture(state(w), key, againstSuiteId, suiteId);
       if (!diff) throw notFound(request, `task ${key} in suite ${againstSuiteId}`);
-      return diff;
+      return hasScenario('diff-not-recorded') ? w.suites.withReferenceNotRecorded(diff) : diff;
     },
     { request },
   );
@@ -224,7 +215,7 @@ export function getFixturePreview(
       TablePreviewSchema.nullable(),
     );
   }
-  return fixture(() => fixturePreviewFixture(path), {
+  return fixture((w) => w.suites.fixturePreviewFixture(path), {
     request: `GET /api/suites/${suiteId}/tasks/${key}/fixtures/${path}/preview`,
   });
 }

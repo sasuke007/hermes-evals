@@ -9,7 +9,9 @@
  * shared schema; Save and Rebase also parse the 409 and 422 bodies they are designed to
  * answer (DraftConflictBody, DraftSaveFailureBody). A file upload goes through
  * ./drafts-upload.ts for its progress. Fixtures mode serves the in-memory draft world of
- * ./drafts-fixtures.ts, whose edits stick while the page is open (src/api/README.md).
+ * ./drafts-fixtures.ts, whose edits stick while the page is open (src/api/README.md):
+ * `draftOps` (./drafts-fixture-ops.ts) and `draftSave` (./drafts-fixture-save.ts) of the
+ * fixture world, which a live build leaves out.
  */
 import {
   DraftConflictBodySchema,
@@ -53,8 +55,6 @@ import type { TablePreview } from './types/suites';
 import { API_BASE, apiGet, apiGetText, apiSend, type TextStart } from './client';
 import { sendWithFailures } from './drafts-upload';
 import { apiMode, fixture } from './source';
-import * as ops from './drafts-fixture-ops';
-import * as whole from './drafts-fixture-save';
 
 /** One path segment; a file path's slashes are encoded too (`fixtures%2Finvoices.csv`). */
 const seg = (value: string): string => encodeURIComponent(value);
@@ -73,25 +73,31 @@ const req = (method: string, path: string): string => `${method} ${API_BASE}${pa
 /** GET /suites/drafts: every open draft, for the suite list's chip and unsaved new suites. */
 export function listDrafts(): Promise<DraftSummary[]> {
   if (apiMode === 'live') return apiGet('/suites/drafts', DraftSummarySchema.array());
-  return fixture(() => whole.listDrafts(), { request: 'GET /api/suites/drafts' });
+  return fixture(({ draftSave }) => draftSave.listDrafts(), { request: 'GET /api/suites/drafts' });
 }
 
 /** POST /suites/drafts: a new suite, empty, a copy of a suite, or a validated zip (SA.2). */
 export function createSuiteDraft(body: CreateSuiteDraftRequest): Promise<SuiteDraftView> {
   if (apiMode === 'live') return apiSend('POST', '/suites/drafts', body, SuiteDraftViewSchema);
-  return fixture(() => whole.createDraft(body), { request: 'POST /api/suites/drafts' });
+  return fixture(({ draftSave }) => draftSave.createDraft(body), {
+    request: 'POST /api/suites/drafts',
+  });
 }
 
 /** POST /suites/:suite/draft: the draft of a folder, opened on its current version if none is. */
 export function openSuiteDraft(folder: string): Promise<SuiteDraftView> {
   if (apiMode === 'live') return apiSend('POST', draftPath(folder), {}, SuiteDraftViewSchema);
-  return fixture(() => whole.openDraft(folder), { request: req('POST', draftPath(folder)) });
+  return fixture(({ draftSave }) => draftSave.openDraft(folder), {
+    request: req('POST', draftPath(folder)),
+  });
 }
 
 /** GET /suites/:suite/draft; 404 when the folder has no draft. */
 export function getSuiteDraft(folder: string): Promise<SuiteDraftView> {
   if (apiMode === 'live') return apiGet(draftPath(folder), SuiteDraftViewSchema);
-  return fixture(() => whole.getDraft(folder), { request: req('GET', draftPath(folder)) });
+  return fixture(({ draftSave }) => draftSave.getDraft(folder), {
+    request: req('GET', draftPath(folder)),
+  });
 }
 
 /** PATCH /suites/:suite/draft: Edit details (label, description) and the task order. */
@@ -100,13 +106,17 @@ export function updateSuiteDraft(
   body: UpdateSuiteDraftRequest,
 ): Promise<SuiteDraftView> {
   if (apiMode === 'live') return apiSend('PATCH', draftPath(folder), body, SuiteDraftViewSchema);
-  return fixture(() => ops.patchDraft(folder, body), { request: req('PATCH', draftPath(folder)) });
+  return fixture(({ draftOps }) => draftOps.patchDraft(folder, body), {
+    request: req('PATCH', draftPath(folder)),
+  });
 }
 
 /** DELETE /suites/:suite/draft: discard; nothing on disk changes. */
 export function discardSuiteDraft(folder: string): Promise<void> {
   if (apiMode === 'live') return apiSend('DELETE', draftPath(folder));
-  return fixture(() => whole.discardDraft(folder), { request: req('DELETE', draftPath(folder)) });
+  return fixture(({ draftSave }) => draftSave.discardDraft(folder), {
+    request: req('DELETE', draftPath(folder)),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -120,14 +130,16 @@ export function createDraftTask(
 ): Promise<DraftTaskCreateResult> {
   const path = `${draftPath(folder)}/tasks`;
   if (apiMode === 'live') return apiSend('POST', path, body, DraftTaskCreateResultSchema);
-  return fixture(() => ops.createTask(folder, body), { request: req('POST', path) });
+  return fixture(({ draftOps }) => draftOps.createTask(folder, body), {
+    request: req('POST', path),
+  });
 }
 
 /** GET …/draft/tasks/:key: the task editor's whole picture. */
 export function getDraftTask(folder: string, key: string): Promise<DraftTaskDetail> {
   const path = draftTaskPath(folder, key);
   if (apiMode === 'live') return apiGet(path, DraftTaskDetailSchema);
-  return fixture(() => ops.getTask(folder, key), { request: req('GET', path) });
+  return fixture(({ draftOps }) => draftOps.getTask(folder, key), { request: req('GET', path) });
 }
 
 /** PUT …/draft/tasks/:key: what changed, as the editor autosaves it (form or task.yaml). */
@@ -138,21 +150,27 @@ export function updateDraftTask(
 ): Promise<DraftTaskDetail> {
   const path = draftTaskPath(folder, key);
   if (apiMode === 'live') return apiSend('PUT', path, body, DraftTaskDetailSchema);
-  return fixture(() => ops.putTask(folder, key, body), { request: req('PUT', path) });
+  return fixture(({ draftOps }) => draftOps.putTask(folder, key, body), {
+    request: req('PUT', path),
+  });
 }
 
 /** DELETE …/draft/tasks/:key: marks a base task removed, drops an added one. */
 export function removeDraftTask(folder: string, key: string): Promise<SuiteDraftView> {
   const path = draftTaskPath(folder, key);
   if (apiMode === 'live') return apiSend('DELETE', path, undefined, SuiteDraftViewSchema);
-  return fixture(() => ops.deleteTask(folder, key), { request: req('DELETE', path) });
+  return fixture(({ draftOps }) => draftOps.deleteTask(folder, key), {
+    request: req('DELETE', path),
+  });
 }
 
 /** POST …/draft/tasks/:key/revert: the base version's files again ("Revert to v6"). */
 export function revertDraftTask(folder: string, key: string): Promise<DraftTaskDetail> {
   const path = `${draftTaskPath(folder, key)}/revert`;
   if (apiMode === 'live') return apiSend('POST', path, {}, DraftTaskDetailSchema);
-  return fixture(() => ops.revertTask(folder, key), { request: req('POST', path) });
+  return fixture(({ draftOps }) => draftOps.revertTask(folder, key), {
+    request: req('POST', path),
+  });
 }
 
 /** PATCH …/files/:path: rename or move a file within the task folder. */
@@ -164,7 +182,9 @@ export function moveDraftFile(
 ): Promise<DraftTaskDetail> {
   const url = filePath(folder, key, path);
   if (apiMode === 'live') return apiSend('PATCH', url, body, DraftTaskDetailSchema);
-  return fixture(() => ops.moveFile(folder, key, path, body.path), { request: req('PATCH', url) });
+  return fixture(({ draftOps }) => draftOps.moveFile(folder, key, path, body.path), {
+    request: req('PATCH', url),
+  });
 }
 
 /** DELETE …/files/:path. */
@@ -175,7 +195,9 @@ export function deleteDraftFile(
 ): Promise<DraftTaskDetail> {
   const url = filePath(folder, key, path);
   if (apiMode === 'live') return apiSend('DELETE', url, undefined, DraftTaskDetailSchema);
-  return fixture(() => ops.deleteFile(folder, key, path), { request: req('DELETE', url) });
+  return fixture(({ draftOps }) => draftOps.deleteFile(folder, key, path), {
+    request: req('DELETE', url),
+  });
 }
 
 /** The URL of a draft file's bytes, for a download link. */
@@ -193,8 +215,8 @@ export function getDraftFileText(
   const url = filePath(folder, key, path);
   if (apiMode === 'live') return apiGetText(url, maxBytes);
   return fixture(
-    () => {
-      const text = ops.fileText(folder, key, path) ?? '';
+    ({ draftOps }) => {
+      const text = draftOps.fileText(folder, key, path) ?? '';
       return { text: text.slice(0, maxBytes), truncated: text.length > maxBytes };
     },
     { request: req('GET', url) },
@@ -210,8 +232,8 @@ export function getDraftFilePreview(
   const url = `${filePath(folder, key, path)}/preview`;
   if (apiMode === 'live') return apiGet(url, TablePreviewSchema.nullable());
   return fixture(
-    () => {
-      const text = ops.fileText(folder, key, path);
+    ({ draftOps }) => {
+      const text = draftOps.fileText(folder, key, path);
       if (text === null || !/\.(csv|tsv)$/i.test(path)) return null;
       const lines = text.split('\n').filter((l) => l.trim() !== '');
       const split = (l: string) => l.split(path.endsWith('.tsv') ? '\t' : ',');
@@ -229,14 +251,19 @@ export function getDraftFilePreview(
 export function getDraftTaskReadiness(folder: string, key: string): Promise<TaskReadiness> {
   const url = `${draftTaskPath(folder, key)}/readiness`;
   if (apiMode === 'live') return apiGet(url, TaskReadinessSchema);
-  return fixture(() => ops.getTask(folder, key).readiness, { request: req('GET', url) });
+  return fixture(({ draftOps }) => draftOps.getTask(folder, key).readiness, {
+    request: req('GET', url),
+  });
 }
 
 /** POST …/tasks/:key/self-check: file checks and scripts in the worker; 503 without one. */
 export function runDraftSelfCheck(folder: string, key: string): Promise<DraftSelfCheckView> {
   const url = `${draftTaskPath(folder, key)}/self-check`;
   if (apiMode === 'live') return apiSend('POST', url, {}, DraftSelfCheckViewSchema);
-  return fixture(() => ops.selfCheck(folder, key), { request: req('POST', url), latencyMs: 900 });
+  return fixture(({ draftOps }) => draftOps.selfCheck(folder, key), {
+    request: req('POST', url),
+    latencyMs: 900,
+  });
 }
 
 /** POST …/tasks/:key/try: an answer check on the reference (reply null) or a pasted reply. */
@@ -247,14 +274,16 @@ export function tryDraftCheck(
 ): Promise<TryCheckResult> {
   const url = `${draftTaskPath(folder, key)}/try`;
   if (apiMode === 'live') return apiSend('POST', url, body, TryCheckResultSchema);
-  return fixture(() => ops.tryCheck(folder, key, body), { request: req('POST', url) });
+  return fixture(({ draftOps }) => draftOps.tryCheck(folder, key, body), {
+    request: req('POST', url),
+  });
 }
 
 /** GET …/tasks/:key/diff: the draft task against its base version. */
 export function getDraftTaskDiff(folder: string, key: string): Promise<DraftTaskDiff> {
   const url = `${draftTaskPath(folder, key)}/diff`;
   if (apiMode === 'live') return apiGet(url, DraftTaskDiffSchema);
-  return fixture(() => whole.taskDiff(folder, key), { request: req('GET', url) });
+  return fixture(({ draftSave }) => draftSave.taskDiff(folder, key), { request: req('GET', url) });
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +294,7 @@ export function getDraftTaskDiff(folder: string, key: string): Promise<DraftTask
 export function getDraftReview(folder: string): Promise<DraftReview> {
   const url = `${draftPath(folder)}/review`;
   if (apiMode === 'live') return apiGet(url, DraftReviewSchema);
-  return fixture(() => whole.review(folder), { request: req('GET', url) });
+  return fixture(({ draftSave }) => draftSave.review(folder), { request: req('GET', url) });
 }
 
 /** What Save answered: the new version, the conflict that stopped it, or the loader's 422. */
@@ -294,8 +323,8 @@ export async function saveSuiteDraft(
     return { kind: 'not_saved', body: answer.body as DraftSaveFailureBody };
   }
   return fixture(
-    (): DraftSaveOutcome => {
-      const outcome = whole.save(folder, body);
+    ({ draftSave }): DraftSaveOutcome => {
+      const outcome = draftSave.save(folder, body);
       return outcome.ok
         ? { kind: 'saved', result: outcome.result }
         : { kind: 'conflict', body: outcome.conflict };
@@ -322,7 +351,10 @@ export async function rebaseSuiteDraft(
     return { kind: 'conflict', body: answer.body as DraftConflictBody };
   }
   return fixture(
-    (): DraftRebaseOutcome => ({ kind: 'rebased', draft: whole.rebase(folder, body) }),
+    ({ draftSave }): DraftRebaseOutcome => ({
+      kind: 'rebased',
+      draft: draftSave.rebase(folder, body),
+    }),
     { request: req('POST', url) },
   );
 }

@@ -256,5 +256,6 @@ In which bin is the product whose code is exactly \`${target}\` stored? Give the
       answer: { bin: null },
     },
     readPhrase: line(own).join(','),
+    answersFromFixtures: true,
   };
 }

@@ -6,7 +6,7 @@
  * sentences the API and the boards write. Pure functions, so the components stay small and
  * the rules are tested once.
  */
-import type { JsonValue } from '@hermes-evals/shared';
+import { TIMELINE_OUTPUT_LIMITS, timelineOutputLimit, type JsonValue } from '@hermes-evals/shared';
 import type {
   ArtifactView,
   AttemptView,
@@ -16,6 +16,7 @@ import type {
   TokenCounts,
 } from '@/api/types/runs';
 import { formatCount, formatDuration, formatUsd, plural } from '@/lib/format';
+import { isMcpStreamNotOffered } from './neutralRows';
 
 // ---------------------------------------------------------------------------
 // Text
@@ -104,7 +105,8 @@ export type EventLook =
 
 export function eventLook(event: TimelineEvent): EventLook {
   if (event.running) return 'running';
-  if (event.kind === 'refused' && event.origin === 'hermes-background') return 'refused';
+  if (event.origin === 'hermes-background') return event.kind === 'refused' ? 'refused' : 'net';
+  if (isMcpStreamNotOffered(event)) return 'net';
   if (event.error) return 'error';
   if (event.kind === 'tool') return event.server ? 'mcp' : 'tool';
   if (event.kind === 'network') return 'net';
@@ -190,15 +192,26 @@ export function defaultOpenSeq(events: readonly TimelineEvent[]): number | null 
 export function outputNote(event: TimelineEvent): string {
   if (event.outputChars === null) return '';
   const size = plural(event.outputChars, 'character');
+  // An MCP tool's result keeps 20,000 characters, any other tool's 5,000 (Phase 6 question 13).
+  const kept = timelineOutputLimit(event);
+  const limit = formatCount(kept);
+  // Hermes's stream-json emitter cuts every tool output at 5,000 characters and "..." before
+  // the worker reads it, so an MCP result marked cut inside the 20,000 window arrived cut.
+  if (event.truncated && event.outputChars <= kept && kept > TIMELINE_OUTPUT_LIMITS.tool) {
+    return `${size} · Truncated by Hermes at ${formatCount(TIMELINE_OUTPUT_LIMITS.tool)} characters before the run's events were recorded.`;
+  }
   return event.truncated
-    ? `${size} · Truncated by the runtime at 5,000 characters.`
-    : `${size} · not truncated. Output beyond 5,000 characters is truncated by the runtime and marked here.`;
+    ? `${size} · Truncated by the runtime at ${limit} characters.`
+    : `${size} · not truncated. Output beyond ${limit} characters is truncated by the runtime and marked here.`;
 }
 
 /** The detail line of a network row when the API sent no text of its own. */
 export function networkLine(event: TimelineEvent): string {
   const n = event.network;
   if (!n) return event.text ?? '';
+  if (isMcpStreamNotOffered(event)) {
+    return `${n.server ?? 'The MCP server'} offers no event stream: it answered the MCP client's GET with 405, as the protocol allows. Its tools are called over POST, so the run is not affected.`;
+  }
   if (n.decision === 'denied') {
     const target = n.host ? `${n.host}${n.port ? `:${n.port}` : ''}` : (n.url ?? '');
     return `Refused by sandbox: ${target}${n.reason ? ` (${n.reason})` : ''}.`;

@@ -201,6 +201,19 @@ describe('TaskDetailPage', () => {
     expect(diff.get('a.btn').attributes('href')).toBe(`/suites/${SUITE_V2_ID}/tasks/total_due`);
   });
 
+  it('says "not recorded" for a reference.json loaded before Phase 5b (Phase 5b #9)', async () => {
+    const { w } = await mountAt(
+      `/suites/${SUITE_V2_ID}/tasks/total_due?diff=${SUITE_V1_ID}`,
+      'newer-version,diff-not-recorded',
+    );
+    const row = w.get('[data-testid="task-diff"] tr[data-file="reference.json"]');
+    expect(row.attributes('data-change')).toBe('changed');
+    const cells = row.findAll('td').map((td) => flat(td.text()));
+    expect(cells[2]).toMatch(/^not recorded → \d+ B$/);
+    expect(cells[3]).toMatch(/^not recorded\s*→\s*[0-9a-f]{7}$/);
+    expect(row.text()).not.toContain('–');
+  });
+
   it("lists a first version's files as added", async () => {
     const { w } = await mountAt(`/suites/${SUITE_V1_ID}/tasks/dup_invoices?diff=${SUITE_V1_ID}`);
     expect(w.text()).toContain('Files of task v1');

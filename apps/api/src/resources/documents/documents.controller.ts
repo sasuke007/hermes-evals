@@ -49,7 +49,8 @@ export class DocumentsController {
   @ApiNotFoundResponse({ description: 'No such document' })
   @ApiJsonResponse(ResourceInUseBodySchema, {
     status: 409,
-    description: 'A configuration version names the document: the configurations in `usedBy`',
+    description:
+      "A configuration version names the document: the configurations in `usedBy` (the row's `inUseBy`)",
   })
   remove(@Param('id') id: string): Promise<void> {
     return this.documents.remove(id);

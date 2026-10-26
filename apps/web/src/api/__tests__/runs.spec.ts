@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { EXPERIMENT_IDS } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import {
   cancelRun,
   getArtifactPreview,

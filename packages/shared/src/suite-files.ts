@@ -348,6 +348,15 @@ export const TaskYamlSchema = z.strictObject({
        * expected_workspace or expected_home is set.
        */
       negative_control: z.boolean().optional(),
+      /**
+       * The answer is picked from the task's own data (a list of invoice
+       * numbers, IBANs or vendor names that are in the fixtures), so a
+       * reference value found in a workspace file is expected rather than a
+       * leak: true silences the readiness rule `reference_leak` for this
+       * task (Phase 5b question 1). Absent means false. It changes nothing
+       * else: no check, no self-check and nothing the agent sees.
+       */
+      answers_from_fixtures: z.boolean().optional(),
     })
     .superRefine((s, ctx) => {
       const folders = [s.expected_workspace, s.expected_home];

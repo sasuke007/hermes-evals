@@ -16,8 +16,9 @@
  *    another folder holds) stops here: disk unchanged, draft kept.
  * 4. Moving: the conflict check again, and the live folder listed again, so
  *    an edit by hand made since staging (hand edits take no lock) stops the
- *    save instead of being lost; then the live folder renamed aside,
- *    staging renamed into place, and that read recorded under the folder's
+ *    save instead of being lost; then the staging folder fsynced, the live
+ *    folder renamed aside, staging renamed into place (SUITES_DIR fsynced
+ *    after), and that read recorded under the folder's
  *    path, as the load of the folder would record it: the next version, or
  *    `unchanged`. When the staging folder hashes as the live one, nothing
  *    is moved at all. Any failure from here puts the live folder back.
@@ -275,10 +276,11 @@ async function saveLocked(
   report('staging');
   const live = draft.origin === 'edit' ? folder : null;
   const listed = live === null ? null : await folderListing(dir.folder(live));
-  const liveYaml =
-    live === null ? null : await readFile(join(dir.folder(live), SUITE_YAML), 'utf8');
+  // The live file, or a zip draft's suite.yaml as the zip held it (Phase 5b question 17).
+  const sourceYaml =
+    live === null ? draft.suiteYaml : await readFile(join(dir.folder(live), SUITE_YAML), 'utf8');
   const kept = stored.tasks.filter((t) => t.state !== 'removed');
-  const suiteYaml = renderSuiteYaml(liveYaml, {
+  const suiteYaml = renderSuiteYaml(sourceYaml, {
     name: draft.name,
     versionLabel: draft.versionLabel,
     description: draft.description,
@@ -330,6 +332,8 @@ async function saveLocked(
   let placed = false;
   try {
     if (!same) {
+      // On disk before it moves into place, and the renames after (Phase 5b question 4).
+      await dir.syncTree(staging);
       if (live !== null) {
         await dir.remove(aside);
         await dir.move(live, aside);
@@ -337,6 +341,7 @@ async function saveLocked(
       }
       await dir.move(staging, folder);
       placed = true;
+      await dir.syncRoot();
     }
     const outcome = await persistSuite(tx, persist, suite);
     if (outcome === null || outcome.outcome === 'missing' || outcome.outcome === 'error') {

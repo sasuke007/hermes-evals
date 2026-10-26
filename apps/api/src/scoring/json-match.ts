@@ -27,10 +27,13 @@
  * a list, the reference's items matched exactly; for an object, the keys that
  * match; for any other value, 1 or 0) and the path of each mismatch
  * (json-match-paths.ts), so the run inspector can explain a fractional score.
+ * Since Phase 7 also the answer path compared (`path`) and every key or item
+ * with both values (`entries`, json-match-entries.ts).
  */
 import type { JsonMatchEvidence, JsonMatchParams, JsonValue } from '@hermes-evals/shared';
 import { canonicalText, isObject, type JsonObject, type ListOrder } from './json-canonical.js';
 import { greedyAssignment, maxCreditAssignment } from './json-match-assignment.js';
+import { itemEntries, keyEntries, valueEntries } from './json-match-entries.js';
 import { collectDifferences, indexPath, keyPath, MismatchPaths } from './json-match-paths.js';
 import { graded, type ScorerResult } from './result.js';
 
@@ -115,6 +118,8 @@ interface ListMatch {
   credit: number;
   /** Items paired with full credit. */
   exact: number;
+  /** Every pair, full credit or not, as [answer index, reference index]. */
+  pairs: Array<[number, number]>;
   /** Pairs short of full credit, as [answer index, reference index]. */
   partial: Array<[number, number]>;
   /** Reference items paired with nothing. */
@@ -135,11 +140,12 @@ function matchUnordered(
     pool.set(id, [...(pool.get(id) ?? []), j]);
   });
   const restObserved: number[] = [];
+  const pairs: Array<[number, number]> = [];
   let exact = 0;
   observed.forEach((item, i) => {
     const slots = pool.get(itemIdentity(item, options));
     if (slots && slots.length > 0) {
-      slots.shift();
+      pairs.push([i, slots.shift()!]);
       exact += 1;
     } else {
       restObserved.push(i);
@@ -147,7 +153,7 @@ function matchUnordered(
   });
   const restExpected = [...pool.values()].flat().sort((a, b) => a - b);
   if (restObserved.length === 0 || restExpected.length === 0) {
-    return { credit: exact, exact, partial: [], missing: restExpected, extra: restObserved };
+    return { credit: exact, exact, pairs, partial: [], missing: restExpected, extra: restObserved };
   }
 
   // Rows are the shorter side, as the assignment requires.
@@ -177,12 +183,17 @@ function matchUnordered(
     paired.add(col);
     const c = credit[row]![col]!;
     partialCredit += c;
-    if (c < 1) partial.push(observedRows ? [rows[row]!, cols[col]!] : [cols[col]!, rows[row]!]);
+    const pair: [number, number] = observedRows
+      ? [rows[row]!, cols[col]!]
+      : [cols[col]!, rows[row]!];
+    pairs.push(pair);
+    if (c < 1) partial.push(pair);
   });
   const unpairedCols = cols.filter((_, col) => !paired.has(col));
   return {
     credit: exact + partialCredit,
     exact,
+    pairs,
     partial,
     missing: observedRows ? unpairedCols : unpairedRows,
     extra: observedRows ? unpairedRows : unpairedCols,
@@ -197,8 +208,10 @@ function matchOrdered(
   let credit = 0;
   let exact = 0;
   const partial: Array<[number, number]> = [];
+  const pairs: Array<[number, number]> = [];
   const shared = Math.min(observed.length, expected.length);
   for (let i = 0; i < shared; i++) {
+    pairs.push([i, i]);
     const c = itemCredit(observed[i]!, expected[i]!, options);
     credit += c;
     if (c === 1) exact += 1;
@@ -209,6 +222,7 @@ function matchOrdered(
   return {
     credit,
     exact,
+    pairs,
     partial,
     missing: from(shared, expected.length),
     extra: from(shared, observed.length),
@@ -290,22 +304,29 @@ export function scoreJsonMatch(
     return graded(stored >= params.pass_at, stored, comment, {
       observed,
       expected,
-      evidence: { json_match: evidence },
+      // The compared answer path (the loader already applied answer.path to the primary).
+      evidence: { json_match: { ...evidence, path: params.path ?? null } },
     });
   };
 
   if (Array.isArray(expected)) {
-    const items = (matched: number, mismatches: string[] = []): JsonMatchEvidence => ({
+    const items = (
+      matched: number,
+      entries: JsonMatchEvidence['entries'],
+      mismatches: string[] = [],
+    ): JsonMatchEvidence => ({
       unit: 'items',
       matched,
       total: expected.length,
       mismatches,
+      entries,
     });
     if (!Array.isArray(observed)) {
-      return result(0, `expected a list, got ${kind(observed)}`, items(0));
+      const none = itemEntries(null, expected, { pairs: [], partial: [] });
+      return result(0, `expected a list, got ${kind(observed)}`, items(0, none));
     }
     if (expected.length === 0 && observed.length === 0) {
-      return result(1, 'both lists are empty', items(0));
+      return result(1, 'both lists are empty', items(0, []));
     }
     const match = options.outer
       ? matchUnordered(observed, expected, options)
@@ -318,7 +339,11 @@ export function scoreJsonMatch(
     return result(
       score,
       `${match.exact} of ${expected.length} items match exactly (${sizes})`,
-      items(match.exact, listMismatches(observed, expected, match, options)),
+      items(
+        match.exact,
+        itemEntries(observed, expected, match),
+        listMismatches(observed, expected, match, options),
+      ),
     );
   }
 
@@ -330,6 +355,7 @@ export function scoreJsonMatch(
         matched: 0,
         total,
         mismatches: [],
+        entries: keyEntries(null, expected, new Set(), options.exclude),
       });
     }
     const fraction = keyFraction(observed, expected, options.outer, options);
@@ -344,6 +370,7 @@ export function scoreJsonMatch(
       matched: fraction.matched,
       total: fraction.total,
       mismatches: out.paths,
+      entries: keyEntries(observed, expected, new Set(fraction.differing), options.exclude),
     });
   }
 
@@ -354,5 +381,6 @@ export function scoreJsonMatch(
     matched: same ? 1 : 0,
     total: 1,
     mismatches: [],
+    entries: valueEntries(observed, expected, same),
   });
 }

@@ -3,18 +3,22 @@
  * first, as the board lists them, then the task files by path, each marked changed, added,
  * removed or unchanged with its size and hash. The API lists the root files with the sizes
  * and hashes the loader recorded (Phase 5b); a version loaded before has no record of its
- * reference.json, and the row then shows no size. Pure.
+ * reference.json, and that side reads "not recorded" (Phase 5b question 9). Pure.
  */
-import type { TaskFileChange, TextDiffLine } from '@/api/types/suites';
+import { isRecordedFileVersion } from '@hermes-evals/shared';
+import type { TaskFileChange, TaskFileVersion, TextDiffLine } from '@/api/types/suites';
 import { formatBytes, MISSING, plural, shortHash } from '@/lib/format';
 
 export type FileChange = TaskFileChange['change'];
+
+/** What a side of a file whose size and hash the loader never recorded shows. */
+export const NOT_RECORDED = 'not recorded';
 
 export interface FileRow {
   path: string;
   change: FileChange;
   size: string;
-  /** The older hash of a changed file. */
+  /** The older hash of a changed file, or NOT_RECORDED. */
   from: string | null;
   to: string | null;
 }
@@ -35,16 +39,21 @@ export interface DiffFilesInput {
 const textChanged = (lines: readonly TextDiffLine[]): boolean =>
   lines.some((l) => l.kind !== 'same');
 
+const sizeOf = (side: TaskFileVersion | null): string | null =>
+  side === null ? null : isRecordedFileVersion(side) ? formatBytes(side.sizeBytes) : NOT_RECORDED;
+const hashOf = (side: TaskFileVersion | null): string | null =>
+  side === null ? null : isRecordedFileVersion(side) ? shortHash(side.sha256) : NOT_RECORDED;
+
 function rowOf(f: TaskFileChange, allAdded: boolean): FileRow {
   const change: FileChange = allAdded ? 'added' : f.change;
-  const before = f.before ? formatBytes(f.before.sizeBytes) : null;
-  const after = f.after ? formatBytes(f.after.sizeBytes) : null;
+  const before = sizeOf(f.before);
+  const after = sizeOf(f.after);
   return {
     path: f.path,
     change,
     size: change === 'changed' ? `${before} → ${after}` : (after ?? before ?? MISSING),
-    from: change === 'changed' && f.before ? shortHash(f.before.sha256) : null,
-    to: f.after ? shortHash(f.after.sha256) : f.before ? shortHash(f.before.sha256) : null,
+    from: change === 'changed' && f.before ? hashOf(f.before) : null,
+    to: hashOf(f.after) ?? hashOf(f.before),
   };
 }
 

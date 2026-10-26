@@ -14,6 +14,7 @@ import { ROUTE_NAMES } from '@/router';
 import { useResourcesStore } from '@/stores/resources';
 import MarkdownView from './MarkdownView.vue';
 import SkillFileView from './SkillFileView.vue';
+import { inUseReason, olderVersionsOnly } from './format';
 
 /**
  * A skill's detail, opened from its row on the Skills tab: a right-hand panel 640px wide
@@ -23,11 +24,12 @@ import SkillFileView from './SkillFileView.vue';
  * default, any other file as SkillFileView draws it. Route-backed by the page (?skill=,
  * ?file=); Esc, × or the scrim close it.
  *
- * Delete (Phase 5 section 6.1) sits beside Download zip, as the board draws it: disabled with
- * "Used by 1 configuration. Remove it from with-skill first." while a configuration's latest
- * version uses the skill. Otherwise it asks in place (ConfirmInline under the header) and, once
- * deleted, closes the panel. The API also refuses a skill an older configuration version keeps
- * (409); the confirmation then stays open with its sentence.
+ * Delete (Phase 5 section 6.1) sits beside Download zip, as the board draws it: disabled while
+ * any configuration version names the skill (the row's inUse, Phase 5b question 8), with the
+ * API's reason ("Part of a saved version of with-skill. …"); the meta line says when only an
+ * older version keeps it. Otherwise it asks in place (ConfirmInline under the header) and, once
+ * deleted, closes the panel. Should the API still refuse (409), the confirmation stays open
+ * with its sentence.
  */
 const props = defineProps<{ skillId: string; file: string | null }>();
 const emit = defineEmits<{ 'update:file': [path: string | null]; close: [] }>();
@@ -62,13 +64,12 @@ const confirming = ref(false);
 const deleting = ref(false);
 const deleteError = ref<string | null>(null);
 const deleteButton = ref<HTMLButtonElement | null>(null);
-/** Why Delete is disabled: the board's tooltip, for the configurations "Used by" names. */
-const deleteReason = computed(() => {
-  const used = detail.value?.usedBy ?? [];
-  if (used.length === 0) return null;
-  const names = used.map((c) => c.name).join(', ');
-  return `Used by ${used.length} ${used.length === 1 ? 'configuration' : 'configurations'}. Remove it from ${names} first.`;
-});
+/** Why Delete is disabled: a configuration version, latest or older, names the skill. */
+const deleteReason = computed(() => (detail.value ? inUseReason('skill', detail.value) : null));
+/** Configurations only an older version of which uses the skill. */
+const keptBy = computed(() =>
+  detail.value ? olderVersionsOnly(detail.value.usedBy, detail.value) : [],
+);
 
 async function confirmDelete(): Promise<void> {
   deleting.value = true;
@@ -141,7 +142,18 @@ function pick(path: string): void {
                     >{{ link.name }}</RouterLink
                   ></template
                 ></template
-              ><template v-else>not used by any configuration</template>
+              ><template v-else>not used by any configuration</template
+              ><template v-if="keptBy.length"
+                >{{ detail.usedBy.length ? ' · ' : ' now · ' }}kept by an older version of
+                <template v-for="(link, i) in keptBy" :key="link.configurationId"
+                  >{{ i > 0 ? ', ' : ''
+                  }}<RouterLink
+                    class="font-mono"
+                    :to="{ name: ROUTE_NAMES.configuration, params: { id: link.configurationId } }"
+                    >{{ link.name }}</RouterLink
+                  ></template
+                ></template
+              >
             </p>
           </template>
         </div>

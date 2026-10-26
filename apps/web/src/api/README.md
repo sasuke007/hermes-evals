@@ -6,10 +6,10 @@ either calls the real API or serves a fixture. The view models are the shared co
 
 ## Modes
 
-| Mode     | When                                                        | What a function does                              |
-| -------- | ----------------------------------------------------------- | ------------------------------------------------- |
-| live     | the default: `pnpm dev`, the Compose web image              | `apiGet` / `apiSend` with the response's schema   |
-| fixtures | `VITE_API_MODE=fixtures` (component tests, designed states) | `fixture(value, { request })` from `src/fixtures` |
+| Mode     | When                                                        | What a function does                                    |
+| -------- | ----------------------------------------------------------- | ------------------------------------------------------- |
+| live     | the default: `pnpm dev`, the Compose web image              | `apiGet` / `apiSend` with the response's schema         |
+| fixtures | `VITE_API_MODE=fixtures` (component tests, designed states) | `fixture((w) => …, { request })` from the fixture world |
 
 `apiMode` (`source.ts`) says which. `?scenario=<name>` picks a designed state in fixtures
 mode; `src/fixtures/scenarios.ts` lists them.
@@ -21,9 +21,16 @@ mode; `src/fixtures/scenarios.ts` lists them.
 ```ts
 export function getSystemSummary(): Promise<SystemSummary> {
   if (apiMode === 'live') return apiGet('/system/summary', SystemSummarySchema);
-  return fixture(systemSummaryFixture, { request: 'GET /api/system/summary' });
+  return fixture((w) => w.system.systemSummaryFixture(), { request: 'GET /api/system/summary' });
 }
 ```
+
+- **Fixtures come through the fixture world** (`fixture-world.ts`), never a static import:
+  `fixture((w) => w.<module>.<fn>(), …)` loads it with a dynamic import behind the
+  build-time `VITE_API_MODE` check, so a live build leaves `src/fixtures` and the draft world
+  out of its bundle (Phase 5 question 21). A new fixture module is exported from
+  `fixture-world.ts`. `pnpm --filter @hermes-evals/web check:live-bundle` builds in live mode
+  and checks that fixture-only strings are in none of the built files.
 
 - **Every response is parsed** with its shared schema: `apiGet(path, Schema)`,
   `apiSend(method, path, body, Schema)`. A response that does not match throws an `ApiError`

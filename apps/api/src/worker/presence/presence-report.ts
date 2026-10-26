@@ -8,6 +8,7 @@ import { ENV_NAME_PATTERN } from '@hermes-evals/shared';
 import type { WorkerSandbox } from '../../database/schema/worker-sandbox.js';
 import type { SandboxState } from '../../sandbox/sandbox.service.js';
 import type { SelfTestCheck } from '../../sandbox/self-test.js';
+import { VERIFIER_CHECK_NAME } from '../../sandbox/self-test-verifier.js';
 
 /**
  * Sorted names of the variables in `env` that a definition could reference
@@ -44,6 +45,8 @@ export const SELF_TEST_CHECK_IDS: Readonly<Record<string, string>> = {
   'egress logged the refusals': 'logs-refusals',
   'docker-guard refuses escapes through the Docker API': 'docker-refuses-escapes',
   'docker-guard shows only trial containers': 'docker-trial-only',
+  // The 16th, from Phase 7 (sandbox/self-test-verifier.ts).
+  [VERIFIER_CHECK_NAME]: 'verifier-container',
 };
 
 /** The check's stable id; a check this table does not know gets a slug of its name. */

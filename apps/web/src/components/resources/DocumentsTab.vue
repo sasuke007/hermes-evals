@@ -13,6 +13,7 @@ import { ROUTE_NAMES } from '@/router';
 import { useResourcesStore } from '@/stores/resources';
 import { useRevealFlashedRow } from './revealFlashedRow';
 import DocumentUploadDialog from './DocumentUploadDialog.vue';
+import { inUseReason, olderVersionsOnly } from './format';
 
 /**
  * Resources › Documents (ResourcesDocuments board): the stored files, their content hash and
@@ -21,10 +22,10 @@ import DocumentUploadDialog from './DocumentUploadDialog.vue';
  * empty state) opens it at step 1. The stored document's row flashes.
  *
  * Delete (Phase 5 section 6.1; the board draws Download only, so it follows the skill panel's
- * Delete): disabled with "Attached to 1 configuration. Remove it from with-skill first." while
- * a configuration's latest version has the document; otherwise it asks in a tinted row under
- * the document's (ConfirmInline, as System's Disconnect). The API also refuses a document an
- * older configuration version keeps (409); the row then stays open with its sentence.
+ * Delete): disabled while any configuration version has the document (the row's inUse, Phase
+ * 5b question 8), with the API's reason; "Attached to" says when only an older version keeps
+ * it. Otherwise it asks in a tinted row under the document's (ConfirmInline, as System's
+ * Disconnect). Should the API still refuse (409), the row stays open with its sentence.
  */
 const uploadOpen = defineModel<boolean>('uploadOpen', { default: false });
 
@@ -55,12 +56,9 @@ const confirmOpen = computed({
     if (!open) confirmingId.value = null;
   },
 });
-/** Why Delete is disabled, worded like the skill panel's tooltip. */
+/** Why Delete is disabled: a configuration version, latest or older, has the document. */
 function deleteReason(doc: DocumentRow): string | null {
-  const used = doc.attachedTo;
-  if (used.length === 0) return null;
-  const names = used.map((c) => c.name).join(', ');
-  return `Attached to ${used.length} ${used.length === 1 ? 'configuration' : 'configurations'}. Remove it from ${names} first.`;
+  return inUseReason('document', doc);
 }
 /** Opens the confirmation row; focus goes to its safe option, as ConfirmInline's own trigger does. */
 async function askDelete(doc: DocumentRow): Promise<void> {
@@ -192,6 +190,26 @@ function onDragLeave(event: DragEvent): void {
                       }"
                       >{{ link.name }}</RouterLink
                     ></template
+                  >
+                </template>
+                <template v-else-if="doc.inUse">
+                  <span class="text-text-3">None now</span>
+                  {{ ' ' }}
+                  <span class="text-12 text-text-3" data-testid="kept-by"
+                    >kept by an older version of
+                    <template
+                      v-for="(link, i) in olderVersionsOnly(doc.attachedTo, doc)"
+                      :key="link.configurationId"
+                      >{{ i > 0 ? ', ' : ''
+                      }}<RouterLink
+                        class="font-mono"
+                        :to="{
+                          name: ROUTE_NAMES.configuration,
+                          params: { id: link.configurationId },
+                        }"
+                        >{{ link.name }}</RouterLink
+                      ></template
+                    ></span
                   >
                 </template>
                 <template v-else>

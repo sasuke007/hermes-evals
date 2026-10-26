@@ -10,6 +10,7 @@
  */
 import type {
   JsonValue,
+  SuiteZipRootFile,
   SuiteZipScript,
   TaskImportPreview,
   TaskImportSettings,
@@ -106,6 +107,8 @@ export interface SuiteZipContents {
   tasks: DraftTaskFolder[];
   /** Every file under a task's `verify/`, for "This suite contains code" (R7). */
   scripts: SuiteZipScript[];
+  /** Files at the suite root other than suite.yaml, which the draft leaves out. */
+  rootFilesNotKept: SuiteZipRootFile[];
   fileCount: number;
   unpackedBytes: number;
 }

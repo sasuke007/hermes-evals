@@ -31,23 +31,16 @@ import type {
   SkillUploadValidation,
 } from './types/resources';
 import { API_BASE, apiGet, apiSend } from './client';
-import { apiMode, fixture, fixtureFailure, hasScenario, notFound, withQuery } from './source';
 import {
-  documentsFixture,
-  documentUploadFixture,
-  MCP_INVOICE_DB,
-  mcpSaveFixture,
-  mcpServersFixture,
-  mcpTestFixture,
-  resourceCountsFixture,
-  secretsFixture,
-  type SkillUploadCase,
-  skillConfirmFixture,
-  skillDetailFixture,
-  skillFileFixture,
-  skillsFixture,
-  skillValidationFixture,
-} from '@/fixtures/resources';
+  apiMode,
+  fixture,
+  fixtureFailure,
+  fixtureWorld,
+  hasScenario,
+  notFound,
+  withQuery,
+} from './source';
+import type { SkillUploadCase } from '@/fixtures/resources';
 
 /** The API's upload caps (plan 5.1, 5.2): the dialogs refuse a larger file before sending it. */
 export const SKILL_ZIP_MAX_BYTES = 20 * 1024 * 1024;
@@ -60,7 +53,7 @@ const secretMissing = () => hasScenario('secret-not-set') || hasScenario('mcp-te
 /** Tab counts for the resource kinds nav. */
 export function getResourceCounts(): Promise<ResourceCounts> {
   if (apiMode === 'live') return apiGet('/resources/counts', ResourceCountsSchema);
-  return fixture(() => resourceCountsFixture(noResources()), {
+  return fixture((w) => w.resources.resourceCountsFixture(noResources()), {
     request: 'GET /api/resources/counts',
   });
 }
@@ -72,7 +65,9 @@ export function getResourceCounts(): Promise<ResourceCounts> {
 /** GET /resources/skills: one row per name and version. */
 export function listSkills(): Promise<SkillRow[]> {
   if (apiMode === 'live') return apiGet('/resources/skills', SkillRowSchema.array());
-  return fixture(() => skillsFixture(noResources()), { request: 'GET /api/resources/skills' });
+  return fixture((w) => w.resources.skillsFixture(noResources()), {
+    request: 'GET /api/resources/skills',
+  });
 }
 
 /** GET /resources/skills/:id: SKILL.md (front matter and body), the file tree and "Used by". */
@@ -80,8 +75,8 @@ export function getSkill(id: string): Promise<SkillDetail> {
   if (apiMode === 'live') return apiGet(`/resources/skills/${id}`, SkillDetailSchema);
   const request = `GET /api/resources/skills/${id}`;
   return fixture(
-    () => {
-      const detail = skillDetailFixture(id);
+    (w) => {
+      const detail = w.resources.skillDetailFixture(id);
       if (!detail) throw notFound(request, `skill ${id}`);
       return detail;
     },
@@ -99,8 +94,8 @@ export function getSkillFile(id: string, path: string): Promise<SkillFileContent
   }
   const request = `GET /api/resources/skills/${id}/files/${path}`;
   return fixture(
-    () => {
-      const file = skillFileFixture(id, path);
+    (w) => {
+      const file = w.resources.skillFileFixture(id, path);
       if (!file) throw notFound(request, `file ${path}`);
       return file;
     },
@@ -124,14 +119,15 @@ const inUseDetail = (what: string, names: readonly string[]): string =>
 /**
  * DELETE /resources/skills/:id (Phase 5 section 6.1): only a skill no configuration version
  * names; 409 naming the configurations otherwise (ResourceInUseBody, whose message the
- * ApiError carries). The fixtures refuse a skill a configuration uses.
+ * ApiError carries). The row's `inUse` says the same beforehand (Phase 5b #8), so the page
+ * disables Delete; the fixtures refuse a skill any configuration version names.
  */
-export function deleteSkill(id: string): Promise<void> {
+export async function deleteSkill(id: string): Promise<void> {
   if (apiMode === 'live') return apiSend('DELETE', `/resources/skills/${id}`);
   const request = `DELETE /api/resources/skills/${id}`;
-  const row = skillsFixture(false).find((s) => s.id === id);
-  if (row && row.usedBy.length > 0) {
-    const names = row.usedBy.map((c) => c.name);
+  const row = (await fixtureWorld()).resources.skillsFixture(false).find((s) => s.id === id);
+  if (row?.inUse) {
+    const names = row.inUseBy.map((c) => c.name);
     return fixtureFailure(request, 409, inUseDetail(`skill ${row.name} ${row.version}`, names));
   }
   return fixture(undefined, { request });
@@ -160,7 +156,7 @@ export function validateSkillUpload(file: File): Promise<SkillUploadValidation> 
     body.append('file', file);
     return apiSend('POST', '/resources/skills/validate', body, SkillUploadValidationSchema);
   }
-  return fixture(() => skillValidationFixture(uploadCase()), {
+  return fixture((w) => w.resources.skillValidationFixture(uploadCase()), {
     request: 'POST /api/resources/skills/validate',
     latencyMs: 700,
   });
@@ -169,7 +165,9 @@ export function validateSkillUpload(file: File): Promise<SkillUploadValidation> 
 /** POST /resources/skills with the validation token: stores the skill and returns its row. */
 export function confirmSkillUpload(token: string): Promise<SkillRow> {
   if (apiMode === 'live') return apiSend('POST', '/resources/skills', { token }, SkillRowSchema);
-  return fixture(() => skillConfirmFixture(token), { request: 'POST /api/resources/skills' });
+  return fixture((w) => w.resources.skillConfirmFixture(token), {
+    request: 'POST /api/resources/skills',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +177,7 @@ export function confirmSkillUpload(token: string): Promise<SkillRow> {
 /** GET /resources/documents. */
 export function listDocuments(): Promise<DocumentRow[]> {
   if (apiMode === 'live') return apiGet('/resources/documents', DocumentRowSchema.array());
-  return fixture(() => documentsFixture(noResources()), {
+  return fixture((w) => w.resources.documentsFixture(noResources()), {
     request: 'GET /api/resources/documents',
   });
 }
@@ -195,19 +193,19 @@ export function uploadDocument(file: File): Promise<DocumentRow> {
   if (file.size > DOCUMENT_MAX_BYTES) {
     return fixtureFailure(request, 413, `${file.name} is larger than 50 MB`);
   }
-  return fixture(() => documentUploadFixture(file.name, file.size, file.type), {
+  return fixture((w) => w.resources.documentUploadFixture(file.name, file.size, file.type), {
     request,
     latencyMs: 500,
   });
 }
 
 /** DELETE /resources/documents/:id: as deleteSkill, for a document. */
-export function deleteDocument(id: string): Promise<void> {
+export async function deleteDocument(id: string): Promise<void> {
   if (apiMode === 'live') return apiSend('DELETE', `/resources/documents/${id}`);
   const request = `DELETE /api/resources/documents/${id}`;
-  const row = documentsFixture(false).find((d) => d.id === id);
-  if (row && row.attachedTo.length > 0) {
-    const names = row.attachedTo.map((c) => c.name);
+  const row = (await fixtureWorld()).resources.documentsFixture(false).find((d) => d.id === id);
+  if (row?.inUse) {
+    const names = row.inUseBy.map((c) => c.name);
     return fixtureFailure(request, 409, inUseDetail(`document ${row.filename}`, names));
   }
   return fixture(undefined, { request });
@@ -226,12 +224,14 @@ export function documentContentUrl(id: string): string {
 export function listMcpServers(): Promise<McpServerRow[]> {
   if (apiMode === 'live') return apiGet('/resources/mcp-servers', McpServerRowSchema.array());
   return fixture(
-    () =>
-      mcpServersFixture(noResources()).map((row) =>
-        secretMissing() && row.id === MCP_INVOICE_DB.id
-          ? { ...row, lastTest: mcpTestFixture(row, true) }
-          : row,
-      ),
+    ({ resources }) =>
+      resources
+        .mcpServersFixture(noResources())
+        .map((row) =>
+          secretMissing() && row.id === resources.MCP_INVOICE_DB.id
+            ? { ...row, lastTest: resources.mcpTestFixture(row, true) }
+            : row,
+        ),
     { request: 'GET /api/resources/mcp-servers' },
   );
 }
@@ -254,21 +254,24 @@ function fixtureDefinitionHash(input: McpServerInput): string {
  * Editing a definition a configuration uses creates the next version. A save whose
  * definition passed Test start unsaved keeps that result as the row's last test.
  */
-export function saveMcpServer(input: McpServerInput, id?: string): Promise<McpServerRow> {
+export async function saveMcpServer(input: McpServerInput, id?: string): Promise<McpServerRow> {
   if (apiMode === 'live') {
     return id
       ? apiSend('PUT', `/resources/mcp-servers/${id}`, input, McpServerRowSchema)
       : apiSend('POST', '/resources/mcp-servers', input, McpServerRowSchema);
   }
   const request = id ? `PUT /api/resources/mcp-servers/${id}` : 'POST /api/resources/mcp-servers';
-  const taken = mcpServersFixture(noResources()).find((s) => s.name === input.name.trim());
+  const { resources } = await fixtureWorld();
+  const taken = resources
+    .mcpServersFixture(noResources())
+    .find((s) => s.name === input.name.trim());
   if (!id && taken) {
     return fixtureFailure(request, 409, `an MCP server named ${taken.name} already exists`);
   }
   const kept = passedUnsaved.get(definitionKey(input));
   return fixture(
     () => {
-      const row = mcpSaveFixture(input, id);
+      const row = resources.mcpSaveFixture(input, id);
       if (!kept) return row;
       const { definitionHash: _hash, ...lastTest } = kept;
       return { ...row, lastTest };
@@ -282,7 +285,7 @@ export function saveMcpServer(input: McpServerInput, id?: string): Promise<McpSe
  * A saved server is tested by id (POST /resources/mcp-servers/:id/test); the
  * form tests an unsaved definition (POST /resources/mcp-servers/test).
  */
-export function testMcpServer(target: { id: string } | McpServerInput): Promise<McpTestView> {
+export async function testMcpServer(target: { id: string } | McpServerInput): Promise<McpTestView> {
   const saved = 'id' in target;
   if (apiMode === 'live') {
     return saved
@@ -292,13 +295,15 @@ export function testMcpServer(target: { id: string } | McpServerInput): Promise<
   const request = saved
     ? `POST /api/resources/mcp-servers/${target.id}/test`
     : 'POST /api/resources/mcp-servers/test';
+  const { resources } = await fixtureWorld();
   const definition = saved
-    ? (mcpServersFixture(false).find((s) => s.id === target.id) ?? MCP_INVOICE_DB)
+    ? (resources.mcpServersFixture(false).find((s) => s.id === target.id) ??
+      resources.MCP_INVOICE_DB)
     : target;
   const needsSecret = definition.envNames.includes('INVOICE_DB_URL');
   return fixture(
     (): McpTestView => {
-      const result = mcpTestFixture(definition, needsSecret && secretMissing());
+      const result = resources.mcpTestFixture(definition, needsSecret && secretMissing());
       if (saved || result.status === 'untested') return result;
       // An unsaved test names the definition's hash; a passing one is kept for its save.
       const named = { ...result, definitionHash: fixtureDefinitionHash(target) };
@@ -319,9 +324,12 @@ export function testMcpServer(target: { id: string } | McpServerInput): Promise<
  */
 export function listSecrets(): Promise<SecretRow[]> {
   if (apiMode === 'live') return apiGet('/resources/secrets', SecretRowSchema.array());
-  return fixture(() => secretsFixture({ empty: noResources(), set: !secretMissing() }), {
-    request: 'GET /api/resources/secrets',
-  });
+  return fixture(
+    (w) => w.resources.secretsFixture({ empty: noResources(), set: !secretMissing() }),
+    {
+      request: 'GET /api/resources/secrets',
+    },
+  );
 }
 
 /** "Check again": asks the worker, and egress through it, to report their environment names now. */
@@ -330,7 +338,8 @@ export function checkSecrets(): Promise<SecretRow[]> {
     return apiGet(withQuery('/resources/secrets', { refresh: 'true' }), SecretRowSchema.array());
   }
   return fixture(
-    () => secretsFixture({ empty: noResources(), set: !secretMissing(), checkedNow: true }),
+    (w) =>
+      w.resources.secretsFixture({ empty: noResources(), set: !secretMissing(), checkedNow: true }),
     { request: 'GET /api/resources/secrets', latencyMs: 600 },
   );
 }

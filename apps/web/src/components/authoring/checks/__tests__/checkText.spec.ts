@@ -140,7 +140,7 @@ describe('keys, type changes and suggestions', () => {
 
   it('keeps key, primary and path across answer types and lists what it drops', () => {
     const from = check('json_match', { path: 'overdue_by_vendor', pass_at: 0.8 });
-    const { check: next, dropped } = changeType(from, 'exact_match', []);
+    const { check: next, dropped } = changeType(from, 'exact_match');
     expect(next).toEqual({
       key: 'answer',
       type: 'exact_match',

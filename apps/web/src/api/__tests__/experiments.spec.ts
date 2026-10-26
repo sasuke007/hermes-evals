@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '@/api/client';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import {
   cancelExperiment,
   duplicateExperiment,
   estimateExperiment,
-  EXPERIMENT_IDS,
   getComparison,
   getExperiment,
   getNewExperimentOptions,

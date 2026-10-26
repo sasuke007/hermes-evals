@@ -111,6 +111,13 @@ export const DRAFT_SCENARIOS: ScenarioEntry[] = [
       "Run self-check on summary_file: the verifier script exits with status 1 (KeyError: 'totals'); the panel shows its transcript.",
     route: task('summary_file'),
   },
+  {
+    name: 'task-large-text',
+    domain: 'suites',
+    description:
+      'Files tab of overdue_count: rubrics/method.md came in a zip at 1.4 MB, over the 1 MiB an editor holds, so it is kept as an other file, saved as is and shown read-only (Phase 5b question 18).',
+    route: task('overdue_count', '?tab=files'),
+  },
 ];
 
 export const DRAFT_SCENARIO_NAMES = DRAFT_SCENARIOS.map((s) => s.name);

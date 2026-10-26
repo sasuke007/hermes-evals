@@ -6,8 +6,9 @@ import type { SandboxStatus } from '@/api/types/system';
 import { shortRevision } from '@/lib/format';
 
 /**
- * The 15 isolation checks the worker runs before it executes anything. Collapsed to its
- * summary by default; failing checks are always listed with their detail ("Show all 15
+ * The isolation checks the worker runs before it executes anything: the trial container's
+ * 15 and, since Phase 7, one verifier container started through docker-guard. Collapsed to
+ * its summary by default; failing checks are always listed with their detail ("Show all 16
  * checks" opens the rest, as the System board draws it), and an alert above says execution is
  * disabled and how to re-run the self-test.
  */

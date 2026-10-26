@@ -11,6 +11,7 @@ import type { ReadStream } from 'node:fs';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
+  AttemptStderr,
   RunDetail,
   RunEventsPage,
   RunFilters,
@@ -54,6 +55,7 @@ import {
   workerById,
 } from './run-views.queries.js';
 import type { ArtifactRecord, EventRecord } from './rows.js';
+import { attemptIdOf, attemptStderrView, stderrLogRef } from './stderr-log.js';
 import { buildTimeline, timelinePage } from './timeline.js';
 
 /** Events one GET /runs/:id/events page is built from at most; the cursor continues from there. */
@@ -221,6 +223,28 @@ export class RunViewsService {
     if (!format || !artifact.sha256) return null;
     await this.requireBlob(artifact.sha256, artifact.path);
     return streamTablePreview(this.storage.stream(artifact.sha256), format);
+  }
+
+  /**
+   * GET /runs/:id/attempts/:n/stderr: the attempt's stderr.log, as the worker
+   * stored it redacted when the attempt ended (stderr-log.ts).
+   */
+  async stderr(runId: string, n: number): Promise<AttemptStderr> {
+    const attemptId = await attemptIdOf(this.db, runId, n);
+    if (!attemptId) {
+      if (!(await runById(this.db, runId))) throw notFound(`run ${runId}`);
+      throw notFound(`attempt ${n} of run ${runId}`);
+    }
+    const ref = await stderrLogRef(this.db, attemptId);
+    if (!ref) throw notFound(`stderr.log of attempt ${n}`);
+    let text: Buffer;
+    try {
+      text = await this.storage.read(ref.sha256);
+    } catch (err) {
+      if ((err as { code?: unknown }).code !== 'ENOENT') throw err;
+      throw serverError(`stderr.log of attempt ${n} is missing from the blob store`);
+    }
+    return attemptStderrView({ runId, attempt: n, text: text.toString('utf8'), ref });
   }
 
   private async artifact(runId: string, artifactId: string): Promise<ArtifactRecord> {

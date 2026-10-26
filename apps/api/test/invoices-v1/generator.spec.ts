@@ -65,6 +65,17 @@ describe('scripts/fixtures/invoices-v1.ts', () => {
       'summary_file/expected/summary.csv',
       'summary_file/verify/expected_summary.json',
     ]);
+    // The tasks answered from the ledger get task.yaml's answers_from_fixtures key (Phase 7).
+    expect(generated.filter((f) => f.endsWith('task.yaml'))).toEqual([
+      'dup_invoices/task.yaml',
+      'overdue_list/task.yaml',
+      'per_vendor/task.yaml',
+    ]);
+    for (const file of generated.filter((f) => f.endsWith('task.yaml'))) {
+      expect(await readFile(join(first, 'suites/invoices-v1', file), 'utf8')).toMatch(
+        /\nself_check:\n {2}answers_from_fixtures: true\n$/,
+      );
+    }
     expect(await listFiles(join(first, 'scripts'))).toEqual(['phase6-mock-scripts.json']);
   });
 

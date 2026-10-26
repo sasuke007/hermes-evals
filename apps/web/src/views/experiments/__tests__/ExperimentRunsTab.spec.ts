@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VueWrapper } from '@vue/test-utils';
-import { EXPERIMENT_IDS } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import { useExperimentDetailStore } from '@/stores/experiment-detail';
 import { mountExperimentRoute, settle } from './experimentPage';
 

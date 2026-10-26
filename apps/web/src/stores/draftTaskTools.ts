@@ -7,9 +7,12 @@
  *   reference" chip stays live); a pasted reply is scored a moment after typing stops.
  * - The self-check runs file checks and verifier scripts in the worker (plan 4.6). Without a
  *   worker the API answers 503: the panel then says so and keeps the draft.
- * - A file over 25 MB is refused here and never sent ("ledger-2025.parquet is 31.2 MB. The
- *   limit is 25 MB per file."). Uploads run one per file, each with Cancel; leaving the
- *   editor while one runs asks first (SA.13).
+ * - A file over 25 MB is refused here at once ("ledger-2025.parquet is 31.2 MB. The limit is
+ *   25 MB per file."), and only its first 25 MB and a byte go to the API, which refuses it
+ *   too and keeps the refusal on the task, so readiness still reports it after a reload
+ *   (Phase 5b question 11). `refusals` adds the ones the API keeps to those refused here;
+ *   dismissing one deletes its path, which drops the API's record. Uploads run one per
+ *   file, each with Cancel; leaving the editor while one runs asks first (SA.13).
  */
 import { AUTHORING_LIMITS } from '@hermes-evals/shared';
 import { defineStore } from 'pinia';
@@ -26,7 +29,17 @@ import {
 import { uploadDraftFile } from '@/api/drafts-upload';
 import type { DraftUploadKind, TryCheckResult } from '@/api/types/authoring';
 import type { TablePreview } from '@/api/types/suites';
+import { kindFolder } from '@/components/authoring/files/fileRows';
 import { useDraftTaskStore } from './draftTask';
+import {
+  OVER_LIMIT_REASON,
+  keptRefusals as keptRefusalsOf,
+  mergeRefusals,
+  refusalHead,
+  type RejectedFile,
+} from './draftRefusals';
+
+export { OVER_LIMIT_REASON, type RejectedFile };
 
 const ANSWER_TYPES: readonly string[] = [
   'numeric_tolerance',
@@ -59,15 +72,6 @@ export interface UploadItem {
   controller: AbortController;
 }
 
-export interface RejectedFile {
-  name: string;
-  /** Where it was dropped, so the section that took the drop says so. */
-  kind: DraftUploadKind;
-  sizeBytes: number;
-  /** "The limit is 25 MB per file.", or the API's sentence. */
-  reason: string;
-}
-
 const emptyTry = (): TryState => ({
   reference: null,
   referenceError: null,
@@ -94,6 +98,16 @@ export const useDraftTaskToolsStore = defineStore('draftTaskTools', () => {
   const replyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const uploading = computed(() => uploads.value.length > 0);
+  /** Paths of kept refusals dismissed while a file is stored there (a DELETE would remove it). */
+  const dismissedPaths = ref<string[]>([]);
+
+  /** Uploads the API refused for their size and keeps on the task, read from its readiness. */
+  const keptRefusals = computed(() => keptRefusalsOf(task.detail?.readiness.issues ?? []));
+
+  /** What the drop zones list: the files refused here, then those the API keeps. */
+  const refusals = computed<RejectedFile[]>(() =>
+    mergeRefusals(rejected.value, keptRefusals.value, dismissedPaths.value),
+  );
 
   function tryOf(checkKey: string): TryState {
     if (!tries.value[checkKey]) tries.value[checkKey] = emptyTry();
@@ -199,16 +213,18 @@ export const useDraftTaskToolsStore = defineStore('draftTaskTools', () => {
     fileError.value = null;
     await Promise.all(
       items.map(async ({ file, path: dropped }) => {
+        const path = kind === 'home_seed' ? `memories/${file.name}` : `${prefix}${dropped}`;
         if (file.size > AUTHORING_LIMITS.suiteMaxFileBytes) {
           rejected.value.push({
             name: file.name,
             kind,
             sizeBytes: file.size,
-            reason: 'The limit is 25 MB per file.',
+            reason: OVER_LIMIT_REASON,
+            path: `${kindFolder(kind, task.form?.expectedWorkspace ?? null, task.form?.expectedHome ?? null)}/${path}`,
           });
+          await reportRefusal(f, task.key ?? k, file, { kind, path });
           return;
         }
-        const path = kind === 'home_seed' ? `memories/${file.name}` : `${prefix}${dropped}`;
         const item: UploadItem = {
           id: nextUpload++,
           name: file.name,
@@ -251,6 +267,24 @@ export const useDraftTaskToolsStore = defineStore('draftTaskTools', () => {
     );
   }
 
+  /**
+   * Sends the first limit + 1 bytes of a file refused here, so the API refuses it as well
+   * (413) and keeps the refusal on the task. Nothing of the file is stored; any answer is
+   * fine, since the row says so already.
+   */
+  async function reportRefusal(
+    folder: string,
+    key: string,
+    file: File,
+    fields: { kind: DraftUploadKind; path: string },
+  ): Promise<void> {
+    try {
+      task.applyDetail(await uploadDraftFile(folder, key, refusalHead(file), fields));
+    } catch {
+      // The expected 413: the refusal is kept, and shows on the next read of the task.
+    }
+  }
+
   /** A file the section refuses before sending it (a home file that is not a memory). */
   function rejectFile(file: File, kind: DraftUploadKind, reason: string): void {
     rejected.value.push({ name: file.name, kind, sizeBytes: file.size, reason });
@@ -264,8 +298,24 @@ export const useDraftTaskToolsStore = defineStore('draftTaskTools', () => {
     for (const item of uploads.value) item.controller.abort();
   }
 
-  function dismissRejected(name: string): void {
+  /**
+   * Hides a refused file. A refusal the API keeps goes by deleting its path, unless a file is
+   * stored there (an earlier upload a bigger one tried to replace): then it is only hidden.
+   */
+  async function dismissRejected(name: string): Promise<void> {
+    const row = refusals.value.find((r) => r.name === name);
     rejected.value = rejected.value.filter((r) => r.name !== name);
+    const path = row?.path;
+    if (!path || !task.folder || !task.key) return;
+    if (task.detail?.files.some((f) => f.path === path)) {
+      dismissedPaths.value = [...dismissedPaths.value, path];
+      return;
+    }
+    try {
+      task.applyDetail(await deleteDraftFile(task.folder, task.key, path));
+    } catch {
+      // Nothing kept at that path (the API never learned of it): nothing to drop.
+    }
   }
 
   async function removeFile(path: string): Promise<void> {
@@ -322,6 +372,7 @@ export const useDraftTaskToolsStore = defineStore('draftTaskTools', () => {
     selfCheckError.value = null;
     uploads.value = [];
     rejected.value = [];
+    dismissedPaths.value = [];
     fileError.value = null;
     sources.value = {};
     previews.value = {};
@@ -334,6 +385,7 @@ export const useDraftTaskToolsStore = defineStore('draftTaskTools', () => {
     uploads,
     uploading,
     rejected,
+    refusals,
     fileError,
     sources,
     previews,

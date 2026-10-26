@@ -7,7 +7,9 @@
  *
  * Scenarios handled here (see scenarios.ts): empty, upload-invalid,
  * upload-new-version, upload-same-version-different-hash, mcp-test-failed,
- * secret-not-set.
+ * secret-not-set, document-in-older-version (no configuration's latest
+ * version has vendor-policy-v3.pdf, but an older version of with-skill does,
+ * so Delete stays disabled; Phase 5b question 8).
  */
 import type {
   DocumentRow,
@@ -21,6 +23,7 @@ import type {
   SkillRow,
   SkillUploadValidation,
 } from '@/api/types/resources';
+import { hasScenario } from '@/api/source';
 import { at, sha, ulid } from './suites';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +124,8 @@ export const SKILL_INVOICE_METHOD: SkillRow = {
   unpackedBytes: 18637,
   uploadedAt: at(22, '09:48:21'),
   usedBy: SKILL_USED_BY,
+  inUse: true,
+  inUseBy: SKILL_USED_BY,
 };
 
 export const SKILL_INVOICE_METHOD_110: SkillRow = {
@@ -130,6 +135,8 @@ export const SKILL_INVOICE_METHOD_110: SkillRow = {
   contentHash: SKILL_INVOICE_METHOD_110_HASH,
   uploadedAt: at(23, '15:46:02'),
   usedBy: [],
+  inUse: false,
+  inUseBy: [],
 };
 
 export function skillsFixture(empty: boolean): SkillRow[] {
@@ -251,10 +258,17 @@ export const DOCUMENT_POLICY: DocumentRow = {
   sha256: DOCUMENT_POLICY_HASH,
   uploadedAt: at(22, '09:30:44'),
   attachedTo: [],
+  inUse: false,
+  inUseBy: [],
 };
 
 export function documentsFixture(empty: boolean): DocumentRow[] {
-  return empty ? [] : [DOCUMENT_POLICY];
+  if (empty) return [];
+  if (hasScenario('document-in-older-version')) {
+    const keptBy = [{ configurationId: CONFIG_IDS['with-skill'], name: 'with-skill' }];
+    return [{ ...DOCUMENT_POLICY, inUse: true, inUseBy: keptBy }];
+  }
+  return [DOCUMENT_POLICY];
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -276,6 +290,8 @@ export function documentUploadFixture(name: string, sizeBytes: number, type: str
     sha256: sha(`${name}:${sizeBytes}`),
     uploadedAt: at(23, '15:48:12'),
     attachedTo: [],
+    inUse: false,
+    inUseBy: [],
   };
 }
 
@@ -340,8 +356,9 @@ export const MCP_INVOICE_DB: McpServerRow = {
 };
 
 /**
- * The http sample: egress adds the Authorization header from its own
- * VENDOR_API_TOKEN, so the run never sees the value. No configuration uses it.
+ * The http sample: egress adds the Authorization header, "Bearer " and its own
+ * VENDOR_API_TOKEN (Phase 6 question 6: .env holds the raw token), so the run
+ * never sees the value. No configuration uses it.
  */
 export const MCP_VENDOR_API_INPUT: McpServerInput = {
   name: 'vendor-api',
@@ -350,7 +367,7 @@ export const MCP_VENDOR_API_INPUT: McpServerInput = {
   args: [],
   envNames: [],
   url: 'https://vendor-api.example.com/mcp',
-  headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }],
+  headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Bearer ' }],
   include: [],
   exclude: [],
   timeoutS: 30,

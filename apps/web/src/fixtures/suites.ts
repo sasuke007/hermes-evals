@@ -1236,6 +1236,24 @@ export function taskDiffFixture(
   };
 }
 
+/**
+ * diff-not-recorded: the older version was loaded before Phase 5b, so its reference.json has
+ * no recorded size or hash (Phase 5b question 9); the page says "not recorded".
+ */
+export function withReferenceNotRecorded(diff: TaskDiff): TaskDiff {
+  const notRecorded = {
+    sizeBytes: null,
+    sha256: null,
+    notRecorded: 'loaded_before_phase_5b' as const,
+  };
+  const files = diff.files.map((f) => {
+    if (f.path !== 'reference.json' || !f.before) return f;
+    const unchanged = f.change === 'unchanged';
+    return { ...f, before: notRecorded, after: unchanged ? notRecorded : f.after };
+  });
+  return { ...diff, files };
+}
+
 /** Preview of a fixture file: invoices.csv is tabular; other files have none. */
 export function fixturePreviewFixture(path: string): TablePreview | null {
   return path === 'invoices.csv' ? INVOICES_PREVIEW : null;

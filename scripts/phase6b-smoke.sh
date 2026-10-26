@@ -55,9 +55,12 @@
 # so no file changes:
 #
 #   export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
-#   MOCK_SCRIPTS="$(python3 -c 'import glob, json; print(json.dumps([s for f in sorted(glob.glob("scripts/*mock-scripts.json")) for s in json.load(open(f))]))')" \
+#   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
 #     docker compose --profile test --profile samples up -d --build
+#
+# (Compose mounts the directory MOCK_SCRIPTS_FILE names into the mock, which
+# reads every *.json file in it in name order.)
 #
 # Every configuration uses provider `custom` with base URL
 # http://mock-model:8090/v1 and model mock/scripted, which config/prices.yaml
@@ -345,7 +348,7 @@ check 'GET /system/workers: online, sandbox proven' 200 \
   '"; ".join("{} effective concurrency {}".format(w["id"], w["effectiveConcurrency"]) for w in d if w["status"] == "online")'
 
 if [ "$DOCKER" = 1 ]; then
-  dc exec -T mock-model printenv MOCK_SCRIPTS >"$WORK/mock-scripts.json" 2>/dev/null
+  dc exec -T mock-model node dist/mock-model.js --print-scripts >"$WORK/mock-scripts.json" 2>/dev/null
   # Every script of every file, by its phrase: the order does not matter.
   check_file 'the mock holds every scripts/*mock-scripts.json' "$WORK/mock-scripts.json" \
     'all(s["match"] in {x["match"] for x in d} for f in __import__("glob").glob(env["REPO_DIR"] + "/scripts/*mock-scripts.json") for s in json.load(open(f)))' \
@@ -456,13 +459,21 @@ if runs mcp-v1; then
   for DOC in invoices.csv vendors.json; do upload_document "$REPO_DIR/samples/documents/mcp-v1/$DOC"; done
   MCP_DOCS="$DOC_IDS"
   # sample_server NAME DEFINITION EXPR: reuses the stored server of that name
-  # (its latest version, which must pass EXPR), else creates it; sets SERVER_VERSION.
+  # when its latest version passes EXPR, updates it to DEFINITION when it does
+  # not, else creates it; sets SERVER_VERSION.
   sample_server() {
     SERVER_VERSION=''
     request GET /resources/mcp-servers
     if [ "$(NAME="$1" jv 'any(r["name"] == env["NAME"] for r in d)' 2>/dev/null)" = true ]; then
       NAME="$1" jv 'json.dumps(next(r for r in d if r["name"] == env["NAME"]))' >"$WORK/server.json"
-      check_file "MCP server $1 (stored already: reused)" "$WORK/server.json" "$3" '"v{version} · {transport}".format_map(d)' || return 0
+      if [ "$(jv "$3" "$WORK/server.json" 2>/dev/null)" = true ]; then
+        check_file "MCP server $1 (stored already: reused)" "$WORK/server.json" "$3" '"v{version} · {transport}".format_map(d)' || return 0
+      else
+        # Stored with another definition (vendor-directory before Phase 7 had no
+        # `Bearer ` prefix): update it, which makes its next version if frozen.
+        send_json PUT "/resources/mcp-servers/$(jv 'd["id"]' "$WORK/server.json" 2>/dev/null)" "$2"
+        NAME="$1" check "MCP server $1 (stored with another definition: updated)" 200 "d[\"name\"] == env[\"NAME\"] and $3" '"v{version} · {transport}".format_map(d)' || return 0
+      fi
     else
       send_json POST /resources/mcp-servers "$2"
       NAME="$1" check "MCP server $1: created" 201 "d[\"name\"] == env[\"NAME\"] and $3" '"v{version} · {transport}".format_map(d)' || return 0
@@ -471,8 +482,8 @@ if runs mcp-v1; then
   }
   # Fixed names: mcp-v1's tasks and scripts name mcp__invoice_db__* and mcp__vendor_directory__*.
   sample_server vendor-directory \
-    '{"name":"vendor-directory","transport":"http","command":null,"args":[],"envNames":[],"url":"http://vendor-directory:8000/mcp","headers":[{"header":"Authorization","env":"VENDOR_DIRECTORY_TOKEN"}],"include":[],"exclude":[],"timeoutS":30}' \
-    'd["transport"] == "http" and d["url"] == "http://vendor-directory:8000/mcp" and d["headers"] == [{"header": "Authorization", "env": "VENDOR_DIRECTORY_TOKEN"}] and d["include"] == [] and d["exclude"] == []'
+    '{"name":"vendor-directory","transport":"http","command":null,"args":[],"envNames":[],"url":"http://vendor-directory:8000/mcp","headers":[{"header":"Authorization","env":"VENDOR_DIRECTORY_TOKEN","prefix":"Bearer "}],"include":[],"exclude":[],"timeoutS":30}' \
+    'd["transport"] == "http" and d["url"] == "http://vendor-directory:8000/mcp" and d["headers"] == [{"header": "Authorization", "env": "VENDOR_DIRECTORY_TOKEN", "prefix": "Bearer "}] and d["include"] == [] and d["exclude"] == []'
   VENDORS_VERSION="$SERVER_VERSION"
   sample_server invoice-db \
     '{"name":"invoice-db","transport":"stdio","command":"invoice-db-mcp","args":[],"envNames":["INVOICE_DB_URL"],"url":null,"headers":[],"include":[],"exclude":[],"timeoutS":30}' \

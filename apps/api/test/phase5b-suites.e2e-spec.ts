@@ -93,8 +93,11 @@ describe.skipIf(!SERVER_URL)('Phase 5b on Postgres 17: imports and round trips',
         path: 'answer_verifier/verify/check_count.py',
         sizeBytes: script.length,
         sha256: sha256(script),
+        runByCheck: true,
       },
     ]);
+    expect(checked.verifyCounts).toEqual({ files: 1, checkScripts: 1 });
+    expect(checked.rootFilesNotKept).toEqual([]);
     // No code runs before the scripts are trusted: the verifier's task waits for the worker.
     expect(checked.tasks).toEqual([
       expect.objectContaining({ key: 'answer_verifier', readiness: 'not_run' }),

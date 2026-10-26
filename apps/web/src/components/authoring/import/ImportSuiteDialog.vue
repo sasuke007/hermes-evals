@@ -14,6 +14,8 @@ import { ROUTE_NAMES } from '@/router';
 import { useSuiteAuthoringStore } from '@/stores/suites-authoring';
 import { useSuitesStore } from '@/stores/suites';
 import { draftLocation } from '@/views/suites/authoringRoutes';
+import ZipProblems from './ZipProblems.vue';
+import ZipRootFilesNote from './ZipRootFilesNote.vue';
 import ZipScriptsPanel from './ZipScriptsPanel.vue';
 import ZipTaskList from './ZipTaskList.vue';
 import { nameHolders } from '../new-suite/suiteName';
@@ -26,7 +28,8 @@ import { newNameProblem, taskCountLine, zipChip } from './zipFormat';
  * of a new suite, every task added, saved as v1 after review. A name another suite holds is
  * imported under a new one, or the existing suite is opened instead. A zip with verifier
  * scripts shows "This suite contains code" and waits for "I trust these scripts" (R7).
- * A rejection stops the import; invalid tasks do not.
+ * A rejection stops the import; invalid tasks do not. Files at the suite root other than
+ * suite.yaml are named as not imported (Phase 7).
  *
  * Validating shows no file count or self-check name: the validation is one request and runs
  * no code, so there is no step to report (the board draws "self-checking unmatched_lines").
@@ -245,37 +248,7 @@ const IMPORT_NOTE =
         </span>
       </div>
 
-      <template v-else-if="result?.outcome === 'rejected'">
-        <div
-          v-for="problem in result.problems"
-          :key="problem.title"
-          role="alert"
-          class="flex items-start gap-10 rounded-4 border border-fail bg-fail-soft px-12 py-10"
-          data-testid="zip-rejected"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            aria-hidden="true"
-            class="mt-2 flex-none text-fail-text"
-          >
-            <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" />
-            <path
-              d="M8 4.5v4M8 11h.01"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-            />
-          </svg>
-          <span class="flex flex-col gap-2">
-            <b class="text-fail-text"><CodeText :text="problem.title" /></b>
-            <span v-if="problem.detail" class="text-text-2"
-              ><CodeText :text="problem.detail"
-            /></span>
-          </span>
-        </div>
-      </template>
+      <ZipProblems v-else-if="result?.outcome === 'rejected'" :problems="result.problems" />
 
       <template v-else-if="result && asking">
         <div
@@ -343,8 +316,10 @@ const IMPORT_NOTE =
           v-if="result.scripts.length"
           v-model:trusted="trusted"
           :scripts="result.scripts"
+          :counts="result.verifyCounts"
         />
         <ZipTaskList :tasks="result.tasks" />
+        <ZipRootFilesNote v-if="result.rootFilesNotKept.length" :files="result.rootFilesNotKept" />
         <p v-if="hasInvalid" class="text-12 text-text-3">
           An invalid task can be imported. It is shown with its reason and can't be launched until
           it is fixed.

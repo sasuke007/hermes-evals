@@ -11,6 +11,7 @@
  */
 import {
   ApiErrorBodySchema,
+  AttemptStderrSchema,
   BulkRescoreResultSchema,
   BulkRunActionInputSchema,
   BulkRunActionResultSchema,
@@ -144,6 +145,7 @@ export const RESPONSE_SCHEMAS = {
   RunListResult: RunListResultSchema,
   RunDetail: RunDetailSchema,
   RunEventsPage: RunEventsPageSchema,
+  AttemptStderr: AttemptStderrSchema,
   RunActionResult: RunActionResultSchema,
   BulkRunActionResult: BulkRunActionResultSchema,
   RescoreRunResult: RescoreRunResultSchema,

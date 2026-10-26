@@ -222,18 +222,18 @@ describe('SystemPage', () => {
       const s = section('sandbox');
       expect(s.find('[role="alert"]').exists()).toBe(false);
       expect(s.get('[data-testid="sandbox-summary"]').text()).toBe(
-        'Isolation proven · 15 of 15 checks · checked 2 min ago at worker start',
+        'Isolation proven · 16 of 16 checks · checked 2 min ago at worker start',
       );
       expect(s.text()).toContain('Hermes hermes-agent v0.22.4 @ 4d04303');
       expect(s.findAll('li[data-check]')).toHaveLength(0);
-      expect(s.get('button[aria-expanded]').text()).toBe('Show 15 checks');
+      expect(s.get('button[aria-expanded]').text()).toBe('Show 16 checks');
     });
 
     it('sandbox-failed: execution disabled, the failing checks open', async () => {
       await mountPage('sandbox-failed');
       const s = section('sandbox');
       expect(s.get('[role="alert"]').text()).toContain(
-        'Execution is disabled: 2 of 15 isolation checks failed. No run will start until every check passes.',
+        'Execution is disabled: 2 of 16 isolation checks failed. No run will start until every check passes.',
       );
       expect(s.get('[role="alert"]').text()).toContain(
         'docker compose exec worker node dist/sandbox-cli.js selftest',

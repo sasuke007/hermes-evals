@@ -1,6 +1,14 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { McpServerInput } from '@hermes-evals/shared';
-import { definitionHash, planEdit, type LatestVersion } from './definition.js';
+import { canonicalJson } from '../../queue/queues.js';
+import {
+  definitionHash,
+  definitionOf,
+  planEdit,
+  versionColumns,
+  type LatestVersion,
+} from './definition.js';
 
 const stdio: McpServerInput = {
   name: 'invoice-db',
@@ -140,5 +148,92 @@ describe('planEdit', () => {
     // Version 2 exists only because version 1 froze, so the name is fixed even
     // while version 2 itself is unused.
     expect(planEdit(latest({ version: 2 }), renamed)).toEqual({ kind: 'refuse_rename' });
+  });
+});
+
+describe('a header prefix (Phase 7)', () => {
+  /** The hash as it was computed before prefixes existed, written out by hand. */
+  const hashBeforePhase7 = (def: McpServerInput): string =>
+    createHash('sha256')
+      .update(
+        canonicalJson({
+          name: def.name,
+          transport: def.transport,
+          command: def.command,
+          args: def.args,
+          envNames: [...def.envNames].sort(),
+          url: def.url,
+          headers: def.headers
+            .map((h) => ({ header: h.header.toLowerCase(), env: h.env }))
+            .sort((a, b) => (a.header < b.header ? -1 : a.header > b.header ? 1 : 0)),
+          include: [...def.include].sort(),
+          exclude: [...def.exclude].sort(),
+          timeoutS: def.timeoutS,
+        }),
+      )
+      .digest('hex');
+  const bearer: McpServerInput = {
+    ...http,
+    headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Bearer ' }],
+  };
+
+  it('keeps the hash of a definition without one, so no new version is made for it', () => {
+    expect(definitionHash(http)).toBe(hashBeforePhase7(http));
+    expect(definitionHash(stdio)).toBe(hashBeforePhase7(stdio));
+  });
+
+  it('changes the hash when a prefix is set, changed or removed', () => {
+    const plain = { ...bearer, headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }] };
+    const token = {
+      ...bearer,
+      headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Token ' }],
+    };
+    const hashes = new Set([plain, bearer, token].map(definitionHash));
+    expect(hashes.size).toBe(3);
+    // Header case still does not matter, the prefix's does.
+    expect(
+      definitionHash({
+        ...bearer,
+        headers: [{ header: 'authorization', env: 'VENDOR_API_TOKEN', prefix: 'Bearer ' }],
+      }),
+    ).toBe(definitionHash(bearer));
+    expect(
+      definitionHash({
+        ...bearer,
+        headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'bearer ' }],
+      }),
+    ).not.toBe(definitionHash(bearer));
+  });
+
+  it('stores the prefix only when there is one, and reads it back', () => {
+    const columns = versionColumns(bearer);
+    expect(columns.headers).toEqual(bearer.headers);
+    expect(versionColumns(http).headers).toEqual(http.headers);
+    expect(versionColumns(http).headers.every((h) => !('prefix' in h))).toBe(true);
+    const row = { ...columns, id: 'v1' } as unknown as Parameters<typeof definitionOf>[1];
+    expect(definitionOf(bearer.name, row).headers).toEqual(bearer.headers);
+  });
+
+  it('makes adding a prefix to a frozen definition its next version, and an unfrozen one in place', () => {
+    const was: LatestVersion = {
+      definition: http,
+      version: 1,
+      definitionHash: definitionHash(http),
+      frozen: true,
+    };
+    const next = {
+      ...http,
+      headers: [{ ...http.headers[0]!, prefix: 'Bearer ' }, http.headers[1]!],
+    };
+    expect(planEdit(was, next)).toEqual({
+      kind: 'new_version',
+      version: 2,
+      definitionHash: definitionHash(next),
+    });
+    expect(planEdit({ ...was, frozen: false }, next)).toEqual({
+      kind: 'in_place',
+      definitionHash: definitionHash(next),
+      resetTest: true,
+    });
   });
 });

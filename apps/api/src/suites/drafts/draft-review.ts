@@ -3,15 +3,17 @@
  * summary, the files the save writes to the folder (files the UI does not
  * manage, verify/ scripts and a README, are kept as they are and not
  * listed), each touched task's readiness, and the tasks that would be
- * stored invalid ("Save with 1 invalid task?").
+ * stored invalid ("Save with 1 invalid task?"): those with a problem the
+ * loader would also find, which an upload refused for its size is not.
  */
-import type {
-  DraftChange,
-  DraftReview,
-  DraftWrite,
-  ReadinessRuleResult,
-  SuiteDraftView,
-  TaskReadiness,
+import {
+  refusedUploadMessage,
+  type DraftChange,
+  type DraftReview,
+  type DraftWrite,
+  type ReadinessRuleResult,
+  type SuiteDraftView,
+  type TaskReadiness,
 } from '@hermes-evals/shared';
 import { suiteDisplayPath } from '../views/format.js';
 import { folderFiles, utf8Size, type FolderFile } from './draft-folder.js';
@@ -84,9 +86,25 @@ function readinessNote(readiness: TaskReadiness | null): string {
   return lead.charAt(0).toLowerCase() + lead.slice(1);
 }
 
+/**
+ * The problem rows the loader would also find. An upload refused for its
+ * size is a `file_limits` problem that leaves no file behind, so a row that
+ * holds nothing else does not make the task load invalid.
+ */
+function loaderProblems(row: DraftTaskDbRow): ReadinessRuleResult[] {
+  const readiness = row.readiness;
+  if (readiness === null) return [];
+  const refused = new Set(row.refusedUploads.map(refusedUploadMessage));
+  const onlyRefused = readiness.issues
+    .filter((i) => i.rule === 'file_limits' && i.severity === 'problem')
+    .every((i) => refused.has(i.message));
+  return readiness.rules.filter(
+    (r) => r.status === 'problem' && !(r.rule === 'file_limits' && onlyRefused),
+  );
+}
+
 /** Why a task would be stored invalid: its first problem ("self-check failed" for rows 12 and 13). */
-function invalidReason(readiness: TaskReadiness): string {
-  const first = readiness.rules.find((r: ReadinessRuleResult) => r.status === 'problem')!;
+function invalidReason(first: ReadinessRuleResult): string {
   return first.rule === 'self_check' || first.rule === 'negative_control'
     ? 'self-check failed'
     : first.message;
@@ -179,8 +197,9 @@ export function draftReview(view: SuiteDraftView, tasks: readonly ReviewTask[]):
       readiness: t.row.readiness?.summary ?? 'not_run',
       note: readinessNote(t.row.readiness),
     })),
-    invalid: live
-      .filter((t) => t.row.readiness?.summary === 'problems')
-      .map((t) => ({ key: t.row.key, reason: invalidReason(t.row.readiness!) })),
+    invalid: live.flatMap((t) => {
+      const [first] = loaderProblems(t.row);
+      return first === undefined ? [] : [{ key: t.row.key, reason: invalidReason(first) }];
+    }),
   };
 }

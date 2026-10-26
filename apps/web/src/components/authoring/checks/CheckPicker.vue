@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, useId } from 'vue';
 import type { ScorerType } from '@hermes-evals/shared';
 import CodeText from '../editors/CodeText.vue';
 import { CHECK_TYPE_NAMES, PICKER_GROUPS, type PickerCard } from './checkText';
+import { CHOOSE_SCRIPT_FIRST, initialScript, scriptOptions } from './scriptChoice';
 
 /**
  * The gallery + Add check opens (Components 5, CheckPicker; SA.7, SA.7a): a 560px popover
  * under the button, grouped Answer, Workspace, Behaviour, Judge and Script. Each card says
  * what it checks, what to use it for and whether it gives partial credit; the reference
- * suggests one. Verifier script is disabled until the task has a script in verify/. In
- * replace mode (Change type…) the current type is marked and disabled. The cards are a
- * listbox: arrow keys move, Enter picks, Esc closes and focus returns to what opened it.
+ * suggests one. Verifier script is disabled until the task has a file in verify/; then its
+ * card asks for the script first (Phase 5b question 19): a Script field in the card, set to
+ * the task's only Python file or else empty, and picking the card without one says so and
+ * focuses the field. In replace mode (Change type…) the current type is marked and
+ * disabled. The cards are a listbox: arrow keys move, Enter picks, Esc closes and focus
+ * returns to what opened it.
  */
 const props = withDefaults(
   defineProps<{
@@ -21,7 +25,8 @@ const props = withDefaults(
     suggested?: { type: ScorerType; reason: string } | null;
     /** No reference yet: the header asks for one. */
     noReference?: boolean;
-    hasScripts?: boolean;
+    /** The task's files under verify/, by name there: `check_summary.py`. */
+    scripts?: string[];
   }>(),
   {
     mode: 'add',
@@ -29,16 +34,18 @@ const props = withDefaults(
     currentType: null,
     suggested: null,
     noReference: false,
-    hasScripts: false,
+    scripts: () => [],
   },
 );
-const emit = defineEmits<{ pick: [type: ScorerType]; close: [] }>();
+/** `script` comes with verifier_script only: the file the card asked for. */
+const emit = defineEmits<{ pick: [type: ScorerType, script?: string]; close: [] }>();
 
 const list = ref<HTMLElement | null>(null);
 const optionId = (type: ScorerType) => `ck-opt-${type}`;
+const hasScripts = computed(() => props.scripts.length > 0);
 const disabled = (type: ScorerType) =>
   (props.mode === 'replace' && type === props.currentType) ||
-  (type === 'verifier_script' && !props.hasScripts);
+  (type === 'verifier_script' && !hasScripts.value);
 const order = computed(() =>
   PICKER_GROUPS.flatMap((g) => g.cards.map((c) => c.type)).filter((t) => !disabled(t)),
 );
@@ -53,6 +60,45 @@ onMounted(async () => {
   list.value?.focus();
 });
 
+/** The Verifier script card's Script field, and whether a pick without one asked for it. */
+const scriptId = useId();
+/** The field sits in the cards' v-for, so it is kept by a function ref, not a ref array. */
+let scriptField: HTMLSelectElement | null = null;
+const keepScriptField = (el: unknown): void => {
+  scriptField = el instanceof HTMLSelectElement ? el : null;
+};
+const script = ref<string | null>(initialScript(props.scripts));
+const askingScript = ref(false);
+const scriptChoices = computed(() => scriptOptions(props.scripts));
+
+function pick(type: ScorerType): void {
+  if (type !== 'verifier_script') {
+    emit('pick', type);
+    return;
+  }
+  if (script.value) {
+    emit('pick', type, script.value);
+    return;
+  }
+  active.value = type;
+  askingScript.value = true;
+  scriptField?.focus();
+}
+
+function onScriptChange(): void {
+  askingScript.value = false;
+  active.value = 'verifier_script';
+}
+
+/** In the Script field the arrow keys are the select's; Enter adds, Esc still closes. */
+function onScriptKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') return;
+  event.stopPropagation();
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  pick('verifier_script');
+}
+
 function onKeydown(event: KeyboardEvent): void {
   const i = active.value ? order.value.indexOf(active.value) : -1;
   if (event.key === 'ArrowDown' || event.key === 'ArrowRight')
@@ -62,7 +108,7 @@ function onKeydown(event: KeyboardEvent): void {
   else if (event.key === 'Home') active.value = order.value[0] ?? null;
   else if (event.key === 'End') active.value = order.value[order.value.length - 1] ?? null;
   else if (event.key === 'Enter' || event.key === ' ') {
-    if (active.value) emit('pick', active.value);
+    if (active.value) pick(active.value);
   } else if (event.key === 'Escape') emit('close');
   else return;
   event.preventDefault();
@@ -70,7 +116,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 function choose(card: PickerCard): void {
-  if (!disabled(card.type)) emit('pick', card.type);
+  if (!disabled(card.type)) pick(card.type);
 }
 
 /** The groups as the board lays them out: Behaviour and Judge side by side, the others alone. */
@@ -228,6 +274,37 @@ const title = computed(() =>
                 class="text-12 leading-18 text-ung-text"
                 >No scripts in <code>verify/</code>. Add one on disk, then reload.</span
               >
+              <span
+                v-else-if="card.type === 'verifier_script' && !disabled(card.type)"
+                class="mt-4 flex flex-col gap-4"
+                @click.stop
+              >
+                <label :for="scriptId" class="text-12 font-medium text-text-2">Script</label>
+                <select
+                  :id="scriptId"
+                  :ref="keepScriptField"
+                  v-model="script"
+                  class="input sm font-mono"
+                  :aria-invalid="askingScript ? 'true' : 'false'"
+                  :aria-describedby="askingScript ? `${scriptId}-ask` : undefined"
+                  data-testid="picker-script"
+                  @change="onScriptChange"
+                  @keydown="onScriptKeydown"
+                >
+                  <option v-if="!script" :value="null" disabled>Choose a script…</option>
+                  <option v-for="name in scriptChoices" :key="name" :value="name">
+                    {{ name }}
+                  </option>
+                </select>
+                <span
+                  v-if="askingScript"
+                  :id="`${scriptId}-ask`"
+                  role="alert"
+                  class="text-12 text-ung-text"
+                  data-testid="picker-script-ask"
+                  >{{ CHOOSE_SCRIPT_FIRST }}</span
+                >
+              </span>
             </div>
           </div>
         </div>

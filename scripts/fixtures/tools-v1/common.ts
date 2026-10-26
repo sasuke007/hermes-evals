@@ -127,6 +127,12 @@ export interface ToolsTask {
   fileOnly: FileOnlyRun;
   /** The control only: a phrase of a fixture that only reading it puts in a request. */
   readPhrase?: string;
+  /**
+   * The answer is picked from the task's own data (IBANs from the log, a
+   * bin from the catalog), so task.yaml gets
+   * `self_check.answers_from_fixtures: true` (../answers-from-fixtures.ts).
+   */
+  answersFromFixtures?: true;
 }
 
 /** Opens every prompt: the phrase its mock script matches, unique to tools-v1. */

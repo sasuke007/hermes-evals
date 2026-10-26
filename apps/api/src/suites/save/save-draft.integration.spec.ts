@@ -2,14 +2,25 @@
  * Saving a draft (plan 4.6, section 16's suite-authoring row) on PGlite with
  * the real loader and a fresh SUITES_DIR: the unchanged round trip of the
  * five committed suites (on copies), a new version and what it rewrites, the
- * files the draft does not manage, a removed task, a new suite, the steps it
- * reports, and a save whose claim is not the draft's.
+ * files the draft does not manage, a removed task, a new suite (a zip's
+ * suite.yaml kept as it was), the steps it reports, and a save whose claim
+ * is not the draft's.
  */
 import { readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { DraftSaveResultSchema } from '@hermes-evals/shared';
 import { suiteDrafts, suites, tasks } from '../../database/schema/index.js';
+import {
+  configOf,
+  silentLogger,
+  uploadedFile,
+} from '../../resources/skills/testing.helper-spec.js';
+import type { StorageService } from '../../storage/storage.service.js';
+import { SuiteDraftsService } from '../drafts/drafts.service.js';
+import { SuiteImportStore } from '../import/suite-import.store.js';
+import { SuiteZipImports } from '../import/suite-zip-imports.js';
+import { buildZip, vendorStatements } from '../import/zip-testing.helper-spec.js';
 import { FIVE, SaveWorld } from './save-world.support-spec.js';
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -191,6 +202,83 @@ describe('a new suite', () => {
     }
     expect(after['zz-smoke-copy/answer_verifier/verify/check_count.py']).toBeDefined();
     expect(after['zz-smoke-copy/summary_file/verify/check_summary.py']).toBeDefined();
+  });
+
+  it("keeps a zip's suite.yaml as the zip held it, comments and folding, patching only a new name", async () => {
+    world = await SaveWorld.create();
+    const zipped = [
+      '# Vendor statements, as the finance team keeps them.',
+      'name: zz-smoke-zip',
+      "version_label: '0.1' # the first cut",
+      'description: >-',
+      '  Statements matched',
+      '  line by line.',
+      'tasks:',
+      '  - one # the only task so far',
+      '',
+    ].join('\n');
+    for (const name of ['zz-smoke-zip', 'zz-smoke-zip-renamed']) {
+      await world.writer.create(
+        {
+          sourcePath: name,
+          name,
+          origin: 'zip',
+          versionLabel: '0.1',
+          description: 'Statements matched line by line.',
+          suiteYaml: zipped,
+        },
+        async (ctx) => {
+          const one = { key: 'one', taskYaml: null, prompt: 'Say hi.', reference: '1' };
+          await ctx.insert({ ...one, rubrics: {}, files: [] }, {});
+        },
+      );
+      expect(saved(await world.save(name))).toMatchObject({ outcome: 'created' });
+    }
+    const onDisk = (name: string) => readFile(join(world.suitesDir, name, 'suite.yaml'), 'utf8');
+    expect(await onDisk('zz-smoke-zip')).toBe(zipped);
+    expect(await onDisk('zz-smoke-zip-renamed')).toBe(
+      zipped.replace('name: zz-smoke-zip\n', 'name: zz-smoke-zip-renamed\n'),
+    );
+  });
+
+  it("keeps a zip's suite.yaml from validation through POST /suites/drafts to the saved folder", async () => {
+    world = await SaveWorld.create();
+    const zipped = [
+      '# Vendor statements, as the finance team keeps them.',
+      'name: zz-smoke-zipped',
+      "version_label: '0.1' # the first cut",
+      'description: >-',
+      '  Statements matched',
+      '  line by line.',
+      'tasks:',
+      '  - unmatched_lines # the only task so far',
+      '',
+    ].join('\n');
+    const storage = world.store as unknown as StorageService;
+    const store = new SuiteImportStore(
+      storage,
+      configOf({ SKILL_UPLOAD_TTL_S: 1800 }),
+      silentLogger,
+    );
+    const zips = new SuiteZipImports(world.t.db, storage, store, silentLogger);
+    const items = vendorStatements().map((item) =>
+      item.path === 'suite.yaml' ? { ...item, content: zipped } : item,
+    );
+    const validation = await zips.validate(
+      await uploadedFile(world.store, await buildZip(items), 'statements.zip'),
+    );
+    expect(validation.outcome).toBe('valid');
+    await new SuiteDraftsService(world.t.db, storage, zips).create({
+      name: 'zz-smoke-zipped',
+      versionLabel: '0.1',
+      from: { kind: 'zip', token: validation.token!, trustScripts: false },
+    });
+    expect((await world.draft('zz-smoke-zipped')).suiteYaml).toBe(zipped);
+
+    expect(saved(await world.save('zz-smoke-zipped'))).toMatchObject({ outcome: 'created' });
+    expect(await readFile(join(world.suitesDir, 'zz-smoke-zipped', 'suite.yaml'), 'utf8')).toBe(
+      zipped,
+    );
   });
 
   it('is not saved when its folder appeared on disk meanwhile', async () => {

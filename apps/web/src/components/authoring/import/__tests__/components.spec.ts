@@ -142,16 +142,20 @@ describe('ImportSuiteDialog (SA.10)', () => {
     expect(q('[data-testid="zip-chip"]')!.textContent).toBe('1 invalid task');
     const panel = q('[data-testid="zip-scripts"]')!;
     expect(panel.getAttribute('aria-label')).toBe('This suite contains code');
+    expect(flat(q('[data-testid="zip-script-counts"]')!.textContent!)).toBe(
+      '2 files under verify/ · 2 scripts a check runs',
+    );
     expect(panel.textContent).toContain(
-      '2 verifier scripts will run in the worker when the suite is checked and when runs are scored. Import only suites you trust.',
+      'The 2 scripts a check runs will run in the worker when the suite is checked and when runs are scored. Import only suites you trust.',
     );
     const scripts = [...document.querySelectorAll('[data-testid="zip-script"]')].map((s) =>
       [...s.children].map((c) => flat(c.textContent!)),
     );
     expect(scripts).toEqual([
-      ['late_fees/verify/check_late_fees.py', '2.4 KB', 'e81f0c2'],
-      ['summary_file/verify/check_summary.py', '1.2 KB', '9b14e0d'],
+      ['late_fees/verify/check_late_fees.py', 'run by a check', '2.4 KB', 'e81f0c2'],
+      ['summary_file/verify/check_summary.py', 'run by a check', '1.2 KB', '9b14e0d'],
     ]);
+    expect(q('[data-testid="zip-root-files"]')).toBeNull();
     const importButton = q('[data-testid="zip-import"]')!;
     expect(importButton.getAttribute('aria-disabled')).toBe('true');
     expect(
@@ -163,6 +167,35 @@ describe('ImportSuiteDialog (SA.10)', () => {
     await flushPromises();
     expect(q('[data-testid="zip-import"]')!.getAttribute('aria-disabled')).toBeNull();
     expect(q('[data-task="late_fees"]')!.getAttribute('data-readiness')).toBe('problems');
+  });
+
+  it('counts data under verify/ apart from scripts, and names the root files left out', async () => {
+    await mountDialog();
+    await drop('stock-tools-v1.zip');
+    expect(flat(q('[data-testid="zip-script-counts"]')!.textContent!)).toBe(
+      '2 files under verify/ · 1 script a check runs',
+    );
+    const rows = [...document.querySelectorAll('[data-testid="zip-script"]')];
+    expect(
+      rows.map((r) => [r.getAttribute('data-run-by-check'), r.children[1]!.textContent]),
+    ).toEqual([
+      ['true', 'run by a check'],
+      ['false', 'file'],
+    ]);
+    const note = q('[data-testid="zip-root-files"]')!;
+    expect(note.getAttribute('role')).toBe('note');
+    expect(flat(note.querySelector('span')!.textContent!)).toBe(
+      '2 files at the suite root are not imported: a draft keeps suite.yaml and the task folders only.',
+    );
+    expect(
+      [...document.querySelectorAll('[data-testid="zip-root-file"]')].map((r) =>
+        [...r.children].map((c) => c.textContent),
+      ),
+    ).toEqual([
+      ['LICENSE', '1 KB'],
+      ['README.md', '2.3 KB'],
+    ]);
+    expect(q('[data-testid="zip-import"]')!.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('refuses a name that is taken or not a folder name', async () => {

@@ -217,10 +217,15 @@ export function revertTask(folder: string, key: string): DraftTaskDetail {
     throw new ApiError(409, request, `${key} is new in this draft`);
   Object.assign(task, structuredClone(task.baseContent));
   Object.assign(task, { key: task.base.key, removed: false, restoredFrom: null, lock: null });
+  task.refused = [];
   task.taskYaml = taskYamlOf(task.form);
   touch(draft, task);
   return taskDetailView(draft, task);
 }
+
+/** The task's refused uploads but the one at `path`. */
+const withoutRefusal = (task: FixtureTask, path: string) =>
+  (task.refused ?? []).filter((r) => r.path !== path);
 
 /** The folder a kind of upload lands in. */
 function folderOf(kind: DraftFileUploadFields['kind'], task: FixtureTask): string {
@@ -239,16 +244,29 @@ export async function uploadFile(
   const request = `POST ${draftPath(folder)}/tasks/${key}/files`;
   const [draft, task] = findTask(folder, key, request);
   writable(draft, request);
+  const path = `${folderOf(fields.kind, task)}/${fields.path ?? file.name}`;
   if (file.size > AUTHORING_LIMITS.suiteMaxFileBytes) {
+    // Kept on the task, so readiness still reports it after a reload (Phase 5b #11).
+    task.refused = [
+      ...withoutRefusal(task, path),
+      {
+        path,
+        kind: fields.kind,
+        sizeBytes: null,
+        limitBytes: AUTHORING_LIMITS.suiteMaxFileBytes,
+        refusedAt: nowIso(),
+      },
+    ];
+    touch(draft, task);
     throw new ApiError(413, request, `${file.name} is over 25 MB`);
   }
-  const path = `${folderOf(fields.kind, task)}/${fields.path ?? file.name}`;
   if (isVerifyPath(path))
     throw new ApiError(400, request, 'verify/ holds code and is edited on disk only');
   if (fields.kind === 'expected' && !task.form.expectedWorkspace) {
     task.form.expectedWorkspace = 'expected';
     task.taskYaml = taskYamlOf(task.form);
   }
+  task.refused = withoutRefusal(task, path);
   const textual = file.size < 1024 * 1024 && /\.(csv|tsv|txt|md|json|ya?ml)$/i.test(file.name);
   const text = textual ? await file.text() : null;
   task.files = task.files.filter((f) => f.path !== path);
@@ -273,6 +291,7 @@ export function moveFile(folder: string, key: string, from: string, to: string):
   );
   const { [from]: text, ...others } = task.texts;
   task.texts = text === undefined ? others : { ...others, [to]: text };
+  task.refused = withoutRefusal(task, to);
   touch(draft, task);
   return taskDetailView(draft, task);
 }
@@ -282,6 +301,8 @@ export function deleteFile(folder: string, key: string, path: string): DraftTask
   const [draft, task] = findTask(folder, key, request);
   if (isVerifyPath(path))
     throw new ApiError(400, request, 'verify/ holds code and is edited on disk only');
+  // Deleting the path of a refused upload dismisses the refusal (Phase 5b #11).
+  task.refused = withoutRefusal(task, path);
   task.files = task.files.filter((f) => f.path !== path);
   touch(draft, task);
   return taskDetailView(draft, task);

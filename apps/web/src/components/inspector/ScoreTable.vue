@@ -5,6 +5,7 @@ import StatusChip from '@/components/ui/StatusChip.vue';
 import type { ScoreRowView } from '@/api/types/runs';
 import { MISSING, formatRate } from '@/lib/format';
 import { evidenceSummary } from './inspectorFormat';
+import { hasJsonMismatch } from './jsonMatchRows';
 import RichSentence from './RichSentence.vue';
 import ScoreEvidence from './ScoreEvidence.vue';
 
@@ -27,7 +28,7 @@ watch(
   () => props.scores,
   (scores) => {
     open.value = new Set(
-      scores.filter((s) => (s.evidence.jsonMatch?.mismatches.length ?? 0) > 0).map((s) => s.key),
+      scores.filter((s) => hasJsonMismatch(s.evidence.jsonMatch)).map((s) => s.key),
     );
   },
   { immediate: true },

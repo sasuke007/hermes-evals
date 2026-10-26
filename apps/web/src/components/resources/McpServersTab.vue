@@ -11,7 +11,7 @@ import { urlOptional, useUrlState } from '@/composables/useUrlState';
 import { formatDateTime } from '@/lib/format';
 import { useResourcesStore } from '@/stores/resources';
 import { useRevealFlashedRow } from './revealFlashedRow';
-import { endpointOf, toolCounts } from './format';
+import { endpointOf, headerNamesText, toolCounts } from './format';
 import McpServerForm from './McpServerForm.vue';
 import UsedByLink from './UsedByLink.vue';
 
@@ -131,7 +131,7 @@ function close(): void {
     <template #cell-endpoint="{ row }">
       <span class="font-mono text-12">{{ endpointOf(row) }}</span>
       <span v-if="row.transport === 'http' && row.headers.length" class="text-12 text-text-3">
-        · header {{ row.headers.map((h) => h.header).join(', ') }}</span
+        · header {{ headerNamesText(row.headers) }}</span
       >
     </template>
     <template #cell-filter="{ row }">

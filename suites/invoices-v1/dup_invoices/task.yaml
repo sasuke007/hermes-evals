@@ -11,3 +11,5 @@ verification:
     type: json_match
     primary: true
     params: { path: duplicates, unordered: true, inner_unordered: true }
+self_check:
+  answers_from_fixtures: true

@@ -19,19 +19,27 @@
  *
  * The draft holds task.yaml, prompt.md, reference.json and rubrics as text,
  * verbatim (a byte-order mark included), and every other file by blob with
- * the kind the loader gives it. A root file that is not UTF-8 text is kept
- * as a blob of kind `other`, so the save writes the same bytes. Files at the
- * suite root other than suite.yaml (a README) are not part of any task and
- * are left out. No script runs: verify/ files are only listed (R7).
+ * the kind the loader gives it. A root file that is not UTF-8 text, or one
+ * longer than the editor can save back (AUTHORING_LIMITS.draftTextMaxChars,
+ * Phase 5b question 18), is kept as a blob of kind `other`, so the save
+ * writes the same bytes and the Files tab shows it read-only. suite.yaml is
+ * kept as its text, so the save patches only what the draft changed (V5).
+ * Files at the suite root other than suite.yaml (a README) are not part of
+ * any task and are left out; the validation lists them (rootFilesNotKept).
+ * No script runs: verify/ files are only listed, each marked when a
+ * verifier_script check of its task names it (R7).
  */
 import {
+  AUTHORING_LIMITS,
   DIRECTORY_KEY_MESSAGE,
   DIRECTORY_KEY_PATTERN,
   isHomeSeedPath,
   isVerifyPath,
   type DraftFileKind,
+  type SuiteZipRootFile,
   type SuiteZipScript,
   type UploadProblem,
+  type VerificationEntry,
 } from '@hermes-evals/shared';
 import { MAX_LOAD_SELF_CHECK_SECONDS } from '../../queue/queues.js';
 import type { BlobRef, BlobStore } from '../../storage/blob-store.js';
@@ -41,10 +49,11 @@ import {
   SELF_CHECK_CONCURRENCY,
   SUITE_YAML,
   TASK_YAML,
+  VERIFY_DIR,
 } from '../loader/limits.js';
 import { parseSuiteYaml } from '../loader/suite-yaml.js';
 import { analyseTask } from '../loader/task.js';
-import { decodeUtf8 } from '../loader/task-files.js';
+import { decodeUtf8, normaliseRelative } from '../loader/task-files.js';
 import { suiteSelfCheckSeconds, taskSelfCheckSeconds } from '../loader/task-self-check.js';
 import { comparePaths } from '../loader/walk.js';
 import { parseYamlSource, type LocatedError } from '../loader/yaml-source.js';
@@ -167,6 +176,10 @@ export async function readSuiteZipFile(
     // Suite-relative paths; files at the root other than suite.yaml belong to no task.
     const byPath = new Map<string, ZipFileEntry>();
     for (const file of listing.files) byPath.set(file.path.slice(root.length), file);
+    const rootFilesNotKept: SuiteZipRootFile[] = [...byPath]
+      .filter(([path]) => !path.includes('/') && path !== SUITE_YAML)
+      .map(([path, file]) => ({ path, sizeBytes: file.size }))
+      .sort((a, b) => comparePaths(a.path, b.path));
     const taskFolders = new Set<string>();
     for (const path of byPath.keys()) if (path.includes('/')) taskFolders.add(path.split('/')[0]!);
     // An empty folder is a task folder too, as the walk would list it.
@@ -250,9 +263,15 @@ export async function readSuiteZipFile(
       seconds.push(taskSelfCheckSeconds(analysis));
       const kinds = new Map(analysis.files.map((f) => [f.path, f.kind]));
       tasks.push(await draftTaskOf(key, files, kinds, blobs));
+      const run = scriptsRunByChecks(analysis.verification);
       for (const [path, ref] of files) {
-        if (isVerifyPath(path))
-          scripts.push({ path: `${key}/${path}`, sizeBytes: ref.size, sha256: ref.sha256 });
+        if (!isVerifyPath(path)) continue;
+        scripts.push({
+          path: `${key}/${path}`,
+          sizeBytes: ref.size,
+          sha256: ref.sha256,
+          runByCheck: run.has(path),
+        });
       }
     }
     const total = suiteSelfCheckSeconds(seconds, SELF_CHECK_CONCURRENCY);
@@ -275,6 +294,7 @@ export async function readSuiteZipFile(
         },
         tasks,
         scripts,
+        rootFilesNotKept,
         fileCount: 1 + [...stored.values()].reduce((n, files) => n + files.size, 0),
         unpackedBytes,
       },
@@ -287,7 +307,24 @@ export async function readSuiteZipFile(
   }
 }
 
-/** The draft's picture of one task folder: its texts verbatim, every other file by blob and kind. */
+/** The paths in the task folder of the scripts its verifier_script checks run (`verify/check.py`). */
+function scriptsRunByChecks(verification: readonly VerificationEntry[]): Set<string> {
+  const run = new Set<string>();
+  for (const entry of verification) {
+    if (entry.type !== 'verifier_script' || typeof entry.params.script !== 'string') continue;
+    const path = normaliseRelative(`${VERIFY_DIR}/${entry.params.script}`);
+    if (path !== null) run.add(path);
+  }
+  return run;
+}
+
+/** Whether the task editor can hold `text` as draft text and save it back. */
+const editable = (text: string): boolean => text.length <= AUTHORING_LIMITS.draftTextMaxChars;
+
+/**
+ * The draft's picture of one task folder: its texts verbatim, every other
+ * file by blob and kind. A text the editor could not save back stays a blob.
+ */
 async function draftTaskOf(
   key: string,
   files: ReadonlyMap<string, BlobRef>,
@@ -305,7 +342,7 @@ async function draftTaskOf(
     const loaderKind = kinds.get(path);
     if (Object.hasOwn(texts, path) || (loaderKind === 'rubric' && !isVerifyPath(path))) {
       const text = verbatimText(await blobs.read(ref.sha256));
-      if (text !== null) {
+      if (text !== null && editable(text)) {
         if (Object.hasOwn(texts, path)) texts[path] = text;
         else rubrics[path] = text;
         continue;

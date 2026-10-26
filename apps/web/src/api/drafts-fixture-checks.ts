@@ -8,12 +8,15 @@
 import {
   ANSWER_INSTRUCTIONS_LEAD,
   READINESS_RULES,
+  refusedUploadMessage,
   SCORER_PARAM_SCHEMAS,
   summariseReadiness,
   VerificationKeySchema,
   type ReadinessRule,
+  type TaskEditorSection,
 } from '@hermes-evals/shared';
 import type {
+  DraftUploadKind,
   ReadinessIssue,
   ReadinessRuleResult,
   ReadinessTarget,
@@ -36,6 +39,18 @@ import {
 export type { ReadinessInput };
 
 const WORKER_TYPES = ['file_check', 'verifier_script'];
+
+/** The leak rule's passed row when task.yaml says the answer comes from the files (the API's). */
+export const ANSWERS_FROM_FIXTURES =
+  'Not searched: `answers_from_fixtures` says the answer is picked from the workspace files.';
+
+/** Where the Fix of a refused upload goes, as the API's readiness-issues.ts sends it. */
+const UPLOAD_SECTIONS = {
+  fixture: 'workspace',
+  expected: 'expected',
+  home_seed: 'home',
+  expected_home: 'home',
+} as const satisfies Record<DraftUploadKind, TaskEditorSection>;
 
 /** The readiness of a fixture task, worded as SA.8 draws it. */
 export function fixtureReadiness(input: ReadinessInput): TaskReadiness {
@@ -273,8 +288,10 @@ export function fixtureReadiness(input: ReadinessInput): TaskReadiness {
       ),
     );
 
-  // 10 no workspace file contains a reference value
-  const leak = ref.ok ? leaks(ref.value, input.texts, files)[0] : undefined;
+  // 10 no workspace file contains a reference value, unless task.yaml says the answer is
+  // picked from them (self_check.answers_from_fixtures, Phase 5b question 1)
+  const fromFixtures = form.answersFromFixtures === true;
+  const leak = ref.ok && !fromFixtures ? leaks(ref.value, input.texts, files)[0] : undefined;
   if (leak) {
     const message = `${code(leak.file)} contains ${code(leak.value)}, the reference value at ${code(leak.path)}. The agent could read the answer.`;
     rules.set(
@@ -282,10 +299,22 @@ export function fixtureReadiness(input: ReadinessInput): TaskReadiness {
       row('reference_leak', 'warning', message, { section: 'workspace', field: leak.file }),
     );
     issue('reference_leak', { section: 'workspace', field: leak.file }, message, 'warning');
-  } else rules.set('reference_leak', ok('reference_leak'));
+  } else
+    rules.set('reference_leak', ok('reference_leak', fromFixtures ? ANSWERS_FROM_FIXTURES : ''));
 
-  // 11 files within limits
-  rules.set('file_limits', ok('file_limits'));
+  // 11 files within limits; an upload refused for its size stays a problem (Phase 5b #11)
+  const refusals = (input.refused ?? []).map((u) => ({
+    target: { section: UPLOAD_SECTIONS[u.kind], field: u.path },
+    message: refusedUploadMessage(u),
+  }));
+  for (const r of refusals) issue('file_limits', r.target, r.message);
+  const firstRefusal = refusals[0];
+  rules.set(
+    'file_limits',
+    firstRefusal
+      ? row('file_limits', 'problem', firstRefusal.message, firstRefusal.target)
+      : ok('file_limits'),
+  );
 
   // 12 and 13 the self-check and the negative control
   const [selfRow, negativeRow] = selfCheckRows(

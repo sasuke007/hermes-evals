@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router';
+import { AUTHORING_LIMITS, refusedUploadMessage } from '@hermes-evals/shared';
 import { errorMessage } from '@/api/client';
 import type { ReadinessRuleResult, ReadinessTarget } from '@/api/types/authoring';
 import { hhmm } from '@/components/authoring/draft-bar/draftText';
@@ -15,7 +16,7 @@ import type { BreadcrumbItem } from '@/components/ui/types';
 import { ROUTE_NAMES } from '@/router';
 import { useDraftStore } from '@/stores/draft';
 import { useDraftTaskStore } from '@/stores/draftTask';
-import { useDraftTaskToolsStore } from '@/stores/draftTaskTools';
+import { OVER_LIMIT_REASON, useDraftTaskToolsStore } from '@/stores/draftTaskTools';
 import { draftTaskRoute, suiteDraftRoute, type EditorTab } from './editorRoutes';
 import LeaveDuringUpload from './LeaveDuringUpload.vue';
 import TaskEditorForm from './TaskEditorForm.vue';
@@ -100,15 +101,23 @@ const taskLabel = computed(() => {
   const when = task.status === 'saving' ? 'saving…' : `saved ${hhmm(d.updatedAt)}`;
   return `${d.key} · draft · ${when}`;
 });
+/**
+ * A file refused here a moment ago is a file-limits problem before the API's next answer
+ * says so; once the API keeps the refusal (Phase 5b question 11) its own row stands.
+ */
 const overrides = computed<Partial<Record<'file_limits', ReadinessRuleResult>>>(() => {
-  const big = tools.rejected.find((r) => r.reason === 'The limit is 25 MB per file.');
-  if (!big) return {};
+  const big = tools.rejected.find((r) => r.reason === OVER_LIMIT_REASON);
+  const current = detail.value?.readiness.rules.find((r) => r.rule === 'file_limits');
+  if (!big || current?.status === 'problem') return {};
   return {
     file_limits: {
       rule: 'file_limits',
       status: 'problem',
-      message: `\`${big.name}\` is over 25 MB.`,
-      target: { section: 'workspace', field: null },
+      message: refusedUploadMessage({
+        path: big.path ?? big.name,
+        limitBytes: AUTHORING_LIMITS.suiteMaxFileBytes,
+      }),
+      target: { section: 'workspace', field: big.path ?? null },
     },
   };
 });

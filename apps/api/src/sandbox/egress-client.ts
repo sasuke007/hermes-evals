@@ -8,7 +8,7 @@
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { z } from 'zod';
-import { ENV_NAME_PATTERN } from '@hermes-evals/shared';
+import { ENV_NAME_PATTERN, NETWORK_ORIGINS, type NetworkOrigin } from '@hermes-evals/shared';
 import { adminSocketCall, EgressCallError, refusalMessage } from './admin-socket-call.js';
 
 export { EgressCallError, type EgressFailure } from './admin-socket-call.js';
@@ -23,8 +23,12 @@ export interface EgressMcpRoute {
   name: string;
   /** The definition's exact URL. Requests go there and nowhere else; no redirect is followed. */
   url: string;
-  /** Headers egress adds to every forwarded request, each value from its own environment variable `env`. */
-  headers: Array<{ header: string; env: string }>;
+  /**
+   * Headers egress adds to every forwarded request, each value from its own
+   * environment variable `env`, after `prefix` when the pair gives one
+   * (for example `Bearer `, Phase 7).
+   */
+  headers: Array<{ header: string; env: string; prefix?: string }>;
 }
 
 export interface EgressRegistration {
@@ -94,6 +98,8 @@ export interface EgressLogEntry {
   /** A `model` call's own usage, when the upstream reported it. */
   promptTokens?: number;
   completionTokens?: number;
+  /** Egress's label for a `connect` or `http` entry, by host (Phase 7). */
+  origin?: NetworkOrigin;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +201,7 @@ const EgressLogEntrySchema = z.object({
   ms: z.number().nonnegative().optional(),
   promptTokens: count.optional(),
   completionTokens: count.optional(),
+  origin: z.enum(NETWORK_ORIGINS).optional(),
 }) satisfies z.ZodType<EgressLogEntry>;
 
 /**

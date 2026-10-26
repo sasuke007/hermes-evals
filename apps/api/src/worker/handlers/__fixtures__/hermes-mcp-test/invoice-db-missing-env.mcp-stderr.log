@@ -1,0 +1,12 @@
+
+2026-10-24 09:44:32,790 ===== starting MCP server 'invoice-db' =====
+2026-10-24 09:44:33,144 Error: INVOICE_DB_URL is not set
+
+2026-10-24 09:44:34,309 ===== starting MCP server 'invoice-db' =====
+2026-10-24 09:44:34,672 Error: INVOICE_DB_URL is not set
+
+2026-10-24 09:44:36,795 ===== starting MCP server 'invoice-db' =====
+2026-10-24 09:44:37,209 Error: INVOICE_DB_URL is not set
+
+2026-10-24 09:44:40,878 ===== starting MCP server 'invoice-db' =====
+2026-10-24 09:44:41,239 Error: INVOICE_DB_URL is not set

@@ -6,11 +6,24 @@
  * everything here is safe to hash, store, log and return.
  */
 import { createHash } from 'node:crypto';
-import type { McpServerInput } from '@hermes-evals/shared';
+import { canonicalMcpHeaders, type McpHeader, type McpServerInput } from '@hermes-evals/shared';
 import { canonicalJson } from '../../queue/queues.js';
 import type { mcpServerVersions } from '../../database/schema/index.js';
 
 type VersionRow = typeof mcpServerVersions.$inferSelect;
+
+/**
+ * A header pair as stored and sent: `{ header, env }` plus `prefix` only
+ * when there is one (Phase 7), so a pair saved without a prefix stays
+ * exactly what it was before prefixes existed.
+ */
+export function headerPair(h: McpHeader): McpHeader {
+  return {
+    header: h.header,
+    env: h.env,
+    ...(h.prefix !== undefined ? { prefix: h.prefix } : {}),
+  };
+}
 
 /** The definition fields of a stored version, in the shape the form sends. */
 export function definitionOf(name: string, v: VersionRow): McpServerInput {
@@ -21,7 +34,7 @@ export function definitionOf(name: string, v: VersionRow): McpServerInput {
     args: v.args,
     envNames: v.envNames,
     url: v.url,
-    headers: v.headers,
+    headers: v.headers.map(headerPair),
     include: v.include,
     exclude: v.exclude,
     timeoutS: v.timeoutS,
@@ -36,7 +49,7 @@ export function versionColumns(def: McpServerInput) {
     args: def.args,
     envNames: def.envNames,
     url: def.url,
-    headers: def.headers.map(({ header, env }) => ({ header, env })),
+    headers: def.headers.map(headerPair),
     include: def.include,
     exclude: def.exclude,
     timeoutS: def.timeoutS,
@@ -52,7 +65,9 @@ const sorted = (values: readonly string[]): string[] => [...values].sort();
  * the name (the `-t` alias and config.yaml key). Lists whose order means
  * nothing to Hermes (env names, headers, tool filters) are sorted first, so
  * reordering them is not a change; args keep their order. Header names are
- * compared case-insensitively, as HTTP does.
+ * compared case-insensitively, as HTTP does. A header's prefix is covered
+ * only when it has one (canonicalMcpHeaders), so a definition saved before
+ * prefixes existed keeps its hash, and with it its version (Phase 7).
  */
 export function definitionHash(def: McpServerInput): string {
   const canonical = {
@@ -62,9 +77,7 @@ export function definitionHash(def: McpServerInput): string {
     args: def.args,
     envNames: sorted(def.envNames),
     url: def.url,
-    headers: def.headers
-      .map((h) => ({ header: h.header.toLowerCase(), env: h.env }))
-      .sort((a, b) => (a.header < b.header ? -1 : a.header > b.header ? 1 : 0)),
+    headers: canonicalMcpHeaders(def.headers),
     include: sorted(def.include),
     exclude: sorted(def.exclude),
     timeoutS: def.timeoutS,

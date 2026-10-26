@@ -1,10 +1,10 @@
 /**
  * How ImportSuiteDialog words a validated zip (SA.10): the task counts, each task's line,
- * the chip beside the file and the scripts panel's sentence. Pure, so the dialog and its
- * tests read the same words.
+ * the chip beside the file, the scripts panel's count and sentence, and the root-files
+ * note. Pure, so the dialog and its tests read the same words.
  */
 import { DIRECTORY_KEY_MESSAGE } from '@hermes-evals/shared';
-import type { SuiteZipTask, SuiteZipValidation } from '@/api/types/authoring';
+import type { SuiteZipRootFile, SuiteZipTask, SuiteZipValidation } from '@/api/types/authoring';
 import { suiteNameProblem, type NameHolder } from '../new-suite/suiteName';
 import { plural } from '@/lib/format';
 
@@ -62,9 +62,44 @@ export function splitTasks(tasks: readonly SuiteZipTask[]): {
   };
 }
 
-/** "2 verifier scripts will run in the worker when the suite is checked and when runs are scored." */
-export function scriptsSentence(count: number): string {
-  return `${count === 1 ? '1 verifier script' : `${count} verifier scripts`} will run in the worker when the suite is checked and when runs are scored. Import only suites you trust.`;
+/**
+ * The scripts panel's count (Phase 5b question 12): every file under `verify/` is listed,
+ * data too, and the scripts a check names are counted apart: "3 files under `verify/` · 2
+ * scripts a check runs".
+ */
+export function scriptsCountLine(counts: SuiteZipValidation['verifyCounts']): string {
+  const run =
+    counts.checkScripts === 0
+      ? 'no check runs them'
+      : counts.checkScripts === 1
+        ? '1 script a check runs'
+        : `${counts.checkScripts} scripts a check runs`;
+  return `${plural(counts.files, 'file')} under \`verify/\` · ${run}`;
+}
+
+/** What the scripts a check runs do, and the warning every file under `verify/` earns. */
+export function scriptsSentence(counts: SuiteZipValidation['verifyCounts']): string {
+  const trust = 'Import only suites you trust.';
+  if (counts.checkScripts === 0) {
+    return `No check runs them now, but a check can name any of them later. ${trust}`;
+  }
+  const subject =
+    counts.checkScripts === 1
+      ? 'The script a check runs'
+      : `The ${counts.checkScripts} scripts a check runs`;
+  return `${subject} will run in the worker when the suite is checked and when runs are scored. ${trust}`;
+}
+
+/**
+ * The note on the files at the zip's root other than suite.yaml (Phase 5b question 2): a
+ * draft holds task files only, so the import leaves them out.
+ */
+export function rootFilesSentence(files: readonly SuiteZipRootFile[]): string {
+  const what =
+    files.length === 1
+      ? `\`${files[0]!.path}\` at the suite root is`
+      : `${files.length} files at the suite root are`;
+  return `${what} not imported: a draft keeps \`suite.yaml\` and the task folders only.`;
 }
 
 /**

@@ -69,7 +69,7 @@ function replace(path: string, file: File): void {
   <FileDropZone
     :target="target"
     :uploads="tools.uploads.filter((u) => u.kind === kind)"
-    :rejected="tools.rejected.filter((r) => r.kind === kind)"
+    :rejected="tools.refusals.filter((r) => r.kind === kind)"
     :disabled="task.locked"
     :folder="prefix ? `${prefix}/` : null"
     @files="add"

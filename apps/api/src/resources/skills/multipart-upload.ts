@@ -36,15 +36,27 @@ import { badRequest, payloadTooLarge } from './http.js';
 /** The uploaded file a handler receives; `path` is inside its own scratch directory. */
 export type UploadedFileRef = Express.Multer.File;
 
+/** The name each request's file part was sent under, kept from its first byte. */
+const sentNames = new WeakMap<Request, string>();
+
+/**
+ * The name the request's file part was sent under, also when multer refused
+ * the file (over the size cap, 413) and the handler never received it.
+ */
+export function uploadNameOf(req: Request): string | undefined {
+  return sentNames.get(req);
+}
+
 /** multer storage engine: each file goes to DATA_DIR/tmp/upload-XXXXXX/file. */
 export class ScratchDiskStorage implements StorageEngine {
   constructor(private readonly store: BlobStore) {}
 
   _handleFile(
-    _req: Request,
+    req: Request,
     file: Express.Multer.File,
     callback: (error?: unknown, info?: Partial<Express.Multer.File>) => void,
   ): void {
+    sentNames.set(req, file.originalname);
     void this.store.tmpDir('upload').then(
       async (destination) => {
         const path = join(destination, 'file');

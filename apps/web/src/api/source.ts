@@ -15,8 +15,14 @@
  * the browser tab in sessionStorage; ?scenario=clear forgets it. Two scenarios
  * apply to every fixture-backed call: `loading` never resolves and `error`
  * rejects with an ApiError like the one a stopped `api` service produces.
+ *
+ * The fixture world (./fixture-world.ts: src/fixtures and the draft world) is never
+ * imported statically. fixtureWorld() loads it through a dynamic import behind the
+ * build-time VITE_API_MODE check, so a live build drops the import and none of the
+ * fixtures reaches its bundle (Phase 5 #21).
  */
 import { ApiError } from './client';
+import type * as FixtureWorldModule from './fixture-world';
 
 export type ApiMode = 'fixtures' | 'live';
 
@@ -114,20 +120,45 @@ function cloneJson<T>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
 }
 
+/** The fixture world's modules, by name (./fixture-world.ts). */
+export type FixtureWorld = typeof FixtureWorldModule;
+
+let loadedWorld: FixtureWorld | null = null;
+
+/**
+ * The fixture world, imported on first use and kept. Only fixtures mode reaches it; the
+ * check reads import.meta.env itself (not apiMode), so Vite folds it to a constant and a
+ * live build leaves the dynamic import, and every fixture module behind it, out.
+ */
+export async function fixtureWorld(): Promise<FixtureWorld> {
+  if (import.meta.env.VITE_API_MODE !== 'fixtures') {
+    throw new Error('the fixture world exists only when VITE_API_MODE=fixtures');
+  }
+  loadedWorld ??= await import('./fixture-world');
+  return loadedWorld;
+}
+
 /**
  * Serve a fixture as if it came from the API: after a short delay, as a deep
- * copy. The `loading` scenario never resolves; the `error` scenario rejects
+ * copy. `value` is the answer, or a function of the fixture world that builds it.
+ * The `loading` scenario never resolves; the `error` scenario rejects
  * with an ApiError whose message reads like the real one, e.g.
  * `GET /api/experiments → 502 · upstream api:8080 connection refused`.
  */
-export async function fixture<T>(value: T | (() => T), options: FixtureOptions = {}): Promise<T> {
+export async function fixture<T>(
+  value: T | ((world: FixtureWorld) => T),
+  options: FixtureOptions = {},
+): Promise<T> {
   if (hasScenario('loading')) return new Promise<T>(() => {});
   await sleep(latencyOf(options.latencyMs));
   if (hasScenario('error')) {
     const { status, detail } = options.error ?? DEFAULT_FIXTURE_ERROR;
     throw new ApiError(status, options.request ?? 'GET /api', detail);
   }
-  const resolved = typeof value === 'function' ? (value as () => T)() : value;
+  const resolved =
+    typeof value === 'function'
+      ? (value as (world: FixtureWorld) => T)(await fixtureWorld())
+      : value;
   return cloneJson(resolved);
 }
 

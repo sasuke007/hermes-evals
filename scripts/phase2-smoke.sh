@@ -16,19 +16,16 @@
 # The stack needs the mock model (profile `test`) with the scripts in
 # scripts/phase2-mock-scripts.json, which answer each task's prompt (they
 # match "Smoke task TOTAL", "Smoke task LIST", ... and the skill's phrase).
-# Compose reads MOCK_SCRIPTS from the shell before .env, so no file changes:
+# Compose mounts the file or directory MOCK_SCRIPTS_FILE names into the mock,
+# and reads the variable from the shell before .env, so no file changes; the
+# whole scripts/ directory gives it every scripts/*mock-scripts.json, whose
+# order does not matter, so every smoke test passes on the same stack:
 #
-#   MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps(json.load(open("scripts/phase2-mock-scripts.json"))))')" \
-#     docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=./scripts docker compose --profile test up -d
 #
 # (only mock-model reads it, so on a running stack `... up -d mock-model` is
-# enough). The same override as a file, for `docker compose -f
-# docker-compose.yml -f <file> --profile test up -d`:
-#
-#   services:
-#     mock-model:
-#       environment:
-#         MOCK_SCRIPTS: '<the JSON of scripts/phase2-mock-scripts.json, on one line>'
+# enough; MOCK_SCRIPTS_FILE=./scripts/phase2-mock-scripts.json gives it this
+# file alone). Or set MOCK_SCRIPTS_FILE=./scripts in .env.
 #
 # Every configuration uses provider `custom` with base URL
 # http://mock-model:8090/v1 and model mock/scripted, which config/prices.yaml
@@ -261,10 +258,10 @@ check 'GET /providers' 200 \
   '", ".join("{} {}".format(p["id"], p["status"]) for p in d)'
 
 if [ "$DOCKER" = 1 ]; then
-  if dc exec -T mock-model printenv MOCK_SCRIPTS 2>/dev/null | grep -q 'Smoke task LIST'; then
-    pass 'the mock model has scripts/phase2-mock-scripts.json' 'MOCK_SCRIPTS matches "Smoke task LIST", ...'
+  if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'Smoke task LIST' >/dev/null; then
+    pass 'the mock model has scripts/phase2-mock-scripts.json' 'its scripts match "Smoke task LIST", ...'
   else
-    fail 'the mock model has scripts/phase2-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS)'
+    fail 'the mock model has scripts/phase2-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
   fi
 else
   skip 'the mock model has scripts/phase2-mock-scripts.json' 'docker compose not reachable here (or SMOKE_DOCKER=0)'

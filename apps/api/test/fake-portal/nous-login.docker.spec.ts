@@ -4,17 +4,25 @@
  * plan 6.1 defines, a second Connect replacing the first, Disconnect, and the
  * startup check of the Hermes functions it calls (plan 16, "model access").
  *
- * Gated: RUN_SANDBOX_TESTS=1 and a Docker CLI that reaches the engine. It
- * talks to Docker directly (networks, published ports and copies, which the
- * guard rightly refuses), creates only `hermes-evals-nl-test-*` containers and
- * one network, mounts no volume (the home is a tmpfs), and removes all of it.
+ * Gated: RUN_SANDBOX_TESTS=1 and a Docker CLI that reaches the engine (on
+ * Colima, DOCKER_CONTEXT=colima). It talks to Docker directly (a network and
+ * copies, which the guard rightly refuses), creates only
+ * `hermes-evals-nl-test-*` containers and one network, and removes all of it.
  * The script is copied into the containers from the working tree, to the
  * path docker/trial.Dockerfile installs it at, so the test covers the source
  * without rebuilding the shared image.
  *
- * Nothing here can reach the real Nous Portal: HERMES_PORTAL_BASE_URL and
- * NOUS_INFERENCE_BASE_URL name the fake, and every other HTTP(S) request goes
- * to a proxy address where nothing listens.
+ * It talks only to the fake portal (Phase 4 question 11, Phase 7), and checks
+ * so before any login starts:
+ * - its own network is `--internal`: no gateway, so no container on it has a
+ *   route to the internet, the real portal or the host; the containers are on
+ *   that network alone and publish no port, so the test reaches them with
+ *   `docker exec` (proxies off) rather than through the host;
+ * - never the nous-home volume, nor any named volume or bind mount: each
+ *   home is a tmpfs that goes with its container;
+ * - HERMES_PORTAL_BASE_URL and NOUS_INFERENCE_BASE_URL name the fake, no
+ *   variable names a nousresearch.com URL, and every other HTTP(S) request
+ *   goes to a proxy address where nothing listens.
  */
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -28,24 +36,28 @@ import {
   NousLoginStatusSchema,
   type NousLoginStatus,
 } from '../../src/providers/nous-login.client.js';
+import {
+  docker,
+  expectIsolated,
+  expectNoRoute,
+  fetchIn,
+  json,
+  PYTHON,
+  waitFor,
+  type Started,
+} from './isolated-docker.js';
 
 const run = promisify(execFile);
+/** Container ports the test reaches with `docker exec`, from inside each container. */
+const LOGIN_PORT = 8650;
+const PORTAL_PORT = 8700;
 const IMAGE = process.env.TRIAL_IMAGE ?? 'hermes-evals/trial:v0.22.4-4d04303';
-const PYTHON = '/opt/hermes/.venv/bin/python';
 const SCRIPT = '/opt/nous-login/nous-login.py';
 const REPO = resolve(import.meta.dirname, '../../../..');
 const PREFIX = `hermes-evals-nl-test-${randomBytes(4).toString('hex')}`;
 const NETWORK = PREFIX;
 /** Text no response, log or file outside the home may contain: the fake's tokens. */
 const SECRET_MARKERS = ['eyJ', 'fake-refresh', 'opaque-'];
-
-const docker = async (...args: string[]): Promise<string> =>
-  (await run('docker', args, { maxBuffer: 16 * 1024 * 1024 })).stdout.trim();
-
-interface Started {
-  name: string;
-  url: string;
-}
 
 let staging = '';
 
@@ -69,8 +81,6 @@ async function container(
     '--network',
     NETWORK,
     ...(options.alias ? ['--network-alias', options.alias] : []),
-    '-p',
-    `127.0.0.1::${port}`,
     '--tmpfs',
     '/opt/data:rw,uid=10000,gid=10000,mode=0700',
     '--cap-drop',
@@ -83,32 +93,20 @@ async function container(
     IMAGE,
     ...options.command,
   );
+  await expectIsolated(name, NETWORK);
   for (const [from, to] of options.copy) await docker('cp', from, `${name}:${to}`);
   await docker('start', name);
-  const published = await docker('port', name, `${port}/tcp`);
-  const url = `http://${published.split('\n')[0]!.trim()}`;
-  await waitFor(async () => (await fetch(`${url}/health`)).ok, 15_000);
-  return { name, url };
-}
-
-async function waitFor(check: () => Promise<boolean>, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      if (await check()) return;
-    } catch {
-      // not up yet
-    }
-    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms`);
-    await new Promise((r) => setTimeout(r, 200));
-  }
+  const started = { name, port };
+  await waitFor(async () => (await fetchIn(started, 'GET', '/health')).status === 200, 15_000);
+  await expectNoRoute(name);
+  return started;
 }
 
 const LOGIN_ENV = {
   HOME: '/opt/data',
   HERMES_HOME: '/opt/data',
-  HERMES_PORTAL_BASE_URL: 'http://portal:8700',
-  NOUS_INFERENCE_BASE_URL: 'http://portal:8700/v1',
+  HERMES_PORTAL_BASE_URL: `http://portal:${PORTAL_PORT}`,
+  NOUS_INFERENCE_BASE_URL: `http://portal:${PORTAL_PORT}/v1`,
   HTTP_PROXY: 'http://127.0.0.1:9',
   HTTPS_PROXY: 'http://127.0.0.1:9',
   NO_PROXY: 'portal',
@@ -116,7 +114,7 @@ const LOGIN_ENV = {
 
 /** nous-login started through a wrapper that changes Hermes first, as a future revision might. */
 const patchedLogin = (role: string, patch: string): Promise<Started> =>
-  container(role, 8650, {
+  container(role, LOGIN_PORT, {
     env: LOGIN_ENV,
     command: [
       '-c',
@@ -130,10 +128,9 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
   let login: Started;
 
   async function call(method: string, path: string): Promise<{ status: number; body: unknown }> {
-    const res = await fetch(`${login.url}${path}`, { method });
-    const text = await res.text();
-    for (const marker of SECRET_MARKERS) expect(text).not.toContain(marker);
-    return { status: res.status, body: JSON.parse(text) as unknown };
+    const res = await fetchIn(login, method, path);
+    for (const marker of SECRET_MARKERS) expect(res.text).not.toContain(marker);
+    return { status: res.status, body: json(res) };
   }
   const status = async (): Promise<NousLoginStatus> =>
     NousLoginStatusSchema.parse((await call('GET', '/status')).body);
@@ -143,15 +140,12 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
     return NousLoginSchema.parse(res.body);
   };
   const scenario = async (body: Record<string, unknown>) => {
-    const res = await fetch(`${portal.url}/_control`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    expect(res.ok).toBe(true);
+    const res = await fetchIn(portal, 'POST', '/_control', JSON.stringify(body));
+    expect(res.status).toBe(200);
   };
   const portalRequests = async () =>
     (
-      (await (await fetch(`${portal.url}/_requests`)).json()) as {
+      json(await fetchIn(portal, 'GET', '/_requests')) as {
         requests: { path: string; grantType: string | null; deviceCode: string | null }[];
       }
     ).requests;
@@ -175,6 +169,8 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
       .filter((l) => l.includes('--login-child'));
 
   beforeAll(async () => {
+    // Every URL a container is given names the fake portal, never Nous.
+    expect(JSON.stringify(LOGIN_ENV)).not.toMatch(/nousresearch/i);
     staging = await mkdtemp(join(tmpdir(), 'hermes-evals-nl-'));
     await mkdir(join(staging, 'nous-login'), { mode: 0o755 });
     await chmod(join(staging, 'nous-login'), 0o755);
@@ -183,13 +179,14 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
       join(staging, 'nous-login', 'nous-login.py'),
     );
     await chmod(join(staging, 'nous-login', 'nous-login.py'), 0o644);
-    await docker('network', 'create', '--label', 'hermes-evals.role=test', NETWORK);
-    portal = await container('portal', 8700, {
+    await docker('network', 'create', '--internal', '--label', 'hermes-evals.role=test', NETWORK);
+    expect(await docker('network', 'inspect', '--format', '{{.Internal}}', NETWORK)).toBe('true');
+    portal = await container('portal', PORTAL_PORT, {
       alias: 'portal',
       command: ['/tmp/fake_portal.py'],
       copy: [[join(REPO, 'apps/api/test/fake-portal/fake_portal.py'), '/tmp/fake_portal.py']],
     });
-    login = await container('login', 8650, {
+    login = await container('login', LOGIN_PORT, {
       env: LOGIN_ENV,
       command: [SCRIPT],
       copy: [[join(staging, 'nous-login'), '/opt/']],
@@ -208,7 +205,7 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
   }, 60_000);
 
   it('passes its startup check against this image and starts empty', async () => {
-    expect(await (await fetch(`${login.url}/health`)).json()).toEqual({ ok: true, state: 'ready' });
+    expect(json(await fetchIn(login, 'GET', '/health'))).toEqual({ ok: true, state: 'ready' });
     // The Compose healthcheck, which must ignore the proxy variables.
     await docker('exec', login.name, PYTHON, SCRIPT, '--health');
     expect(await status()).toMatchObject({
@@ -317,16 +314,15 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
   });
 
   it('reports a portal it cannot reach as failed, with the reason', async () => {
-    const lost = await container('lost', 8650, {
+    const lost = await container('lost', LOGIN_PORT, {
       env: { ...LOGIN_ENV, HERMES_PORTAL_BASE_URL: 'http://portal:1' },
       command: [SCRIPT],
       copy: [[join(staging, 'nous-login'), '/opt/']],
     });
-    const res = await fetch(`${lost.url}/login`, { method: 'POST' });
-    const failed = NousLoginSchema.parse(await res.json());
+    const failed = NousLoginSchema.parse(json(await fetchIn(lost, 'POST', '/login')));
     expect(failed).toMatchObject({ state: 'failed', userCode: null });
     expect(failed.error).toMatch(/^Could not reach Nous Portal: /);
-    const s = NousLoginStatusSchema.parse(await (await fetch(`${lost.url}/status`)).json());
+    const s = NousLoginStatusSchema.parse(json(await fetchIn(lost, 'GET', '/status')));
     expect(s).toMatchObject({ state: 'not_connected', login: { state: 'failed' } });
   }, 60_000);
 
@@ -340,15 +336,15 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')('nous-login in the trial i
       [changed, 'hermes_cli.auth._nous_device_code_login now requires device_label'],
       [missing, 'hermes_cli.auth.get_nous_auth_status_local is missing'],
     ] as const) {
-      expect(await (await fetch(`${service.url}/health`)).json()).toEqual({
+      expect(json(await fetchIn(service, 'GET', '/health'))).toEqual({
         ok: true,
         state: 'unavailable',
       });
-      const s = NousLoginStatusSchema.parse(await (await fetch(`${service.url}/status`)).json());
+      const s = NousLoginStatusSchema.parse(json(await fetchIn(service, 'GET', '/status')));
       expect(s).toMatchObject({ state: 'unavailable', reason });
-      const start = await fetch(`${service.url}/login`, { method: 'POST' });
+      const start = await fetchIn(service, 'POST', '/login');
       expect(start.status).toBe(503);
-      expect(await start.json()).toEqual({ state: 'unavailable', reason });
+      expect(json(start)).toEqual({ state: 'unavailable', reason });
     }
   }, 60_000);
 });

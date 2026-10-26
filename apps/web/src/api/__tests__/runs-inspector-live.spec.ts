@@ -72,6 +72,28 @@ describe('reads', () => {
     });
   });
 
+  it('GET /runs/:id/attempts/:n/stderr parses the whole log with AttemptStderrSchema', async () => {
+    const log = {
+      runId: SAMPLE_RUN_ID,
+      attempt: 2,
+      text: 'a\nb\n',
+      sizeBytes: 4,
+      totalLines: 2,
+      truncated: false,
+    };
+    answer = () => json(log);
+    expect(await (await runs()).getAttemptStderr(SAMPLE_RUN_ID, 2)).toEqual(log);
+    expect(last()).toMatchObject({
+      method: 'GET',
+      path: `/api/runs/${SAMPLE_RUN_ID}/attempts/2/stderr`,
+    });
+    // `truncated` must say whether the log is over ATTEMPT_STDERR_MAX_BYTES.
+    answer = () => json({ ...log, truncated: true });
+    await expect((await runs()).getAttemptStderr(SAMPLE_RUN_ID, 2)).rejects.toMatchObject({
+      kind: 'contract',
+    });
+  });
+
   it('GET /runs/:id/events sends the cursor the API parses back', async () => {
     answer = () => json(runEventsFixture(off, SAMPLE_RUN_ID, 3));
     const page = await (await runs()).listRunEvents(SAMPLE_RUN_ID, 3);

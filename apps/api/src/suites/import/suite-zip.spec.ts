@@ -172,8 +172,18 @@ self_check:
       ['verify/data.json', 'verifier'],
     ]);
     expect(contents.scripts).toEqual([
-      { path: 'unmatched_lines/verify/check.py', sizeBytes: 9, sha256: sha('print(1)\n') },
-      { path: 'unmatched_lines/verify/data.json', sizeBytes: 3, sha256: sha('{}\n') },
+      {
+        path: 'unmatched_lines/verify/check.py',
+        sizeBytes: 9,
+        sha256: sha('print(1)\n'),
+        runByCheck: true,
+      },
+      {
+        path: 'unmatched_lines/verify/data.json',
+        sizeBytes: 3,
+        sha256: sha('{}\n'),
+        runByCheck: false,
+      },
     ]);
     // A folder suite.yaml does not list comes after the listed ones; it is kept, invalid.
     expect(other).toMatchObject({ key: 'other_task', taskYaml: null, prompt: 'no task.yaml\n' });

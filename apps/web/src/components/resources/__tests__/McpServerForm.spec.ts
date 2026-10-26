@@ -71,6 +71,49 @@ describe('McpServerForm, create', () => {
     );
   });
 
+  it('adds a header with a prefix, so .env holds the raw token (Phase 6 question 6)', async () => {
+    await form(null);
+    await w!.findAll('input[type="radio"]')[1]!.setValue(true);
+    expect(text('prefix-hint')).toBe(
+      'An optional prefix, such as Bearer, is written before the value, so .env holds the raw token.',
+    );
+    // Enter moves from the header to the prefix, then to the variable.
+    await type('input[aria-label="Add header name"]', 'Authorization');
+    const prefix = w!.get('input[aria-label="Prefix egress writes before the value (optional)"]');
+    expect(document.activeElement).toBe(prefix.element);
+    await type('input[aria-label="Prefix egress writes before the value (optional)"]', 'Bearer');
+    await type(
+      'input[aria-label="Variable egress reads the value from"]',
+      'vendor_directory_token',
+    );
+    await type('input[aria-label="Add header name"]', 'X-Team', false);
+    await type('input[aria-label="Variable egress reads the value from"]', 'team_id');
+    expect(w!.findAll('[data-testid="chip"]').map((c) => c.text())).toEqual([
+      'Authorization ← "Bearer " + VENDOR_DIRECTORY_TOKEN ×',
+      'X-Team ← TEAM_ID ×',
+    ]);
+  });
+
+  it('refuses a prefix the shared schema refuses', async () => {
+    await form(null);
+    await nameInput().setValue('vendor-directory');
+    await w!.findAll('input[type="radio"]')[1]!.setValue(true);
+    await w!.findAll('input.input')[1]!.setValue('http://vendor-directory:8000/mcp');
+    await type('input[aria-label="Add header name"]', 'Authorization', false);
+    await type(
+      'input[aria-label="Prefix egress writes before the value (optional)"]',
+      'Bearér',
+      false,
+    );
+    await type('input[aria-label="Variable egress reads the value from"]', 'token');
+    await w!.get('form').trigger('submit');
+    await flushPromises();
+    expect(w!.text()).toContain(
+      'a prefix is 1 to 64 printable ASCII characters, such as "Bearer "',
+    );
+    expect(w!.emitted('saved')).toBeUndefined();
+  });
+
   it('checks the form with the shared schema before saving', async () => {
     const { store } = await form(null);
     await nameInput().setValue('Invoice DB');
@@ -212,7 +255,7 @@ describe('McpServerForm, edit', () => {
     );
     expect(w!.get('[data-testid="save-mcp"]').text()).toBe('Save changes');
     expect(w!.findAll('[data-testid="chip"]').map((c) => c.text())).toEqual([
-      'Authorization ← VENDOR_API_TOKEN ×',
+      'Authorization ← "Bearer " + VENDOR_API_TOKEN ×',
     ]);
     expect(w!.get('[data-testid="mcp-test-result"]').find('b').text()).toBe(
       'Connected through egress in 0.9 s · exposes 3 tools · all included',

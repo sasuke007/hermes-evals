@@ -10,6 +10,7 @@
  * - Status strings are the shared vocabularies from @hermes-evals/shared.
  */
 export type {
+  FileNotRecordedReason,
   JsonDiffEntry,
   SelfCheckFailureView,
   SuiteChangeSet,
@@ -31,6 +32,7 @@ export type {
   TaskDiff,
   TaskExperimentUsage,
   TaskFileChange,
+  TaskFileVersion,
   TaskHomeFile,
   TaskHomeFileKind,
   TaskFixtureFile,

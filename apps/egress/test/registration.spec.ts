@@ -58,6 +58,28 @@ describe('RegistrationSchema', () => {
   const header = (h: string, env = 'VENDOR_API_TOKEN') =>
     withRoute({ headers: [{ header: h, env }] });
 
+  const prefixed = (prefix: unknown) =>
+    withRoute({ headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix }] });
+
+  it('accepts a header prefix of printable ASCII, and a header without one (Phase 7)', () => {
+    expect(RegistrationSchema.parse(prefixed('Bearer ')).mcp[0]!.headers).toEqual([
+      { header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Bearer ' },
+    ]);
+    expect(RegistrationSchema.parse(prefixed('x'.repeat(64))).mcp).toHaveLength(1);
+    expect(RegistrationSchema.parse(valid).mcp[0]!.headers[0]).not.toHaveProperty('prefix');
+  });
+
+  it.each<[string, unknown]>([
+    ['an empty prefix', ''],
+    ['a prefix with a line break', 'Bearer\r\nX-Injected: 1 '],
+    ['a prefix with a tab', 'Bearer\t'],
+    ['a prefix over 64 characters', 'x'.repeat(65)],
+    ['a prefix outside ASCII', 'Bearér '],
+    ['a null prefix', null],
+  ])('refuses %s', (_label, prefix) => {
+    expect(RegistrationSchema.safeParse(prefixed(prefix)).success).toBe(false);
+  });
+
   it.each<[string, unknown]>([
     ['an ftp url', withRoute({ url: 'ftp://files.example.com/mcp' })],
     ['a file url', withRoute({ url: 'file:///etc/passwd' })],
@@ -371,5 +393,36 @@ describe('allowlist mode (UI_FLOWS 19 #16)', () => {
       log.every((e) => e.decision === 'denied' && e.reason === 'host is not on the allowlist'),
     ).toBe(true);
     expect(log.map((e) => e.kind)).toEqual(['connect', 'connect', 'connect', 'connect', 'http']);
+    // Hermes's own credits-seed host is labelled as its background request (Phase 7), still refused.
+    expect(log.map((e) => [e.host, e.origin])).toEqual([
+      ['example.com', 'agent'],
+      ['api.openai.com', 'agent'],
+      ['93.184.216.34', 'agent'],
+      ['inference-api.nousresearch.com', 'hermes_background'],
+      ['example.com', 'agent'],
+    ]);
+  });
+
+  it('labels a request to each of Hermes’s background hosts, in any case, and nothing else', async () => {
+    registry.register(ATTEMPT, {
+      token: TOKEN,
+      mode: 'allowlist',
+      provider: null,
+      expiresAt: Date.now() + 60_000,
+    });
+    for (const authority of [
+      'hermes-agent.nousresearch.com:443',
+      'RAW.githubusercontent.com:443',
+      'githubusercontent.com:443',
+      'portal.nousresearch.com:443',
+    ]) {
+      expect((await connect(authority)).status, authority).toBe(403);
+    }
+    expect(registry.get(ATTEMPT)!.log.map((e) => [e.host, e.origin])).toEqual([
+      ['hermes-agent.nousresearch.com', 'hermes_background'],
+      ['RAW.githubusercontent.com', 'hermes_background'],
+      ['githubusercontent.com', 'agent'],
+      ['portal.nousresearch.com', 'agent'],
+    ]);
   });
 });

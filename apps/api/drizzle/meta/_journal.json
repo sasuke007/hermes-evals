@@ -71,6 +71,13 @@
       "when": 1792996836176,
       "tag": "0009_phase5b_authoring",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793022392388,
+      "tag": "0010_phase7_packaging",
+      "breakpoints": true
     }
   ]
 }

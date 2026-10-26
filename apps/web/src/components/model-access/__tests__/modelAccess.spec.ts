@@ -207,23 +207,25 @@ describe('SandboxCheckList', () => {
     wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
     expect(wrapper.find('[data-kind]').text()).toBe('proven');
     expect(wrapper.text()).toContain(
-      'Isolation proven · 15 of 15 checks · checked 2 min ago at worker start',
+      'Isolation proven · 16 of 16 checks · checked 2 min ago at worker start',
     );
     expect(wrapper.findAll('li[data-check]')).toHaveLength(0);
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     const toggle = wrapper.find('button[aria-expanded]');
-    expect(toggle.text()).toBe('Show 15 checks');
+    expect(toggle.text()).toBe('Show 16 checks');
     expect(toggle.attributes('aria-expanded')).toBe('false');
   });
 
-  it('expands to all 15 on request', async () => {
+  it('expands to all 16 on request, the verifier container last', async () => {
     useScenario(null);
     wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
     await wrapper.find('button[aria-expanded]').trigger('click');
     const rows = wrapper.findAll('li[data-check]');
-    expect(rows).toHaveLength(15);
+    expect(rows).toHaveLength(16);
     expect(rows[0]!.text()).toContain('01 runs as an unprivileged user (uid 10000)');
     expect(rows[4]!.text()).toContain('ip route → no default route');
+    expect(rows[15]!.attributes('data-check')).toBe('verifier-container');
+    expect(rows[15]!.text()).toContain('16 a verifier container starts through docker-guard');
     expect(wrapper.find('button[aria-expanded]').text()).toBe('Hide checks');
   });
 
@@ -232,22 +234,33 @@ describe('SandboxCheckList', () => {
     wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
     expect(wrapper.find('[data-kind]').text()).toBe('not proven');
     expect(wrapper.find('[role="alert"]').text()).toContain(
-      'Execution is disabled: 2 of 15 isolation checks failed. No run will start until every check passes.',
+      'Execution is disabled: 2 of 16 isolation checks failed. No run will start until every check passes.',
     );
     expect(wrapper.find('[role="alert"] code').text()).toBe(
       'docker compose exec worker node dist/sandbox-cli.js selftest',
     );
-    expect(wrapper.text()).toContain('Isolation not proven · 13 of 15 checks');
+    expect(wrapper.text()).toContain('Isolation not proven · 14 of 16 checks');
     // Collapsed by default, as the System board draws it: only the failures show.
     const failing = wrapper.findAll('li[data-check]');
     expect(failing).toHaveLength(2);
     expect(failing[0]!.find('[role="img"]').attributes('aria-label')).toBe('failed');
     expect(failing[0]!.text()).toContain('192.168.5.2:22 open');
     expect(failing[1]!.text()).toContain('10.0.4.7:5432 reachable');
-    expect(wrapper.find('button[aria-expanded]').text()).toBe('Show all 15 checks');
+    expect(wrapper.find('button[aria-expanded]').text()).toBe('Show all 16 checks');
     await wrapper.find('button[aria-expanded]').trigger('click');
-    expect(wrapper.findAll('li[data-check]')).toHaveLength(15);
+    expect(wrapper.findAll('li[data-check]')).toHaveLength(16);
     expect(wrapper.find('button[aria-expanded]').text()).toBe('Hide checks');
+  });
+
+  it("sandbox-verifier-refused: the verifier container fails alone, with the guard's reason", () => {
+    useScenario('sandbox-verifier-refused');
+    wrapper = mount(SandboxCheckList, { props: { status: sandboxFixture() } });
+    expect(wrapper.find('[role="alert"]').text()).toContain(
+      'Execution is disabled: 1 of 16 isolation checks failed.',
+    );
+    const failing = wrapper.findAll('li[data-check]');
+    expect(failing.map((li) => li.attributes('data-check'))).toEqual(['verifier-container']);
+    expect(failing[0]!.text()).toContain('docker-guard refused the container (403)');
   });
 
   it('shortens the image digest as drawn, the full one in the tooltip', () => {

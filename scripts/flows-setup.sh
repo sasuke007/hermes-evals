@@ -14,19 +14,27 @@
 # - <out>/smoke-<stamp>-stats-method.zip, the skill Flow A uploads; its
 #   SKILL.md holds the phrase the Phase 4 scripts answer right;
 # - <out>/mock-scripts.json: this walk's scripts, then Phase 4, 3 and 2, for
-#   MOCK_SCRIPTS. The MCP scripts call the tools of the server Flow C defines,
-#   smoke-<stamp>-invoice-db, by the names Hermes gives them
-#   (mcp__smoke_<stamp>_invoice_db__list_invoices);
+#   the mock's MOCK_SCRIPTS_FILE. The MCP scripts call the tools of the server
+#   Flow C defines, smoke-<stamp>-invoice-db, by the names Hermes gives them
+#   (mcp__smoke_<stamp>_invoice_db__list_invoices and __get_invoice), and match
+#   only phrases this walk's runs hold (Phase 6b question 14): the prompts, and
+#   the `source="mcp__smoke_<stamp>_invoice_db__<tool>"` Hermes wraps a result of
+#   that server in, which only a run whose call reached it shows. So the file
+#   can share the mock with every scripts/*mock-scripts.json, mcp-v1's too;
+#   the check at the end of the Python below proves no phrase is shared;
 # - <out>/names.txt: every name the flows type, and the commands below.
 #
-#   scripts/flows-setup.sh            # stamp now, <out> = $TMPDIR/hermes-flows-<stamp>
+#   scripts/flows-setup.sh            # stamp now, <out> = data/flows-<stamp> in the repository
 #   FLOWS_OUT=/some/dir scripts/flows-setup.sh
 #
-# Then start the mock with the scripts (Compose reads the shell before .env)
-# and give the worker the sample server's data file, if .env has no
-# INVOICE_DB_URL (see .env.example):
+# <out> must be a path Docker can mount, since Compose mounts the scripts
+# file into the mock: the repository's data/ (git-ignored) is, on Colima,
+# which shares only your home directory, and on Docker Desktop. Then start
+# the mock with the scripts (Compose reads the shell before .env) and give
+# the worker the sample server's data file, if .env has no INVOICE_DB_URL
+# (see .env.example):
 #
-#   MOCK_SCRIPTS="$(cat <out>/mock-scripts.json)" docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=<out>/mock-scripts.json docker compose --profile test up -d
 #
 # The suite directory is the walk's to remove at the end (docs/flows.md,
 # "Afterwards"). Needs bash and python3.
@@ -35,7 +43,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUITES_DIR="${SUITES_DIR:-$REPO_DIR/suites}"
 STAMP="${FLOWS_STAMP:-$(date -u +%Y%m%d%H%M%S)}"
-OUT="${FLOWS_OUT:-${TMPDIR:-/tmp}/hermes-flows-$STAMP}"
+OUT="${FLOWS_OUT:-$REPO_DIR/data/flows-$STAMP}"
 OUT="${OUT%/}"
 SUITE_NAME="zz-smoke-flows-$STAMP"
 SUITE_DIR="$SUITES_DIR/$SUITE_NAME"
@@ -50,7 +58,9 @@ repo, root, suite, stamp, out = sys.argv[1:6]
 prefix = 'smoke-' + stamp
 server = prefix + '-invoice-db'
 # Hermes names an MCP tool mcp__<server, every non-alphanumeric as _>__<tool>.
-tool = 'mcp__' + ''.join(c if c.isalnum() else '_' for c in server) + '__list_invoices'
+tools = 'mcp__' + ''.join(c if c.isalnum() else '_' for c in server) + '__'
+tool = tools + 'list_invoices'
+get_tool = tools + 'get_invoice'
 fenced = '\n\nEnd your reply with a fenced JSON block:\n\n```json\n{}\n```\n'
 
 def put(path, text):
@@ -150,21 +160,26 @@ with zipfile.ZipFile(os.path.join(out, skill + '.zip'), 'w', zipfile.ZIP_DEFLATE
                '---\n\n# Stats method\n\nsmoke-stats-method: count only the open rows of the region the task names. '
                'Paid rows never count.\n'.format(skill))
 
-# The mock's scripts: first match wins. The two after a database answer come first, matched on
-# invoice numbers only that answer holds (never the prompt, a fixture or a tool call's arguments).
-call = lambda args: {'tool': tool, 'arguments': args}
+# The mock's scripts: first match wins, and the prompts are in every request, so the two that
+# answer after a database call come first. They match the attribute Hermes wraps a result of this
+# walk's server in (`<untrusted_tool_result source="mcp__<server>__<tool>">`, any result of 32
+# characters or more), which a request holds only once that server answered: a run without it is
+# told "Tool '...' does not exist", with no source attribute. open_eur lists the invoices and cobalt
+# reads one, so each has a tool, and a source, of its own.
+call = lambda name, args: {'tool': name, 'arguments': args}
 cat = lambda path: {'tool': 'terminal', 'arguments': {'command': 'cat ' + path}}
 say = lambda text, answer: {'content': text + '\n\n```json\n' + json.dumps(answer) + '\n```'}
+answered = lambda name: 'source="{}"'.format(name)
 flows = [
-    {'match': 'INV-1004', 'steps': [call({}), say(
+    {'match': answered(tool), 'steps': [call(tool, {}), say(
         'The open EUR invoices are INV-1002 (980.50), INV-1003 (4200.00) and INV-1008 (560.00): 5740.50.',
         {'total': 5740.5})]},
-    {'match': 'INV-1005', 'steps': [call({'vendor_name': 'Cobalt Software'}), say(
-        'The invoice database lists two open Cobalt Software invoices of 7800.00 USD: 15600.00.',
-        {'total': 15600.0})]},
-    {'match': 'Smoke flows task OPEN-EUR', 'steps': [call({}), say(
+    {'match': answered(get_tool), 'steps': [call(get_tool, {'invoice_no': 'INV-1086'}), say(
+        'The invoice database has Cobalt Software\'s open invoice INV-1086 for 8355.39 USD and no credit note: '
+        'we owe 8355.39.', {'total': 8355.39})]},
+    {'match': 'Smoke flows task OPEN-EUR', 'steps': [call(tool, {}), say(
         'I have no invoice database to read, so I cannot total the invoices.', {'total': 0})]},
-    {'match': 'Smoke flows task COBALT', 'steps': [call({'vendor_name': 'Cobalt Software'}), cat('/workspace/cobalt.csv'), say(
+    {'match': 'Smoke flows task COBALT', 'steps': [call(get_tool, {'invoice_no': 'INV-1086'}), cat('/workspace/cobalt.csv'), say(
         'The statement shows 7800.00 invoiced and a credit note of 3900.00: we owe 3900.00 USD.', {'total': 3900.0})]},
     {'match': 'Smoke flows task LATE-FEES', 'steps': [cat('/workspace/policy_terms.json'), say(
         'The rate is 1.5% a month, so the fee on 1000.00 is 15.00.', {'fee': 15.0})]},
@@ -176,6 +191,40 @@ for phase in ('phase4', 'phase3', 'phase2'):
 with open(os.path.join(out, 'mock-scripts.json'), 'w', encoding='utf-8') as f:
     json.dump(scripts, f)
 
+# No phrase is shared with the committed scripts (Phase 6b question 14), in either direction: no
+# committed script's phrase is in what this walk writes for the agent (its prompts and fixtures),
+# and no phrase of this walk is in a committed script, so the file can share the mock with all of
+# them. The MCP results both see are the sample server's, where mcp-v1's phrases sit on records
+# neither of this walk's calls returns first (apps/api/test/phase6b-mock-scripts.spec.ts).
+import glob
+walk_text = ''
+for dirpath, _, names in os.walk(root):
+    for name in names:
+        with open(os.path.join(dirpath, name), encoding='utf-8') as f:
+            walk_text += f.read() + '\n'
+own = [s['match'] for s in flows]
+def strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from strings(item)
+for path in sorted(glob.glob(os.path.join(repo, 'scripts', '*mock-scripts.json'))):
+    with open(path, encoding='utf-8') as f:
+        committed = json.load(f)
+    committed_text = '\n'.join(strings(committed))
+    for script in committed:
+        phrase = script['match']
+        # Phase 4's scripts answer north, south, east and west, word for word on purpose.
+        if phrase in walk_text and not path.endswith('phase4-mock-scripts.json'):
+            sys.exit('flows-setup: {} phrase {!r} is in this walk\'s files'.format(os.path.basename(path), phrase))
+    for phrase in own:
+        if phrase in committed_text:
+            sys.exit('flows-setup: phrase {!r} is in {}'.format(phrase, os.path.basename(path)))
+
 with open(os.path.join(out, 'names.txt'), 'w', encoding='utf-8') as f:
     f.write('\n'.join([
         'suite            ' + suite,
@@ -183,10 +232,10 @@ with open(os.path.join(out, 'names.txt'), 'w', encoding='utf-8') as f:
         'configurations   {0}-baseline, {0}-with-skill, {0}-with-mcp'.format(prefix),
         '                 model mock/scripted · provider custom · base URL http://mock-model:8090/v1',
         'MCP server       {} · stdio · command invoice-db-mcp · env INVOICE_DB_URL'.format(server),
-        'its tool         ' + tool,
+        'its tools        {}, {}'.format(tool, get_tool),
         'experiments      {0}-skill-vs-baseline, {0}-mcp-vs-baseline'.format(prefix),
         '',
-        'start the mock   MOCK_SCRIPTS="$(cat {})" docker compose --profile test up -d'.format(os.path.join(out, 'mock-scripts.json')),
+        'start the mock   MOCK_SCRIPTS_FILE={} docker compose --profile test up -d'.format(os.path.join(out, 'mock-scripts.json')),
         'load the suite   Suites > Reload all from disk',
         '']))
 PY

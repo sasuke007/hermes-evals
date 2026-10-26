@@ -64,6 +64,7 @@ export function taskDetailView(draft: FixtureDraft, task: FixtureTask): DraftTas
     selfCheck: task.selfCheck,
     otherKeys: draft.tasks.filter((t) => t !== task).map((t) => t.key),
     now: task.updatedAt,
+    refused: task.refused ?? [],
   });
   return {
     draft: draftRef(draft),

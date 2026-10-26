@@ -13,20 +13,22 @@ import {
   type SandboxStatus,
   type SystemSummary,
 } from './types/system';
-import { sandboxFixture, systemSummaryFixture } from '@/fixtures/system';
 
 export { SystemEventSchema };
 
 /** GET /system/summary: running experiments { count, scored, total }, workers, queued runs. */
 export function getSystemSummary(): Promise<SystemSummary> {
   if (apiMode === 'live') return apiGet('/system/summary', SystemSummarySchema);
-  return fixture(systemSummaryFixture, { request: 'GET /api/system/summary' });
+  return fixture((w) => w.system.systemSummaryFixture(), { request: 'GET /api/system/summary' });
 }
 
-/** GET /system/sandbox: the 15 isolation checks from the worker's start-up self-test. */
+/**
+ * GET /system/sandbox: the worker's start-up self-test, 15 trial checks and, since Phase 7,
+ * one verifier container started through docker-guard.
+ */
 export function getSandboxStatus(): Promise<SandboxStatus> {
   if (apiMode === 'live') return apiGet('/system/sandbox', SandboxStatusSchema);
-  return fixture(sandboxFixture, { request: 'GET /api/system/sandbox' });
+  return fixture((w) => w.system.sandboxFixture(), { request: 'GET /api/system/sandbox' });
 }
 
 /**

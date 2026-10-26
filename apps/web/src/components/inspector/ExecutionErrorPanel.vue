@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { EXECUTION_ERROR_CATEGORIES } from '@hermes-evals/shared';
-import CopyButton from '@/components/ui/CopyButton.vue';
 import type { AttemptView, ExecutionErrorView } from '@/api/types/runs';
-import { formatClock, formatCount } from '@/lib/format';
+import { formatClock } from '@/lib/format';
 import AttemptsTable from './AttemptsTable.vue';
+import StderrLog from './StderrLog.vue';
 
 /**
  * Outcome of a run that produced no answer (RunInspectorStates › Execution error): the
  * violet banner with every category and the run's one filled in, what the agent was doing,
- * the attempts table, and the stderr tail with Copy. A timeout adds the line saying when
- * the platform stopped it.
+ * the attempts table, and the stderr tail with Copy and Full log (StderrLog). A timeout adds
+ * the line saying when the platform stopped it.
  */
 const props = defineProps<{
+  runId: string;
   error: ExecutionErrorView;
   attempts: AttemptView[];
   shownAttempt: number;
@@ -21,7 +22,6 @@ const props = defineProps<{
 }>();
 
 const shown = computed(() => props.attempts.find((a) => a.number === props.shownAttempt) ?? null);
-const lines = computed(() => props.error.stderrTail.lines);
 
 /** "10:51:30 Stopped by the platform at 310 s (300 s budget + grace)." for a timeout. */
 const stop = computed(() => {
@@ -65,29 +65,12 @@ const stop = computed(() => {
   </div>
   <AttemptsTable v-if="attempts.length" :attempts="attempts" :shown="shownAttempt" />
   <div class="flex flex-col gap-4">
-    <div class="flex items-center justify-between gap-8">
-      <span class="text-12 text-text-3" data-testid="stderr-caption">
-        <template v-if="lines.length">
-          stderr · last {{ formatCount(lines.length) }} of
-          {{ formatCount(Math.max(error.stderrTail.totalLines, lines.length)) }}
-          {{ error.stderrTail.totalLines === 1 ? 'line' : 'lines' }}
-        </template>
-        <template v-else>stderr · nothing written</template>
-      </span>
-      <CopyButton
-        v-if="lines.length"
-        variant="button"
-        :text="lines.join('\n')"
-        label="Copy the stderr tail"
-        button-text="Copy"
-      />
-    </div>
-    <pre
-      v-if="lines.length"
-      class="overflow-auto rounded-4 border border-border bg-surface px-12 py-10 font-mono text-12 leading-18 break-words whitespace-pre-wrap text-text"
-      aria-label="stderr tail"
-      data-testid="stderr-tail"
-      >{{ lines.join('\n') }}</pre>
+    <StderrLog
+      :run-id="runId"
+      :attempt="shownAttempt"
+      :lines="error.stderrTail.lines"
+      :total-lines="error.stderrTail.totalLines"
+    />
     <div
       v-if="stop"
       class="flex flex-wrap items-center gap-8 rounded-4 border border-dashed border-err px-12 py-8 text-12 text-err-text"

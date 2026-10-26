@@ -91,7 +91,7 @@ function emitWith(next: TaskFormCheck[]): void {
   emit('update', next);
 }
 
-async function add(type: ScorerType): Promise<void> {
+async function add(type: ScorerType, script?: string): Promise<void> {
   picker.value = null;
   const key = defaultCheckKey(
     type,
@@ -102,7 +102,7 @@ async function add(type: ScorerType): Promise<void> {
     key,
     type,
     primary: first,
-    params: defaultParams(type, scriptNames.value),
+    params: defaultParams(type, script ?? null),
   };
   if (first)
     notes.value[key] = 'Primary: the first check is primary. Change it here when you add more.';
@@ -114,10 +114,10 @@ async function add(type: ScorerType): Promise<void> {
   }, 1500);
 }
 
-function replaceType(index: number, type: ScorerType): void {
+function replaceType(index: number, type: ScorerType, script?: string): void {
   picker.value = null;
   const current = props.checks[index]!;
-  const result = changeType(current, type, scriptNames.value);
+  const result = changeType(current, type, script ?? null);
   changed.value[current.key] = { from: current.type, dropped: result.dropped, previous: current };
   emitWith(props.checks.map((c, i) => (i === index ? result.check : c)));
 }
@@ -295,8 +295,8 @@ function onDrop(index: number): void {
           :current-type="check.type"
           :suggested="suggested"
           :no-reference="reference === undefined"
-          :has-scripts="scripts.length > 0"
-          @pick="replaceType(index, $event)"
+          :scripts="scriptNames"
+          @pick="(type, script) => replaceType(index, type, script)"
           @close="closePicker"
         />
       </div>
@@ -333,7 +333,7 @@ function onDrop(index: number): void {
         <CheckPicker
           :suggested="suggested"
           :no-reference="reference === undefined"
-          :has-scripts="scripts.length > 0"
+          :scripts="scriptNames"
           @pick="add"
           @close="closePicker"
         />

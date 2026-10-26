@@ -11,9 +11,12 @@
  */
 import {
   NETWORK_EVENT_KINDS,
+  NETWORK_ORIGINS,
+  TIMELINE_ORIGIN_OF,
   type NetworkEventKind,
   type TimelineEvent,
   type TimelineNetwork,
+  type TimelineOrigin,
 } from '@hermes-evals/shared';
 import { MODEL_GATEWAY_BASE_URL } from '../../execution/providers-map.js';
 import { egressMcpUrl } from '../../resources/mcp/hermes-config.js';
@@ -152,6 +155,31 @@ export interface NetworkContext {
   forwardedTo: string | null;
 }
 
+/**
+ * Whose a network row is (Phase 7): the stored `origin`, else, on an event
+ * stored before it, the `background` flag the worker set then.
+ */
+export function networkOriginOf(p: Payload): TimelineOrigin {
+  const stored = NETWORK_ORIGINS.find((o) => o === p['origin']);
+  if (stored) return TIMELINE_ORIGIN_OF[stored];
+  return p['background'] === true ? 'hermes-background' : 'agent';
+}
+
+/**
+ * Hermes's MCP client opens the server's event stream with a GET, and a
+ * streamable-HTTP server that offers none answers 405, as the protocol
+ * allows (vendor-directory does; Phase 6 question 15). Drawn as a neutral
+ * row, not a failed call: every request of the run still goes over POST.
+ */
+export function isEventStreamDeclined(p: Payload): boolean {
+  return (
+    str(p, 'kind') === 'mcp' &&
+    str(p, 'decision') !== 'denied' &&
+    str(p, 'method') === 'GET' &&
+    int(p, 'status') === 405
+  );
+}
+
 /** The log entry's kind; an unknown one reads as a connection, as its row does. */
 function networkKind(p: Payload): NetworkEventKind {
   const kind = str(p, 'kind');
@@ -213,14 +241,14 @@ export function networkRow(
   const network = networkEntry(p, ctx);
   const kind = str(p, 'kind');
   const denied = network.decision === 'denied';
-  const background = p['background'] === true;
+  const origin = networkOriginOf(p);
+  const background = origin === 'hermes-background';
   const ms = count(p, 'ms') ?? null;
   const status = int(p, 'status');
   const reason = str(p, 'reason');
   const host = str(p, 'host');
   const port = int(p, 'port');
   const start = Math.max(0, atMs - (ms ?? 0));
-  const origin = background ? ('hermes-background' as const) : ('agent' as const);
   const target = host ? (port ? `${host}:${port}` : host) : 'unknown host';
   const hasTarget = host !== undefined && port !== undefined && port >= 1 && port <= 65_535;
 
@@ -245,6 +273,18 @@ export function networkRow(
   if (kind === 'mcp') {
     const server = str(p, 'server') ?? null;
     const name = server ?? 'MCP server';
+    if (isEventStreamDeclined(p)) {
+      return {
+        ...blankRow(seq, start, 'network', 'MCP event stream not offered', `${name} · 405`),
+        origin,
+        server,
+        durationMs: ms,
+        text:
+          `${name} offers no event stream: it answered the MCP client's GET with 405, as ` +
+          'the protocol allows. Its tools are called over POST, so the run is not affected.',
+        network,
+      };
+    }
     const outcome = denied
       ? `refused: ${reason ?? 'refused by the MCP gateway'}`
       : (status ?? 'no answer');
@@ -264,7 +304,7 @@ export function networkRow(
     ...blankRow(seq, start, 'network', title, status ? `${target} · ${status}` : target),
     origin,
     durationMs: ms,
-    error: status !== undefined && status >= 400,
+    error: !background && status !== undefined && status >= 400,
     text: `${title} to ${target} allowed by the sandbox${status ? ` → ${status}` : ''}.${background ? ` ${BACKGROUND_TEXT}` : ''}`,
     network,
   };

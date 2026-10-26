@@ -4,8 +4,10 @@
  * egress registration) and runs a Python probe inside it that tries what an
  * escaping agent would: look at its mounts, write to the image, find a route
  * out, resolve platform names, open sockets to Postgres, the API, the host and
- * the internet, and ask egress for private destinations. The worker refuses
- * to run experiments unless every check passes.
+ * the internet, and ask egress for private destinations. Then it starts one
+ * verifier container through docker-guard (self-test-verifier.ts), the shape
+ * every verifier script runs in. The worker refuses to run experiments
+ * unless every check passes.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { lookup } from 'node:dns/promises';
@@ -13,7 +15,9 @@ import { join } from 'node:path';
 import { newId } from '../database/ids.js';
 import type { EgressClient, EgressLogEntry } from './egress-client.js';
 import { newAttemptToken } from './egress-client.js';
+import type { VerifierRunner } from '../scoring/verifier-runner.js';
 import { EngineError, type EngineClient } from './engine-client.js';
+import { checkVerifierContainer } from './self-test-verifier.js';
 import { clearRun, prepareTrialDirs, removeTrialDirs, runTrial } from './trial-runner.js';
 import { trialContainerBody } from './trial-spec.js';
 
@@ -24,6 +28,8 @@ export interface SelfTestDeps {
   image: string;
   volume: string;
   slot: string;
+  /** Runs the verifier check's container; the worker's container runner, built from the above, by default. */
+  verifier?: VerifierRunner;
 }
 
 export interface SelfTestCheck {
@@ -406,6 +412,8 @@ export async function runIsolationSelfTest(deps: SelfTestDeps): Promise<SelfTest
   check('egress logged the refusals', denials >= PROXY_TARGETS.length, `${denials} denials logged`);
 
   for (const guardCheck of await checkGuardRefusals(deps)) checks.push(guardCheck);
+  // The 16th: a verifier container, as scoring and every load start one (Phase 5b question 3).
+  checks.push(await checkVerifierContainer(deps));
 
   return { ok: checks.every((c) => c.ok), checks, probe, egressLog: egressRecord?.log ?? [] };
 }

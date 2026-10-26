@@ -288,14 +288,21 @@ describe('a directory with two versions', () => {
     expect(diff.prompt.every((l) => l.kind === 'same')).toBe(true);
     expect(diff.reference).toEqual([]);
     // No root-file record (rows seeded as before Phase 5b): task.yaml and prompt.md are
-    // measured from their stored text, and reference.json is left out.
+    // measured from their stored text, and reference.json is "not recorded" (Phase 7),
+    // unchanged since both stored values are the same.
     expect(diff.files.map((f) => [f.path, f.change])).toEqual([
       ['task.yaml', 'unchanged'],
       ['prompt.md', 'unchanged'],
+      ['reference.json', 'unchanged'],
       ['fixtures/invoices.csv', 'unchanged'],
       ['fixtures/policy_terms.json', 'changed'],
       ['verify/check_late_fees.py', 'unchanged'],
     ]);
+    expect(diff.files[2]!.before).toEqual({
+      sizeBytes: null,
+      sha256: null,
+      notRecorded: 'loaded_before_phase_5b',
+    });
     expect(diff.textFiles).toEqual([
       {
         path: 'fixtures/policy_terms.json',

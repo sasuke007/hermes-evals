@@ -71,6 +71,7 @@ export type FileAction =
 
 /** The actions of a row in the Files tab, by kind (SA.6). */
 export function folderActions(file: DraftFileView): FileAction[] {
+  if (file.tooLargeToEdit) return ['Copy path'];
   switch (file.kind) {
     case 'prompt':
     case 'reference':
@@ -93,8 +94,13 @@ export function folderActions(file: DraftFileView): FileAction[] {
   }
 }
 
+/** What the Files tab says of a text too large to edit (Phase 5b question 18). */
+export const TOO_LARGE_TO_EDIT =
+  'Over 1 MiB of text, too large to edit here · read-only, kept as is';
+
 /** What the Files tab says after a row's chip. */
 export function folderDetail(file: DraftFileView): string {
+  if (file.tooLargeToEdit) return TOO_LARGE_TO_EDIT;
   const details: Partial<Record<DraftFileViewKind, string>> = {
     prompt: 'as task.txt',
     reference: 'checks only',

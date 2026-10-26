@@ -382,7 +382,7 @@ describe('a connection log stored by the worker', () => {
       status: 429,
     },
   ];
-  const stored: EventRecord[] = networkEvents(log, 'custom').map((e, i) => ({
+  const stored: EventRecord[] = networkEvents(log).map((e, i) => ({
     seq: i + 1,
     ts: e.ts,
     type: e.type,
@@ -741,5 +741,133 @@ describe('other rows', () => {
       atMs: 310_000,
       error: true,
     });
+  });
+});
+
+describe('Phase 7', () => {
+  const toolRun = (name: string, output: string) =>
+    events(
+      buildTimeline(
+        [
+          line(1, { type: 'tool_use', name, tool_call_id: 'c1', input: {} }),
+          line(2, { type: 'tool_result', name, tool_call_id: 'c1', output }),
+        ],
+        CTX,
+      ),
+    )[0]!;
+  const MCP_TOOL = 'mcp__invoice_db__list_invoices';
+
+  it('keeps 20,000 characters of an MCP result and 5,000 of any other tool’s output', () => {
+    const page = 'p'.repeat(7_000);
+    expect(toolRun(MCP_TOOL, page)).toMatchObject({
+      server: 'invoice-db',
+      output: page,
+      outputChars: 7_000,
+      truncated: false,
+    });
+    const huge = toolRun(MCP_TOOL, 'q'.repeat(25_000));
+    expect(huge).toMatchObject({ outputChars: 25_000, truncated: true });
+    expect(huge.output).toHaveLength(20_000);
+    const terminal = toolRun('terminal', 't'.repeat(7_000));
+    expect(terminal).toMatchObject({ server: null, outputChars: 7_000, truncated: true });
+    expect(terminal.output).toHaveLength(TOOL_OUTPUT_LIMIT);
+  });
+
+  it('still marks an MCP result Hermes’s emitter cut at 5,000 characters', () => {
+    const cut = `${'r'.repeat(TOOL_OUTPUT_LIMIT)}...`;
+    expect(toolRun(MCP_TOOL, cut)).toMatchObject({
+      output: cut,
+      outputChars: TOOL_OUTPUT_LIMIT + 3,
+      truncated: true,
+    });
+    expect(toolRun(MCP_TOOL, 'short...')).toMatchObject({ truncated: false });
+  });
+
+  const one = (fields: Record<string, unknown>) =>
+    events(buildTimeline([network(1, START + 1_000, fields)], CTX))[0]!;
+
+  it('draws a request egress labelled as Hermes background neutral, from its origin', () => {
+    const refused = one({
+      kind: 'connect',
+      host: 'hermes-agent.nousresearch.com',
+      port: 443,
+      decision: 'denied',
+      reason: 'host is not on the allowlist',
+      origin: 'hermes_background',
+      background: true,
+    });
+    expect(refused).toMatchObject({ kind: 'refused', origin: 'hermes-background', error: false });
+    const allowed = one({
+      kind: 'connect',
+      host: 'raw.githubusercontent.com',
+      port: 443,
+      decision: 'allowed',
+      status: 404,
+      origin: 'hermes_background',
+      background: true,
+    });
+    expect(allowed).toMatchObject({ kind: 'network', origin: 'hermes-background', error: false });
+    // The origin wins over a contradicting flag; an event stored before Phase 7 has only the flag.
+    expect(
+      one({
+        kind: 'connect',
+        host: 'a.example',
+        port: 443,
+        decision: 'denied',
+        origin: 'agent',
+        background: true,
+      }).origin,
+    ).toBe('agent');
+    expect(
+      one({
+        kind: 'connect',
+        host: 'inference-api.nousresearch.com',
+        port: 443,
+        decision: 'denied',
+        background: true,
+      }),
+    ).toMatchObject({ kind: 'refused', origin: 'hermes-background', error: false });
+  });
+
+  it('draws the 405 a server answers the MCP client’s GET with as a neutral row', () => {
+    const declined = one({
+      kind: 'mcp',
+      server: 'vendor-directory',
+      method: 'GET',
+      host: 'vendor-directory',
+      port: 8000,
+      decision: 'allowed',
+      status: 405,
+      ms: 4,
+    });
+    expect(declined).toMatchObject({
+      kind: 'network',
+      title: 'MCP event stream not offered',
+      summary: 'vendor-directory · 405',
+      server: 'vendor-directory',
+      origin: 'agent',
+      error: false,
+    });
+    expect(declined.text).toContain('answered the MCP client');
+    // A 405 to a POST is still a failed call, and so is a refused GET.
+    expect(
+      one({
+        kind: 'mcp',
+        server: 'vendor-directory',
+        method: 'POST',
+        decision: 'allowed',
+        status: 405,
+      }),
+    ).toMatchObject({ title: 'MCP call', error: true });
+    expect(
+      one({
+        kind: 'mcp',
+        server: 'x',
+        method: 'GET',
+        decision: 'denied',
+        status: 405,
+        reason: 'GET',
+      }),
+    ).toMatchObject({ title: 'MCP call', error: true });
   });
 });

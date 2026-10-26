@@ -4,6 +4,9 @@
  * ImportSuiteDialog, chosen by the file's name as the board names them:
  * - `vendor-statements-v1.zip` (and any other name): valid, no scripts;
  * - `invoices-v1-v6.zip`: valid but the name is taken, 2 verifier scripts, 1 invalid task;
+ * - `stock-tools-v1.zip`: valid, 2 files under verify/ of which a check runs 1 (Phase 7,
+ *   question 12), and a README and a LICENSE at the root that the import leaves out
+ *   (question 2);
  * - a name with `link`, `payables.zip`, `statements-draft.zip`, `ledger-archive.zip`:
  *   the four rejections.
  * A task file named `*.xlsx` is refused, and `all_questions.csv` is over 500 rows.
@@ -204,6 +207,8 @@ const rejected = (
   nameTaken: null,
   tasks: [],
   scripts: [],
+  verifyCounts: { files: 0, checkScripts: 0 },
+  rootFilesNotKept: [],
   fileCount: 0,
   unpackedBytes: 0,
   problems: [{ title, detail }],
@@ -215,13 +220,56 @@ export const ZIP_SCRIPTS = [
     path: 'late_fees/verify/check_late_fees.py',
     sizeBytes: 2458,
     sha256: sha('zip-check_late_fees', 'e81f0c2'),
+    runByCheck: true,
   },
   {
     path: 'summary_file/verify/check_summary.py',
     sizeBytes: 1229,
     sha256: sha('zip-check_summary', '9b14e0d'),
+    runByCheck: true,
   },
 ];
+
+/** A zip whose `verify/` holds data beside its script, and whose root holds a README. */
+export const STOCK_ZIP_SCRIPTS = [
+  {
+    path: 'reshape_json/verify/check_stock.py',
+    sizeBytes: 1843,
+    sha256: sha('zip-check_stock', '4c7a2e1'),
+    runByCheck: true,
+  },
+  {
+    path: 'reshape_json/verify/expected_stock.json',
+    sizeBytes: 612,
+    sha256: sha('zip-expected_stock', 'a03f9d8'),
+    runByCheck: false,
+  },
+];
+
+function stockZip(fileName: string, sizeBytes: number): SuiteZipValidation {
+  return {
+    token: ulid('zip', fileName),
+    fileName,
+    sizeBytes,
+    outcome: 'valid',
+    suite: {
+      name: 'stock-tools-v1',
+      versionLabel: '0.1',
+      description: 'Reshaping stock files with the code tools.',
+    },
+    nameTaken: null,
+    tasks: [zipTask('reshape_json', 1, 2), zipTask('checksum', 1, 1)],
+    scripts: STOCK_ZIP_SCRIPTS,
+    verifyCounts: { files: 2, checkScripts: 1 },
+    rootFilesNotKept: [
+      { path: 'LICENSE', sizeBytes: 1071 },
+      { path: 'README.md', sizeBytes: 2310 },
+    ],
+    fileCount: 11,
+    unpackedBytes: 18_400,
+    problems: [],
+  };
+}
 
 /** POST /suites/import/validate for a zip of this name. */
 export function suiteZipValidationFixture(fileName: string, sizeBytes: number): SuiteZipValidation {
@@ -258,6 +306,7 @@ export function suiteZipValidationFixture(fileName: string, sizeBytes: number): 
       'A suite holds at most 20,000 files, 25 MB each, in folders at most 12 levels deep.',
     );
   }
+  if (lower.startsWith('stock-tools')) return stockZip(fileName, sizeBytes);
   if (lower.startsWith('invoices-v1')) {
     return {
       token: ulid('zip', fileName),
@@ -278,6 +327,8 @@ export function suiteZipValidationFixture(fileName: string, sizeBytes: number): 
             : zipTask(key),
       ),
       scripts: ZIP_SCRIPTS,
+      verifyCounts: { files: ZIP_SCRIPTS.length, checkScripts: ZIP_SCRIPTS.length },
+      rootFilesNotKept: [],
       fileCount: 61,
       unpackedBytes: 214_000,
       problems: [],
@@ -296,6 +347,8 @@ export function suiteZipValidationFixture(fileName: string, sizeBytes: number): 
     nameTaken: null,
     tasks: [zipTask('unmatched_lines', 2, 1)],
     scripts: [],
+    verifyCounts: { files: 0, checkScripts: 0 },
+    rootFilesNotKept: [],
     fileCount: 7,
     unpackedBytes: 26_700,
     problems: [],

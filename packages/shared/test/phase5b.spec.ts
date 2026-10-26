@@ -152,7 +152,16 @@ const ZIP = {
       checks: 2,
     },
   ],
-  scripts: [{ path: 'late_fees/verify/check_late_fees.py', sizeBytes: 2458, sha256: hash('e') }],
+  scripts: [
+    {
+      path: 'late_fees/verify/check_late_fees.py',
+      sizeBytes: 2458,
+      sha256: hash('e'),
+      runByCheck: true,
+    },
+  ],
+  verifyCounts: { files: 1, checkScripts: 1 },
+  rootFilesNotKept: [],
   fileCount: 61,
   unpackedBytes: 180_000,
   problems: [],
@@ -182,6 +191,7 @@ describe('a suite from a .zip (SA.10)', () => {
       suite: null,
       tasks: [],
       scripts: [],
+      verifyCounts: { files: 0, checkScripts: 0 },
       problems: [
         {
           title:

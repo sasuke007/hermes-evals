@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import type { SuiteZipScript } from '@/api/types/authoring';
+import type { SuiteZipScript, SuiteZipValidation } from '@/api/types/authoring';
+import CodeText from '@/components/suites/CodeText.vue';
 import BaseTag from '@/components/ui/BaseTag.vue';
 import { formatBytes, shortHash } from '@/lib/format';
-import { scriptsSentence } from './zipFormat';
+import { scriptsCountLine, scriptsSentence } from './zipFormat';
 
 /**
- * "This suite contains code" (SA.10, R7): the verifier scripts a zip carries, each with its
- * path, size and short hash, and the "I trust these scripts" tick that Import waits for.
- * Scripts are the only code that can arrive through the browser.
+ * "This suite contains code" (SA.10, R7): every file a zip carries under a task's
+ * `verify/`, each with its path, size and short hash, the ones a check runs marked "run by
+ * a check" and counted apart (Phase 5b question 12: data such as `expected_stock.json` is
+ * listed too), and the "I trust these scripts" tick that Import waits for. Scripts are the
+ * only code that can arrive through the browser.
  */
-defineProps<{ scripts: SuiteZipScript[] }>();
+defineProps<{ scripts: SuiteZipScript[]; counts: SuiteZipValidation['verifyCounts'] }>();
 const trusted = defineModel<boolean>('trusted', { default: false });
 </script>
 
@@ -39,7 +42,10 @@ const trusted = defineModel<boolean>('trusted', { default: false });
       </svg>
       <div class="flex flex-col gap-2">
         <b class="text-ung-text">This suite contains code</b>
-        <span class="text-12 leading-18 text-text-2">{{ scriptsSentence(scripts.length) }}</span>
+        <span class="text-12 font-medium text-text" data-testid="zip-script-counts"
+          ><CodeText :text="scriptsCountLine(counts)"
+        /></span>
+        <span class="text-12 leading-18 text-text-2">{{ scriptsSentence(counts) }}</span>
       </div>
     </div>
     <ul
@@ -49,10 +55,14 @@ const trusted = defineModel<boolean>('trusted', { default: false });
       <li
         v-for="script in scripts"
         :key="script.path"
-        class="grid grid-cols-[minmax(0,1fr)_60px_72px] items-center gap-10 border-b border-border px-10 py-6 last:border-b-0"
+        class="grid grid-cols-[minmax(0,1fr)_96px_60px_72px] items-center gap-10 border-b border-border px-10 py-6 last:border-b-0"
+        :data-run-by-check="script.runByCheck ? 'true' : 'false'"
         data-testid="zip-script"
       >
         <code class="truncate" :title="script.path">{{ script.path }}</code>
+        <span class="text-12" :class="script.runByCheck ? 'text-ung-text' : 'text-text-3'">{{
+          script.runByCheck ? 'run by a check' : 'file'
+        }}</span>
         <span class="text-right text-12 text-text-3">{{ formatBytes(script.sizeBytes) }}</span>
         <BaseTag :title="script.sha256">{{ shortHash(script.sha256) }}</BaseTag>
       </li>

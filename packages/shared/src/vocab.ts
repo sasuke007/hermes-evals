@@ -99,6 +99,16 @@ export const NETWORK_DECISIONS = ['allowed', 'denied'] as const;
 export type NetworkDecision = (typeof NETWORK_DECISIONS)[number];
 
 /**
+ * Who a connection or call was for, as egress labels each entry of its
+ * connection log (Phase 5 question 19, Phase 7): `hermes_background` for a
+ * request to one of Hermes's own background hosts (HERMES_BACKGROUND_HOSTS
+ * in runtime.ts), which the inspector draws neutral; `agent` for anything
+ * else. Stored in the event payload, so no CHECK depends on this list.
+ */
+export const NETWORK_ORIGINS = ['agent', 'hermes_background'] as const;
+export type NetworkOrigin = (typeof NETWORK_ORIGINS)[number];
+
+/**
  * Where a file collected after a run came from. Inputs are the task's
  * fixtures and the configuration's documents in the workspace, and the
  * task's home seeds in the home (Phase 6 P2, migration 0008); anything else

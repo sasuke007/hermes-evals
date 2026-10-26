@@ -21,7 +21,10 @@
  * (removed and rewritten whole), `reference.json`, `prompt.md`, and
  * `verify/expected_*.json` where a verifier compares with computed values.
  * Written by hand, and never touched here: suite.yaml, task.yaml and the
- * verifier scripts.
+ * verifier scripts; but for one key of task.yaml,
+ * `self_check.answers_from_fixtures: true`, which vendor_alias and
+ * standing_exclusion get, their vendor totals being one invoice's amount
+ * at times (../answers-from-fixtures.ts): their task.yaml is written too.
  *
  * The seeds. Every task seeds both memory files, the same in both arms
  * (plan 18.2 P1): USER.md starts with two persona entries and MEMORY.md
@@ -95,6 +98,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { markedTaskYaml } from './answers-from-fixtures.ts';
 import {
   check,
   jsonFile,
@@ -161,6 +165,9 @@ function generatedFiles(tasks: readonly MemoryTask[]): Map<string, string> {
     );
     for (const [path, content] of task.files) files.set(join(SUITE, task.key, path), content);
     files.set(join(SUITE, task.key, 'reference.json'), jsonFile(task.reference));
+    if (task.answersFromFixtures) {
+      files.set(join(SUITE, task.key, 'task.yaml'), markedTaskYaml(SUITE, task.key));
+    }
   }
   files.set(MOCK_SCRIPTS, jsonFile(mockScripts(tasks)));
   return files;

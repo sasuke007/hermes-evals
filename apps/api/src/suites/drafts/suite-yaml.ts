@@ -1,5 +1,6 @@
 /**
- * suite.yaml as a draft writes it (plan 4.6, V5): the live file with only
+ * suite.yaml as a draft writes it (plan 4.6, V5): the live file (or a zip
+ * draft's suite.yaml as the zip held it, Phase 5b question 17) with only
  * the fields the draft changed patched in through the byte-stable patcher
  * (yaml-patch.ts), or a new file in the canonical style of the sample
  * suites for a new suite (and for a version download, whose suite.yaml the

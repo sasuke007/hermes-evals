@@ -11,3 +11,5 @@ verification:
     type: exact_match
     primary: true
     params: { path: bin }
+self_check:
+  answers_from_fixtures: true

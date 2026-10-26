@@ -4,6 +4,7 @@
  * sees of it, its readiness and its last worker self-check.
  */
 import {
+  AUTHORING_LIMITS,
   homeSeedTarget,
   isHomeSeedPath,
   type DraftFileView,
@@ -17,7 +18,7 @@ import { sha256Hex } from '../loader/hashing.js';
 import { PROMPT_MD, REFERENCE_JSON, TASK_YAML } from '../loader/limits.js';
 import { isoTime } from '../views/format.js';
 import { fixtureTypeLabel } from '../views/table.js';
-import { folderFiles, utf8Size, type FolderFile } from './draft-folder.js';
+import { folderFiles, layoutOf, utf8Size, type FolderFile } from './draft-folder.js';
 import type { DraftTaskDbRow } from './draft-store.js';
 import type { DraftTaskFolder } from './materialise.js';
 import { selfCheckView } from './readiness-self-check.js';
@@ -73,12 +74,25 @@ const rank = (file: FolderFile): number =>
           ? 3
           : 4;
 
-/** Every file of the folder; blobs up to LABEL_READ_MAX_BYTES are read for their type label. */
+/**
+ * Every file of the folder; blobs up to LABEL_READ_MAX_BYTES are read for
+ * their type label. A text the forms edit that a zip held at more than the
+ * editor can save back is a blob (suite-zip.ts), marked `tooLargeToEdit`
+ * so the Files tab shows it read-only (Phase 5b question 18).
+ */
 export async function fileViews(
   folder: DraftTaskFolder,
   readBlob: (sha256: string) => Promise<Buffer>,
 ): Promise<DraftFileView[]> {
   const files = folderFiles(folder).sort((a, b) => rank(a) - rank(b));
+  const texts = new Set([
+    TASK_YAML,
+    PROMPT_MD,
+    REFERENCE_JSON,
+    ...layoutOf(folder.taskYaml).rubrics,
+  ]);
+  const tooLarge = (file: FolderFile): boolean =>
+    file.ref !== null && texts.has(file.path) && file.ref.size > AUTHORING_LIMITS.draftTextMaxChars;
   return Promise.all(
     files.map(async (file): Promise<DraftFileView> => {
       const bytes =
@@ -93,6 +107,7 @@ export async function fileViews(
         sizeBytes: file.text !== null ? utf8Size(file.text) : file.ref.size,
         sha256: file.text !== null ? sha256Hex(bytes!) : file.ref.sha256,
         typeLabel: fixtureTypeLabel(file.path, bytes),
+        ...(tooLarge(file) ? { tooLargeToEdit: true } : {}),
       };
     }),
   );

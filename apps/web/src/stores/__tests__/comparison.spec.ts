@@ -2,7 +2,7 @@ import type { RunStatusEvent } from '@hermes-evals/shared';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useScenario } from './scenarioEnv';
-import { EXPERIMENT_IDS } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import { LIVE_REFRESH_MS, useComparisonStore } from '@/stores/comparison';
 
 const SVNS = EXPERIMENT_IDS.skillVsNoSkill;

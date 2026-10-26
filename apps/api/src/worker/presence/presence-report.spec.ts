@@ -3,6 +3,7 @@ import { HERMES_REVISION } from '@hermes-evals/shared';
 import { describe, expect, it } from 'vitest';
 import { WorkerSandboxSchema } from '../../database/schema/worker-sandbox.js';
 import type { SelfTestCheck } from '../../sandbox/self-test.js';
+import { VERIFIER_CHECK_NAME } from '../../sandbox/self-test-verifier.js';
 import {
   presentEnvNames,
   SANDBOX_UNAVAILABLE_ERROR,
@@ -34,10 +35,15 @@ describe('self-test check ids', () => {
     // The names are literals in self-test.ts: a renamed or added check must get its id here.
     const source = await readFile(new URL('../../sandbox/self-test.ts', import.meta.url), 'utf8');
     const names = [
-      ...source.matchAll(/\bcheck\(\s*'([^']+)'/g),
-      ...source.matchAll(/\bname: '([^']+)',\s*ok:/g),
-    ].map((m) => m[1]!);
-    expect(names.length).toBe(16);
+      ...[
+        ...source.matchAll(/\bcheck\(\s*'([^']+)'/g),
+        ...source.matchAll(/\bname: '([^']+)',\s*ok:/g),
+      ].map((m) => m[1]!),
+      VERIFIER_CHECK_NAME,
+    ];
+    // 'probe ran', the trial container's 15 and the verifier container (Phase 7).
+    expect(names.length).toBe(17);
+    expect(selfTestCheckId(VERIFIER_CHECK_NAME)).toBe('verifier-container');
     expect(names.filter((name) => !(name in SELF_TEST_CHECK_IDS))).toEqual([]);
     const ids = Object.values(SELF_TEST_CHECK_IDS);
     expect(new Set(ids).size).toBe(ids.length);

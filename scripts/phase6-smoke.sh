@@ -52,9 +52,12 @@
 # phase6b-mock-scripts.spec.ts the suites'):
 #
 #   export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
-#   MOCK_SCRIPTS="$(python3 -c 'import glob, json; print(json.dumps([s for f in sorted(glob.glob("scripts/*mock-scripts.json")) for s in json.load(open(f))]))')" \
+#   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
 #     docker compose --profile test --profile samples up -d --build
+#
+# (Compose mounts the directory MOCK_SCRIPTS_FILE names into the mock, which
+# reads every *.json file in it in name order.)
 #
 # With SMOKE_RESTART=1, run the smoke from a shell with the same
 # VENDOR_DIRECTORY_TOKEN (or none, when .env holds it): the step that
@@ -379,10 +382,10 @@ check 'GET /system/workers: online, sandbox proven' 200 \
   '"; ".join("{} effective concurrency {}".format(w["id"], w["effectiveConcurrency"]) for w in d if w["status"] == "online")'
 
 if [ "$DOCKER" = 1 ]; then
-  if dc exec -T mock-model printenv MOCK_SCRIPTS 2>/dev/null | grep -q 'smoke-phase6-codeword'; then
-    pass 'the mock model has scripts/phase6-mock-scripts.json' 'MOCK_SCRIPTS matches smoke-phase6-codeword, the skill sentence, ...'
+  if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'smoke-phase6-codeword' >/dev/null; then
+    pass 'the mock model has scripts/phase6-mock-scripts.json' 'its scripts match smoke-phase6-codeword, the skill sentence, ...'
   else
-    fail 'the mock model has scripts/phase6-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS)'
+    fail 'the mock model has scripts/phase6-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
   fi
   ROOT_COL="$(psql_ro "select count(*) from information_schema.columns where table_name = 'artifacts' and column_name = 'root'")"
   LOADING_COL="$(psql_ro "select count(*) from information_schema.columns where table_name = 'configuration_versions' and column_name = 'skill_loading'")"
@@ -524,15 +527,22 @@ fi
 # The two sample servers, by fixed names, since the mock calls
 # mcp__vendor_directory__list_vendors and mcp__invoice_db__list_invoices.
 # sample_server NAME DEFINITION EXPR: reuses the stored server of that name
-# (its latest version, which must pass EXPR), else creates it; sets
-# SERVER_ID and SERVER_VERSION.
+# when its latest version passes EXPR, updates it to DEFINITION when it does
+# not, else creates it; sets SERVER_ID and SERVER_VERSION.
 sample_server() {
   SERVER_ID=''
   SERVER_VERSION=''
   request GET /resources/mcp-servers
   if [ "$(NAME="$1" jv 'any(r["name"] == env["NAME"] for r in d)' 2>/dev/null)" = true ]; then
     NAME="$1" jv 'json.dumps(next(r for r in d if r["name"] == env["NAME"]))' >"$WORK/server.json"
-    check_file "MCP server $1 (stored already: reused)" "$WORK/server.json" "$3" '"v{version} · {transport}".format_map(d)' || return 0
+    if [ "$(jv "$3" "$WORK/server.json" 2>/dev/null)" = true ]; then
+      check_file "MCP server $1 (stored already: reused)" "$WORK/server.json" "$3" '"v{version} · {transport}".format_map(d)' || return 0
+    else
+      # Stored with another definition (vendor-directory before Phase 7 had no
+      # `Bearer ` prefix): update it, which makes its next version if frozen.
+      send_json PUT "/resources/mcp-servers/$(jv 'd["id"]' "$WORK/server.json" 2>/dev/null)" "$2"
+      NAME="$1" check "MCP server $1 (stored with another definition: updated)" 200 "d[\"name\"] == env[\"NAME\"] and $3" '"v{version} · {transport}".format_map(d)' || return 0
+    fi
   else
     send_json POST /resources/mcp-servers "$2"
     NAME="$1" check "POST /resources/mcp-servers $1" 201 "d[\"name\"] == env[\"NAME\"] and $3" '"v{version} · {transport}".format_map(d)' || return 0
@@ -541,8 +551,8 @@ sample_server() {
   SERVER_VERSION="$(jv 'd["versionId"]' 2>/dev/null)"
 }
 sample_server "$VENDOR_SERVER" \
-  '{"name":"vendor-directory","transport":"http","command":null,"args":[],"envNames":[],"url":"http://vendor-directory:8000/mcp","headers":[{"header":"Authorization","env":"VENDOR_DIRECTORY_TOKEN"}],"include":[],"exclude":[],"timeoutS":30}' \
-  'd["transport"] == "http" and d["url"] == "http://vendor-directory:8000/mcp" and d["headers"] == [{"header": "Authorization", "env": "VENDOR_DIRECTORY_TOKEN"}]'
+  '{"name":"vendor-directory","transport":"http","command":null,"args":[],"envNames":[],"url":"http://vendor-directory:8000/mcp","headers":[{"header":"Authorization","env":"VENDOR_DIRECTORY_TOKEN","prefix":"Bearer "}],"include":[],"exclude":[],"timeoutS":30}' \
+  'd["transport"] == "http" and d["url"] == "http://vendor-directory:8000/mcp" and d["headers"] == [{"header": "Authorization", "env": "VENDOR_DIRECTORY_TOKEN", "prefix": "Bearer "}]'
 VENDORS_ID="$SERVER_ID"
 VENDORS_VERSION="$SERVER_VERSION"
 sample_server "$INVOICE_SERVER" \

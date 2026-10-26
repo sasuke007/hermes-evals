@@ -61,6 +61,12 @@ export interface MemoryTask {
    * keep_private), false where only memory holds the fact.
    */
   offPasses: boolean;
+  /**
+   * The answer is picked from the task's own data (vendor totals equal to
+   * one invoice's amount), so task.yaml gets
+   * `self_check.answers_from_fixtures: true` (../answers-from-fixtures.ts).
+   */
+  answersFromFixtures?: true;
 }
 
 // ---------------------------------------------------------------------------

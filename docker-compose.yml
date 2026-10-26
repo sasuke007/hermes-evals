@@ -238,7 +238,7 @@ services:
     environment:
       ADMIN_SOCKET: /run/egress/admin.sock
       # The cap for a registration that names no maxTokens; past it the model
-      # gateway answers 429 (token_cap_reached). Empty means 2000000.
+      # gateway answers 402 (token_cap_reached). Empty means 2000000.
       MODEL_TOKEN_CAP_PER_ATTEMPT: ${MODEL_TOKEN_CAP_PER_ATTEMPT:-}
       # One entry per upstream in PROVIDER_ROUTES (apps/api/src/execution/providers-map.ts);
       # keep the two in step. `custom` has no entry: each custom attempt
@@ -250,12 +250,11 @@ services:
          "openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY"},
          "anthropic":{"baseUrl":"https://api.anthropic.com/v1","apiKeyEnv":"ANTHROPIC_API_KEY"},
          "mock":{"baseUrl":"http://mock-model:8090/v1"}}
-      # The sample vendor-directory's header (profile samples). Its http
-      # definition maps Authorization to VENDOR_DIRECTORY_TOKEN and egress
-      # sends the variable's value unchanged, so it holds the whole value;
-      # .env holds only the token, which vendor-directory checks as
-      # `Bearer <token>`. Empty when unset, which egress reports as not set.
-      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN:+Bearer ${VENDOR_DIRECTORY_TOKEN}}
+      # The sample vendor-directory's token (profile samples), as .env holds
+      # it. Its http definition maps Authorization to VENDOR_DIRECTORY_TOKEN
+      # with the prefix `Bearer `, which egress writes before the value
+      # (Phase 7). Empty when unset, which egress reports as not set.
+      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN:-}
     user: node
     read_only: true
     cap_drop: [ALL]
@@ -343,9 +342,14 @@ services:
   # Scripted OpenAI-compatible model (apps/egress/src/mock-model.ts), for the
   # sandbox smoke test and for test experiments: a configuration with provider
   # `custom` and base URL http://mock-model:8090/v1 runs against it at no cost.
-  # MOCK_STEPS is the default script. MOCK_SCRIPTS, from .env, can give
-  # prompts or skills that contain a phrase their own answers:
+  # MOCK_STEPS is the default script. MOCK_SCRIPTS_FILE (shell or .env) names
+  # a scripts file or a directory of *.json files, read in name order, which
+  # Compose mounts read-only; ./scripts gives it every smoke test's and
+  # suite's scripts. Unset, it mounts apps/egress/no-mock-scripts.json ([]).
+  # MOCK_SCRIPTS (JSON) adds short overrides, played first:
   #   MOCK_SCRIPTS=[{"match":"<phrase>","steps":[{"content":"..."}]}]
+  # `docker compose exec mock-model node dist/mock-model.js --print-scripts`
+  # prints what it plays.
   mock-model:
     image: hermes-evals/egress
     profiles: [test]
@@ -353,7 +357,17 @@ services:
     user: node
     read_only: true
     cap_drop: [ALL]
+    volumes:
+      # create_host_path false: a mistyped path stops `up` instead of
+      # mounting an empty directory.
+      - type: bind
+        source: ${MOCK_SCRIPTS_FILE:-./apps/egress/no-mock-scripts.json}
+        target: /run/mock-scripts
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
+      MOCK_SCRIPTS_FILE: /run/mock-scripts
       MOCK_SCRIPTS: ${MOCK_SCRIPTS:-}
       MOCK_STEPS: >-
         [{"tool":"terminal","arguments":{"command":"id; echo HOST=$(hostname); ls /; ls -a /opt/data; head -3 /workspace/invoices.csv; echo PG=$(curl -sS -m 3 http://postgres:5432 2>&1 | head -c 120); echo META=$(curl -sS -m 3 --noproxy '*' http://169.254.169.254/ 2>&1 | head -c 120); echo WEB=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' https://example.com 2>&1 | head -c 120); echo SECRETS=$(env | grep -c -i -E 'nous_api|openrouter_api|anthropic_api|openai_api'); echo PROBE_DONE"}},

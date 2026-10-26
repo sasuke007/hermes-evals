@@ -3,10 +3,12 @@
  * loader: the draft keeps its own edits, follows the disk elsewhere, takes
  * the side the user chose for a task both changed, gains the tasks the disk
  * added, drops a task both removed, and then saves as the version after.
+ * Changes both sides agree on (both removed, or the same bytes) ask nothing,
+ * and an upload refused for its size stays reported (Phase 5b question 11).
  */
 import { cp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { RebaseSuiteDraftRequest } from '@hermes-evals/shared';
+import { AUTHORING_LIMITS, type RebaseSuiteDraftRequest } from '@hermes-evals/shared';
 import { loadDraft } from '../drafts/draft-store.js';
 import { rebaseDraft } from './rebase.js';
 import { SaveWorld } from './save-world.support-spec.js';
@@ -40,6 +42,17 @@ const rebase = (request: RebaseSuiteDraftRequest) =>
 async function states(): Promise<Record<string, string>> {
   const stored = await loadDraft(world.t.db, await world.draft('complete'));
   return Object.fromEntries(stored.tasks.map((t) => [t.key, t.state]));
+}
+
+/** The tasks whose readiness reports an upload refused for its size (file_limits). */
+async function refusedIn(): Promise<string[]> {
+  const stored = await loadDraft(world.t.db, await world.draft('complete'));
+  return stored.tasks
+    .filter((t) =>
+      t.readiness?.rules.some((r) => r.rule === 'file_limits' && r.status === 'problem'),
+    )
+    .map((t) => t.key)
+    .sort();
 }
 
 describe('rebaseDraft', () => {
@@ -108,14 +121,43 @@ describe('rebaseDraft', () => {
       "name: complete\nversion_label: '1.0'\ndescription: Every scorer type, each proven by its self-check.\ntasks: [numeric, json_unordered, exact, answer_verifier]\n",
     );
     expect((await world.load('complete')).versionNumber).toBe(3);
-    // Both removed it: an overlap all the same, and keeping either side drops it.
-    await rebase({
-      onto: 3,
-      choices: [
-        { key: 'exact', keep: 'mine' },
-        { key: 'summary_file', keep: 'mine' },
-      ],
+    // Both removed it: the sides agree, so it is no part of the overlap (Phase 5b question 6).
+    await expect(rebase({ onto: 2, choices: [] })).rejects.toMatchObject({
+      response: { statusCode: 409, conflict: { overlap: ['exact'] } },
     });
+    await rebase({ onto: 3, choices: [{ key: 'exact', keep: 'mine' }] });
     expect(await states()).not.toHaveProperty('summary_file');
+  });
+
+  it('keeps reporting an upload refused for its size, on a task it keeps and one that follows the disk', async () => {
+    // Reported until the path holds a file, is deleted or the task is reverted: a Combine is none.
+    const refusal = {
+      path: 'fixtures/ledger-2025.parquet',
+      kind: 'fixture' as const,
+      sizeBytes: null,
+      limitBytes: AUTHORING_LIMITS.suiteMaxFileBytes,
+      refusedAt: new Date().toISOString(),
+    };
+    await world.writer.write('complete', undefined, async (ctx) => {
+      for (const key of ['numeric', 'summary_file']) {
+        await ctx.change(ctx.task(key), { refusedUploads: [refusal] });
+      }
+    });
+    expect(await refusedIn()).toEqual(['numeric', 'summary_file']);
+    await rebase({ onto: 2, choices: [{ key: 'exact', keep: 'mine' }] });
+    expect(await states()).toMatchObject({ numeric: 'changed', summary_file: 'unchanged' });
+    expect(await refusedIn()).toEqual(['numeric', 'summary_file']);
+  });
+
+  it('asks nothing of a task both sides changed to the same bytes', async () => {
+    const stored = await loadDraft(world.t.db, await world.draft('complete'));
+    const mine = stored.tasks.find((t) => t.key === 'numeric')!.prompt!;
+    await writeFile(onDisk('numeric/prompt.md'), mine);
+    expect((await world.load('complete')).versionNumber).toBe(3);
+    await expect(rebase({ onto: 2, choices: [] })).rejects.toMatchObject({
+      response: { statusCode: 409, conflict: { overlap: ['exact'] } },
+    });
+    await rebase({ onto: 3, choices: [{ key: 'exact', keep: 'mine' }] });
+    expect((await states()).numeric).toBe('unchanged');
   });
 });

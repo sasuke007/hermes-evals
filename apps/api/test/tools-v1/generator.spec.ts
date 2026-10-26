@@ -70,9 +70,12 @@ describe('scripts/fixtures/tools-v1.ts', () => {
       ).toBe(true);
     }
     expect(generated.filter((f) => !/\/(fixtures\/|prompt\.md|reference\.json)/.test(f))).toEqual([
+      // The two tasks answered from their data: task.yaml's answers_from_fixtures key (Phase 7).
+      'extract_ibans/task.yaml',
       'reshape_json/expected/stock_by_sku.json',
       'reshape_json/task.yaml',
       'reshape_json/verify/expected_stock.json',
+      'small_lookup/task.yaml',
     ]);
     expect(await listFiles(join(first, 'scripts'))).toEqual([MOCK_SCRIPTS.replace('scripts/', '')]);
   });

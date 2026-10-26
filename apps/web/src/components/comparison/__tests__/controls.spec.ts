@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import CandidateSelect from '../CandidateSelect.vue';
 import ComparisonControls from '../ComparisonControls.vue';
 import { SCORE_KEY_HELP } from '../readings';
-import { EXPERIMENT_IDS, getComparison } from '@/api/experiments';
+import { getComparison } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import { useScenario } from '@/stores/__tests__/scenarioEnv';
 
 beforeEach(() => useScenario(null));

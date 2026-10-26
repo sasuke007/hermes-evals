@@ -86,4 +86,12 @@ tasks:
   - unmatched_lines
 `);
   });
+
+  it('keeps a byte-order mark and patches only the name of a zip imported under another name', () => {
+    const zipped = `\uFEFF${SOURCE}`;
+    expect(renderSuiteYaml(zipped, FIELDS)).toBe(zipped);
+    expect(renderSuiteYaml(zipped, { ...FIELDS, name: 'invoices-v1-copy' })).toBe(
+      zipped.replace('name: invoices-v1\n', 'name: invoices-v1-copy\n'),
+    );
+  });
 });

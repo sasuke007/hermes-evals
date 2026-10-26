@@ -20,7 +20,12 @@ import { DB } from '../../database/db.provider.js';
 import { documents } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
 import { StorageService } from '../../storage/storage.service.js';
-import { deleteUnused, latestConfigurationLinks } from '../skills/configuration-links.js';
+import {
+  anyVersionConfigurationLinks,
+  deleteUnused,
+  inUseFields,
+  latestConfigurationLinks,
+} from '../skills/configuration-links.js';
 import { uploadFileName } from '../skills/format.js';
 import { notFound } from '../skills/http.js';
 import type { UploadedFileRef } from '../skills/multipart-upload.js';
@@ -97,7 +102,7 @@ export class DocumentsService {
       { documentId: row.id, filename, mediaType, size: row.size, sha256: row.sha256 },
       'stored document',
     );
-    return this.toRow(row, []);
+    return this.toRow(row, [], []);
   }
 
   /** Every document, by file name and newest first. */
@@ -106,10 +111,17 @@ export class DocumentsService {
       .select()
       .from(documents)
       .orderBy(asc(documents.filename), desc(documents.uploadedAt), asc(documents.id));
-    const links = await latestConfigurationLinks(this.db, 'documentIds');
+    const [links, naming] = await Promise.all([
+      latestConfigurationLinks(this.db, 'documentIds'),
+      anyVersionConfigurationLinks(this.db, 'documentIds'),
+    ]);
     // Labels not cached yet (after a restart) read their blobs; a few at a time.
     const limit = pLimit(LABEL_READS);
-    return Promise.all(rows.map((row) => limit(() => this.toRow(row, links.get(row.id) ?? []))));
+    return Promise.all(
+      rows.map((row) =>
+        limit(() => this.toRow(row, links.get(row.id) ?? [], naming.get(row.id) ?? [])),
+      ),
+    );
   }
 
   async count(): Promise<number> {
@@ -195,7 +207,12 @@ export class DocumentsService {
     return label;
   }
 
-  private async toRow(row: DocumentRecord, attachedTo: ConfigurationLink[]): Promise<DocumentRow> {
+  /** `attachedTo` follows the latest versions; `inUseBy` every version (it keeps the document). */
+  private async toRow(
+    row: DocumentRecord,
+    attachedTo: ConfigurationLink[],
+    inUseBy: ConfigurationLink[],
+  ): Promise<DocumentRow> {
     return {
       id: row.id,
       filename: row.filename,
@@ -205,6 +222,7 @@ export class DocumentsService {
       sha256: row.sha256,
       uploadedAt: row.uploadedAt.toISOString(),
       attachedTo,
+      ...inUseFields(inUseBy),
     };
   }
 }

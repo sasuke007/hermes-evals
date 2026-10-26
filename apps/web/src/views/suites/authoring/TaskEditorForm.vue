@@ -8,6 +8,7 @@ import EditorNote from '@/components/authoring/editors/EditorNote.vue';
 import { useDraftTaskStore } from '@/stores/draftTask';
 import { useDraftTaskToolsStore } from '@/stores/draftTaskTools';
 import AnswerSection from './sections/AnswerSection.vue';
+import AnswersFromFixtures from './sections/AnswersFromFixtures.vue';
 import EditorSection from './sections/EditorSection.vue';
 import ExpectedSection from './sections/ExpectedSection.vue';
 import FilesPart from './sections/FilesPart.vue';
@@ -148,6 +149,7 @@ defineExpose({ reveal });
         caption="Copied into the agent's workspace before every run"
       >
         <FilesPart kind="fixture" />
+        <AnswersFromFixtures />
       </EditorSection>
       <EditorSection
         v-if="hasHome"

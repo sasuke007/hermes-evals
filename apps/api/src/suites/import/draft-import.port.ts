@@ -27,7 +27,12 @@ export interface ImportedSuiteDraft {
   name: string;
   versionLabel: string;
   description: string | null;
-  /** suite.yaml as the zip held it, exactly as read. */
+  /**
+   * suite.yaml as the zip held it, exactly as read. The draft keeps it
+   * (suite_drafts.suite_yaml), and the save patches only the fields the
+   * draft changed into it, so its comments and folding survive (Phase 5b
+   * question 17).
+   */
   suiteYaml: string;
   /** In suite.yaml order, then the other folders by name, as a reload orders them. */
   tasks: readonly DraftTaskFolder[];

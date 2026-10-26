@@ -5,7 +5,7 @@
  * hash to its base task's is `unchanged` whatever was edited and undone on
  * the way, so the change list never reports a change that is not there.
  */
-import type { DraftTaskState, TaskReadiness } from '@hermes-evals/shared';
+import type { DraftRefusedUpload, DraftTaskState, TaskReadiness } from '@hermes-evals/shared';
 import type { DraftSelfCheckRecord } from '../../database/schema/index.js';
 import type { TaskRow } from '../views/rows.js';
 import type { DraftTaskFolder } from './materialise.js';
@@ -24,6 +24,8 @@ export interface EvaluateInput {
   removed: boolean;
   /** The last worker self-check stored on the draft task. */
   selfCheck: DraftSelfCheckRecord | null;
+  /** Uploads refused for their size, kept on the draft task (Phase 5b question 11). */
+  refusedUploads?: readonly DraftRefusedUpload[];
   readBlob: (sha256: string) => Promise<Buffer>;
   now: () => Date;
 }
@@ -52,6 +54,7 @@ export async function evaluateTask(input: EvaluateInput): Promise<Evaluated> {
     folder: input.suiteFolder,
     otherKeys: input.otherKeys,
     renamedFrom: baseTask !== null && baseTask.key !== folder.key ? baseTask.key : null,
+    refusedUploads: input.refusedUploads ?? [],
     readBlob: input.readBlob,
     now: input.now,
   };

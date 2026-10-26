@@ -30,7 +30,7 @@ vi.mock('@/api/experiments', async (importOriginal) => {
   };
 });
 
-const { EXPERIMENT_IDS } = await import('@/api/experiments');
+const { EXPERIMENT_IDS } = await import('@/fixtures/experiments');
 
 beforeEach(() => {
   useScenario(null);

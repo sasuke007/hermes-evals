@@ -9,8 +9,7 @@ import { ApiErrorBodySchema, DraftTaskDetailSchema } from '@hermes-evals/shared'
 import type { ZodType } from 'zod';
 import type { DraftFileUploadFields, DraftTaskDetail } from './types/authoring';
 import { API_BASE, ApiError, REQUESTED_WITH, errorMessage } from './client';
-import { apiMode, FIXTURE_LATENCY_MS, fixture } from './source';
-import { uploadFile } from './drafts-fixture-ops';
+import { apiMode, FIXTURE_LATENCY_MS, fixture, fixtureWorld } from './source';
 
 const describe = (method: string, path: string) => `${method} ${API_BASE}${path.split('?')[0]}`;
 
@@ -179,5 +178,5 @@ async function fixtureUpload(
   if (options.signal?.aborted) throw aborted(request);
   // fixture() honours the loading and error scenarios; the world then takes the file.
   await fixture(null, { request });
-  return uploadFile(folder, key, file, fields);
+  return (await fixtureWorld()).draftOps.uploadFile(folder, key, file, fields);
 }

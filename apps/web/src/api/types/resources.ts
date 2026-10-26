@@ -8,6 +8,7 @@
 export type {
   ConfigurationLink,
   DocumentRow,
+  McpHeader,
   McpServerInput,
   McpServerRow,
   McpTestView,

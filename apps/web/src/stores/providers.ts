@@ -423,8 +423,7 @@ export const useProvidersStore = defineStore('providers', () => {
 
   /** Fixtures, development only: end the waiting login as approved, declined, … */
   function simulate(outcome: LoginOutcome): void {
-    simulateNousLogin(outcome);
-    void poll();
+    void simulateNousLogin(outcome).then(poll);
   }
 
   /** Refresh provider statuses in the background (paused while the tab is hidden). */

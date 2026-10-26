@@ -1,10 +1,15 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   chooseScript,
   createMockModelServer,
   messageText,
   mockModelOptions,
+  printScripts,
+  startMessage,
   type MockModelOptions,
 } from '../src/mock-model.js';
 
@@ -49,11 +54,14 @@ const answer = async (messages: unknown[]): Promise<Completion['choices'][number
   ((await (await chat(messages)).json()) as Completion).choices[0]!;
 
 describe('mockModelOptions', () => {
-  it('keeps the single-script behaviour when MOCK_SCRIPTS is unset', () => {
-    expect(mockModelOptions({})).toEqual({
-      model: 'mock/scripted',
-      steps: [{ content: 'Done.' }],
-      scripts: [],
+  it('keeps the single-script behaviour when MOCK_SCRIPTS and MOCK_SCRIPTS_FILE are unset', () => {
+    const empty = { model: 'mock/scripted', steps: [{ content: 'Done.' }], scripts: [] };
+    const loaded = { variable: 0, file: null };
+    expect(mockModelOptions({})).toEqual({ ...empty, loaded });
+    // Compose passes an unset variable as empty.
+    expect(mockModelOptions({ MOCK_SCRIPTS: '', MOCK_SCRIPTS_FILE: '' })).toEqual({
+      ...empty,
+      loaded,
     });
   });
 
@@ -63,6 +71,82 @@ describe('mockModelOptions', () => {
       /MOCK_SCRIPTS is invalid/,
     );
     expect(() => mockModelOptions({ MOCK_STEPS: '[]' })).toThrow(/MOCK_STEPS is invalid/);
+  });
+});
+
+describe('MOCK_SCRIPTS_FILE (Phase 7)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mock-scripts-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const script = (match: string) => ({ match, steps: [{ content: match }] });
+  const write = (path: string, value: unknown) => {
+    writeFileSync(path, typeof value === 'string' ? value : JSON.stringify(value));
+    return path;
+  };
+
+  it('reads a file of scripts, after the MOCK_SCRIPTS overrides', () => {
+    const file = write(join(dir, 'one.json'), [script('from-file'), script('shared')]);
+    const options = mockModelOptions({
+      MOCK_SCRIPTS: JSON.stringify([script('shared')]),
+      MOCK_SCRIPTS_FILE: file,
+    });
+    expect(options.scripts.map((s) => s.match)).toEqual(['shared', 'from-file', 'shared']);
+    expect(options.loaded).toEqual({ variable: 1, file: { path: file, files: 1, scripts: 2 } });
+    // The override wins: the first script whose phrase a request holds plays.
+    expect(chooseScript(options, [{ role: 'user', content: 'shared' }]).steps).toBe(
+      options.scripts[0]!.steps,
+    );
+    expect(startMessage(8090, options)).toBe(
+      `mock model listening on 8090 · 3 scripts (1 from MOCK_SCRIPTS, 2 from 1 file at ${file})`,
+    );
+  });
+
+  it('reads every .json file of a directory in name order, and nothing else', () => {
+    const scripts = join(dir, 'scripts');
+    mkdirSync(join(scripts, 'fixtures'), { recursive: true });
+    write(join(scripts, 'phase3-mock-scripts.json'), [script('three')]);
+    write(join(scripts, 'phase2-mock-scripts.json'), [script('two-a'), script('two-b')]);
+    write(join(scripts, 'phase2-smoke.sh'), 'echo not json');
+    write(join(scripts, 'fixtures', 'nested.json'), [script('nested')]);
+    const options = mockModelOptions({ MOCK_SCRIPTS_FILE: scripts });
+    expect(options.scripts.map((s) => s.match)).toEqual(['two-a', 'two-b', 'three']);
+    expect(options.loaded?.file).toEqual({ path: scripts, files: 2, scripts: 3 });
+  });
+
+  it('gives no scripts for an empty directory, and says so at start', () => {
+    const empty = join(dir, 'empty');
+    mkdirSync(empty);
+    const options = mockModelOptions({ MOCK_SCRIPTS_FILE: empty });
+    expect(options.scripts).toEqual([]);
+    expect(startMessage(8090, options)).toContain('0 from 0 files at');
+  });
+
+  it('refuses a missing path or a bad file by name', () => {
+    expect(() => mockModelOptions({ MOCK_SCRIPTS_FILE: join(dir, 'nope.json') })).toThrow(
+      /^MOCK_SCRIPTS_FILE .*nope\.json cannot be read \(ENOENT\)$/,
+    );
+    const broken = write(join(dir, 'broken.json'), '[{');
+    expect(() => mockModelOptions({ MOCK_SCRIPTS_FILE: broken })).toThrow(
+      `MOCK_SCRIPTS_FILE ${broken} is not valid JSON`,
+    );
+    const invalid = write(join(dir, 'invalid.json'), [{ match: '', steps: [] }]);
+    expect(() => mockModelOptions({ MOCK_SCRIPTS_FILE: invalid })).toThrow(
+      `MOCK_SCRIPTS_FILE ${invalid} is invalid`,
+    );
+  });
+
+  it('prints the scripts it would play for --print-scripts, or why it cannot', () => {
+    const file = write(join(dir, 'print.json'), [script('printed')]);
+    const printed = printScripts({
+      MOCK_SCRIPTS: JSON.stringify([script('first')]),
+      MOCK_SCRIPTS_FILE: file,
+    });
+    expect(printed.code).toBe(0);
+    expect(JSON.parse(printed.stdout)).toEqual([script('first'), script('printed')]);
+    expect(printScripts({ MOCK_SCRIPTS_FILE: join(dir, 'missing') })).toMatchObject({
+      code: 1,
+      stdout: '',
+      stderr: expect.stringMatching(/^mock model: MOCK_SCRIPTS_FILE .* cannot be read/),
+    });
   });
 });
 

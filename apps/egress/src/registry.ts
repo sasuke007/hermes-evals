@@ -6,6 +6,7 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import { originOf, type NetworkOrigin } from './background.js';
 import { ENV_NAME_PATTERN } from './env-names.js';
 
 /** The upstream name whose base URL comes with each registration instead of MODEL_UPSTREAMS. */
@@ -50,6 +51,14 @@ export const REFUSED_ROUTE_HEADERS: ReadonlySet<string> = new Set([
 const ROUTE_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 /**
+ * A header's fixed prefix (Phase 7, Phase 6 question 6), such as `Bearer `:
+ * 1 to 64 printable ASCII characters, spaces included, so no line break or
+ * control character reaches the header line. MCP_HEADER_PREFIX_PATTERN in
+ * packages/shared records.ts holds the same rule, so a definition that saves
+ * also registers.
+ */
+const HEADER_PREFIX = /^[\x20-\x7E]{1,64}$/;
+/**
  * The attempt token travels as `Bearer <token>` and as the password of the
  * proxy's Basic credentials, so it may hold no space and no colon.
  */
@@ -82,13 +91,19 @@ const McpRouteSchema = z
     name: z.string().regex(ROUTE_NAME),
     /** The definition's exact URL; requests go there and nowhere else. */
     url: HttpUrlSchema,
-    /** Headers egress adds, each value read from its own environment variable `env`. */
+    /**
+     * Headers egress adds, each value read from its own environment variable
+     * `env` and written after `prefix` when there is one: `Authorization`
+     * with prefix `Bearer ` sends `Authorization: Bearer <value>`. Without a
+     * prefix the header is the variable's whole value, as before Phase 7.
+     */
     headers: z
       .array(
         z
           .object({
             header: z.string().regex(HEADER_NAME),
             env: z.string().regex(ENV_NAME_PATTERN),
+            prefix: z.string().regex(HEADER_PREFIX).optional(),
           })
           .strict(),
       )
@@ -173,6 +188,14 @@ export interface LogEntry {
   at: string;
   /** `mcp`: a call through the MCP gateway, with `server` and `method` set. */
   kind: 'connect' | 'http' | 'model' | 'mcp';
+  /**
+   * Who the entry was for, on the forward proxy's entries (`connect`, `http`):
+   * `hermes_background` for one of Hermes's own background hosts
+   * (background.ts), else `agent`. Set by Registry.log, never by a caller.
+   * The gateways' entries (`model`, `mcp`) carry none: those calls are the
+   * agent's by construction.
+   */
+  origin?: NetworkOrigin;
   /** The MCP server name, for `mcp`. */
   server?: string;
   /** The HTTP method, for `mcp`. */
@@ -337,10 +360,15 @@ export class Registry {
     entry.usage.totalTokens += usage.totalTokens ?? 0;
   }
 
-  log(attemptId: string, entry: Omit<LogEntry, 'at'>): void {
+  log(attemptId: string, entry: Omit<LogEntry, 'at' | 'origin'>): void {
     const target = this.attempts.get(attemptId);
     if (!target || target.log.length >= MAX_LOG) return;
-    target.log.push({ at: new Date(this.now()).toISOString(), ...entry });
+    const proxied = entry.kind === 'connect' || entry.kind === 'http';
+    target.log.push({
+      at: new Date(this.now()).toISOString(),
+      ...entry,
+      ...(proxied ? { origin: originOf(entry.host) } : {}),
+    });
   }
 
   /** Reserves a tunnel slot; false when the attempt already has `max` open. */

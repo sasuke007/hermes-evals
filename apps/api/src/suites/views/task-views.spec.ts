@@ -15,6 +15,7 @@ import {
   verificationViews,
   type PlacedTask,
 } from './task-views.js';
+import { isTextDiffCandidate } from './diff-files.js';
 import { T0, T2, T3, TOTAL_DUE_YAML, fileRow, hash, suiteRow, taskRow } from './test-rows-spec.js';
 
 const CSV = 'invoice_no,amount\nINV-1,10.00\nINV-2,12.50\n';
@@ -319,18 +320,27 @@ describe('taskHistory and taskDiff', () => {
     expect(diff.reference).toEqual([
       { path: 'total_due', kind: 'changed', before: 48213.65, after: 48526.05 },
     ]);
-    // Loaded before Phase 5b: task.yaml and prompt.md measured from their text, no reference.json.
+    // Loaded before Phase 5b: task.yaml and prompt.md measured from their text,
+    // reference.json not recorded, changed by its stored value.
     expect(diff.files.map((f) => [f.path, f.change])).toEqual([
       ['task.yaml', 'unchanged'],
       ['prompt.md', 'changed'],
+      ['reference.json', 'changed'],
       ['fixtures/invoices.csv', 'changed'],
       ['verify/check.py', 'unchanged'],
     ]);
+    const notRecorded = { sizeBytes: null, sha256: null, notRecorded: 'loaded_before_phase_5b' };
+    expect(diff.files[2]).toEqual({
+      path: 'reference.json',
+      change: 'changed',
+      before: notRecorded,
+      after: notRecorded,
+    });
     expect(diff.files[1]!.after).toEqual({
       sizeBytes: Buffer.byteLength(t3.prompt!),
       sha256: hash(t3.prompt!),
     });
-    expect(diff.files[2]!.after).toEqual({
+    expect(diff.files[3]!.after).toEqual({
       sizeBytes: CSV.length + 'INV-3,1.00\n'.length,
       sha256: hash(`${CSV}INV-3,1.00\n`),
     });
@@ -381,6 +391,26 @@ describe('taskHistory and taskDiff', () => {
       },
     ]);
     expect(diff.textFiles[0]!.lines.filter((l) => l.kind !== 'same')).toHaveLength(1);
+  });
+
+  it('says reference.json is not recorded on the side loaded before Phase 5b', () => {
+    const content = '{ "total_due": 48526.05 }\n';
+    const after = [{ path: 'reference.json' as const, sha256: hash(content), size: 26 }];
+    const diff = TaskDiffSchema.parse(taskDiff(rows[1]!, rows[2]!, { rootTo: after }));
+    const reference = diff.files.find((f) => f.path === 'reference.json')!;
+    expect(reference).toEqual({
+      path: 'reference.json',
+      change: 'changed',
+      before: { sizeBytes: null, sha256: null, notRecorded: 'loaded_before_phase_5b' },
+      after: { sizeBytes: 26, sha256: hash(content) },
+    });
+    // The same stored value on both sides reads unchanged, though one side is not recorded.
+    const same = TaskDiffSchema.parse(taskDiff(rows[2]!, rows[2]!, { rootTo: after }));
+    expect(same.files.find((f) => f.path === 'reference.json')!.change).toBe('unchanged');
+    // A side without a stored reference is not listed at all.
+    const none = taskDiff({ ...rows[1]!, task: { ...rows[1]!.task, reference: null } }, rows[2]!);
+    expect(none.files.map((f) => f.path)).not.toContain('reference.json');
+    expect(isTextDiffCandidate(reference)).toBe(false);
   });
 
   it('leaves a binary or oversized changed file out of the line diffs', () => {

@@ -25,7 +25,8 @@ const CONTENTS: SuiteZipContents = {
       files: [{ path: 'verify/check.py', kind: 'verifier', sha256: 'a'.repeat(64), size: 3 }],
     },
   ],
-  scripts: [{ path: 't/verify/check.py', sizeBytes: 3, sha256: 'a'.repeat(64) }],
+  scripts: [{ path: 't/verify/check.py', sizeBytes: 3, sha256: 'a'.repeat(64), runByCheck: true }],
+  rootFilesNotKept: [],
   fileCount: 5,
   unpackedBytes: 30,
 };

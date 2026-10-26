@@ -13,7 +13,8 @@
  *   classify  plan 8.4, with the MCP servers Hermes's errors.log says failed to start
  *   collect   the workspace, after the container is gone (owner permissions
  *             the agent removed restored first), and the home's memories/
- *             (Phase 6 P2); then delete the home
+ *             (Phase 6 P2); then delete the home; store stderr.log's end,
+ *             redacted, for the inspector's "Full log" (Phase 7)
  *
  * Anything the agent, the trial or its setup did is an outcome. It throws
  * only what the lifecycle must handle itself: LeaseLostError and
@@ -35,6 +36,7 @@ import type {
 } from '../../sandbox/egress-client.js';
 import type { EngineClient } from '../../sandbox/engine-client.js';
 import { forceRemoveTree, prepareTrialDirs } from '../../sandbox/trial-runner.js';
+import { egressRouteHeaders } from '../../resources/mcp/hermes-config.js';
 import type { BlobStore } from '../../storage/blob-store.js';
 import {
   LeaseLostError,
@@ -62,7 +64,7 @@ import {
   type AttemptRunnerSettings,
 } from './settings.js';
 import { checkHttpMcpServers, checkMcpRoutes, httpServers, stdioSecretValues } from './secrets.js';
-import { StderrCapture } from './stderr-capture.js';
+import { StderrCapture, storeStderrLog, type StoredStderrLog } from './stderr-capture.js';
 import { attemptConfig, configYaml } from './trial-config.js';
 import { runTrialSession, type SessionResult } from './trial-session.js';
 
@@ -253,7 +255,9 @@ export class TrialAttemptRunner implements AttemptRunner {
   private async finish(ran: Ran): Promise<AttemptOutcome> {
     const { plan, redactor, session } = ran;
     const trial = session?.trial ?? null;
+    const counted = redactor.count;
     const stderrTail = ran.stderr?.tailLines(redactor) ?? null;
+    const tailReplaced = redactor.count - counted;
     // Read from the home before it is deleted below; only a trial that ran can have failed one.
     const failedServers =
       trial && ran.ownsDirs
@@ -285,8 +289,12 @@ export class TrialAttemptRunner implements AttemptRunner {
         this.deps.logger?.warn({ attemptId: plan.attemptId, err: codeOf(err) }, 'home not deleted'),
       );
     }
+    // stderr_log is added after the redaction below: its sha256 is the platform's, and a short
+    // value of hex characters (DEBUG=1) would otherwise be replaced inside it.
+    let stderrLog: { stderr_log?: StoredStderrLog } = {};
     if (collection && ran.stderr) {
       collection.event.payload = { ...collection.event.payload, stderr_lines: ran.stderr.lines };
+      stderrLog = await this.storeStderrLog(plan.attemptId, ran.stderr, redactor, tailReplaced);
     }
     if (collection && ran.report) {
       const check = tokenCheck(classification.tokens, ran.report.usage);
@@ -299,16 +307,20 @@ export class TrialAttemptRunner implements AttemptRunner {
       }
     }
 
+    const collected = collection?.event ?? null;
     const events = finalEvents({
-      network: networkEvents(ran.report?.log ?? [], plan.configuration.provider, this.now()),
+      network: networkEvents(ran.report?.log ?? [], this.now()),
       trial,
       classification,
       hermesResult: session?.result != null,
       droppedEvents: ran.droppedEvents,
-      collected: collection?.event ?? null,
+      collected,
       stopGraceS: this.settings.stopGraceS,
       now: this.now(),
-    }).map((event) => ({ ...event, payload: redactor.json(event.payload) }));
+    }).map((event) => {
+      const payload = redactor.json(event.payload);
+      return { ...event, payload: event === collected ? { ...payload, ...stderrLog } : payload };
+    });
     const errorMessage =
       classification.errorMessage === null ? null : redactor.text(classification.errorMessage);
     return {
@@ -354,6 +366,22 @@ export class TrialAttemptRunner implements AttemptRunner {
           payload: { type: 'platform', subtype: 'collected', files: 0, error: messageOf(err) },
         },
       };
+    }
+  }
+
+  /** stderr_log for the collected event (stderr-capture.ts storeStderrLog); a failure only logs. */
+  private async storeStderrLog(
+    attemptId: string,
+    stderr: StderrCapture,
+    redactor: Redactor,
+    tailReplaced: number,
+  ): Promise<{ stderr_log?: StoredStderrLog }> {
+    try {
+      const stored = await storeStderrLog(stderr, redactor, this.deps.blobs, tailReplaced);
+      return stored ? { stderr_log: stored } : {};
+    } catch (err) {
+      this.deps.logger?.warn({ attemptId, err: messageOf(err) }, 'stderr.log not stored');
+      return {};
     }
   }
 
@@ -414,7 +442,7 @@ export class TrialAttemptRunner implements AttemptRunner {
               {
                 name: server.name,
                 url: server.definition.url,
-                headers: server.definition.headers.map((h) => ({ header: h.header, env: h.env })),
+                headers: egressRouteHeaders(server.definition.headers),
               },
             ]
           : [],

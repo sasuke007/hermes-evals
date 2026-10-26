@@ -136,15 +136,18 @@ export function defaultCheckKey(type: ScorerType, taken: readonly string[]): str
   return `${base}_${n}`;
 }
 
-/** The params a new card starts with. */
+/**
+ * The params a new card starts with. A Verifier script names the script the picker asked
+ * for (Phase 5b question 19), never simply the first file under `verify/`.
+ */
 export function defaultParams(
   type: ScorerType,
-  scripts: readonly string[],
+  script: string | null = null,
 ): Record<string, JsonValue> {
   if (type === 'numeric_tolerance') return { abs: 0 };
   if (type === 'trajectory_match') return { min_calls: 1 };
   if (type === 'llm_judge') return { rubric: 'rubric.md' };
-  if (type === 'verifier_script') return scripts[0] ? { script: scripts[0] } : {};
+  if (type === 'verifier_script') return script ? { script } : {};
   return {};
 }
 
@@ -323,11 +326,11 @@ const PARAM_WORDS: Record<string, string> = {
 export function changeType(
   check: TaskFormCheck,
   to: ScorerType,
-  scripts: readonly string[],
+  script: string | null = null,
 ): { check: TaskFormCheck; dropped: string[] } {
   const keepPath = isAnswerCheck(check.type) && isAnswerCheck(to) && str(check.params.path);
   const params: Record<string, JsonValue> = keepPath ? { path: check.params.path! } : {};
-  const fresh = defaultParams(to, scripts);
+  const fresh = defaultParams(to, script);
   const dropped = Object.keys(check.params)
     .filter((k) => k !== 'path' && !(k in fresh))
     .map((k) =>

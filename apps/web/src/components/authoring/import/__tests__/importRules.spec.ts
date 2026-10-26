@@ -11,6 +11,8 @@ import {
 import { checkSentence, initialSettings, newCheckFor, sampleReference } from '../importSettings';
 import {
   newNameProblem,
+  rootFilesSentence,
+  scriptsCountLine,
   scriptsSentence,
   splitTasks,
   taskCountLine,
@@ -156,8 +158,40 @@ describe('zip review wording (SA.10)', () => {
       'valid · 2 workspace files · 1 check',
     );
     expect(zipChip({ tasks } as never)).toEqual({ text: '1 invalid task', tone: 'ung' });
-    expect(scriptsSentence(2)).toBe(
-      '2 verifier scripts will run in the worker when the suite is checked and when runs are scored. Import only suites you trust.',
+    expect(scriptsSentence({ files: 2, checkScripts: 2 })).toBe(
+      'The 2 scripts a check runs will run in the worker when the suite is checked and when runs are scored. Import only suites you trust.',
+    );
+  });
+
+  it('counts the files under verify/ and, apart, the scripts a check runs (Phase 7)', () => {
+    expect(scriptsCountLine({ files: 3, checkScripts: 2 })).toBe(
+      '3 files under `verify/` · 2 scripts a check runs',
+    );
+    expect(scriptsCountLine({ files: 2, checkScripts: 1 })).toBe(
+      '2 files under `verify/` · 1 script a check runs',
+    );
+    expect(scriptsCountLine({ files: 1, checkScripts: 0 })).toBe(
+      '1 file under `verify/` · no check runs them',
+    );
+    expect(scriptsSentence({ files: 2, checkScripts: 1 })).toMatch(
+      /^The script a check runs will run in the worker/,
+    );
+    expect(scriptsSentence({ files: 1, checkScripts: 0 })).toBe(
+      'No check runs them now, but a check can name any of them later. Import only suites you trust.',
+    );
+  });
+
+  it('names the root files the import leaves out (Phase 7)', () => {
+    expect(rootFilesSentence([{ path: 'README.md', sizeBytes: 10 }])).toBe(
+      '`README.md` at the suite root is not imported: a draft keeps `suite.yaml` and the task folders only.',
+    );
+    expect(
+      rootFilesSentence([
+        { path: 'LICENSE', sizeBytes: 1 },
+        { path: 'README.md', sizeBytes: 1 },
+      ]),
+    ).toBe(
+      '2 files at the suite root are not imported: a draft keeps `suite.yaml` and the task folders only.',
     );
   });
 

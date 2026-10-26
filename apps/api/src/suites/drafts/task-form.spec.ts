@@ -65,7 +65,20 @@ describe('formOf', () => {
       expectedWorkspace: 'expected',
       expectedHome: null,
       negativeControl: true,
+      answersFromFixtures: null,
     });
+  });
+
+  it('reads self_check.answers_from_fixtures, and locks on a value that is not true or false', () => {
+    const flagged = SUMMARY_FILE.replace(
+      'negative_control: true',
+      'negative_control: true\n  answers_from_fixtures: true',
+    );
+    expect(flagged).not.toBe(SUMMARY_FILE);
+    expect(formOfText(flagged).answersFromFixtures).toBe(true);
+    expect(
+      formOf(flagged.replace('answers_from_fixtures: true', 'answers_from_fixtures: 1')).lock,
+    ).toMatchObject({ message: 'answers_from_fixtures must be true or false.' });
   });
 
   it('shows values the rules refuse, without locking', () => {
@@ -178,6 +191,23 @@ describe('applyForm', () => {
     expect(out).toContain(
       'verification:\n  - key: answer\n    type: numeric_tolerance\n    primary: true\n    params: { abs: 0.01 }\n',
     );
+  });
+
+  it('sets and clears answers_from_fixtures, and leaves it alone for a form sent without it', () => {
+    const on = applyForm(SUMMARY_FILE, { ...formOfText(SUMMARY_FILE), answersFromFixtures: true });
+    expect(on).toBe(
+      SUMMARY_FILE.replace(
+        'negative_control: true',
+        'negative_control: true\n  answers_from_fixtures: true',
+      ),
+    );
+    const { answersFromFixtures: _dropped, ...older } = formOfText(on);
+    expect(applyForm(on, { ...older, summary: 'Changed' })).toContain(
+      '  answers_from_fixtures: true\n',
+    );
+    expect(applyForm(on, { ...formOfText(on), answersFromFixtures: null })).toBe(SUMMARY_FILE);
+    const blank = newTaskYaml({ ...BLANK_FORM, answersFromFixtures: true });
+    expect(blank).toContain('self_check:\n  answers_from_fixtures: true\n');
   });
 
   it('refuses a form while task.yaml locks it', () => {

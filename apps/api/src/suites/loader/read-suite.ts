@@ -110,6 +110,19 @@ const fail = (message: string, file = '.'): DirectoryRead => ({
 
 const KEY_RULE = "must start with a letter or digit and use only letters, digits, '.', '_' and '-'";
 
+const SUITE_YAML_NOT_FOUND = `${SUITE_YAML} not found`;
+
+/**
+ * Whether the read found the folder without its suite.yaml, which is also
+ * what a folder deleted on the host looks like for about a second through
+ * macOS file sharing (Phase 5b question 20): the loader reads it once more.
+ */
+export const isSuiteYamlNotFound = (read: DirectoryRead): boolean =>
+  !read.ok &&
+  'error' in read &&
+  read.error.file === SUITE_YAML &&
+  read.error.message === SUITE_YAML_NOT_FOUND;
+
 export async function readSuiteDirectory(
   suitesDir: string,
   path: string,
@@ -132,7 +145,7 @@ export async function readSuiteDirectory(
 
   // suite.yaml
   const yamlEntry = tree.entries.find((e) => e.path === SUITE_YAML);
-  if (!yamlEntry) return fail(`${SUITE_YAML} not found`, SUITE_YAML);
+  if (!yamlEntry) return fail(SUITE_YAML_NOT_FOUND, SUITE_YAML);
   if (yamlEntry.kind !== 'file')
     return fail(`${SUITE_YAML} is not a regular file (${yamlEntry.kind})`, SUITE_YAML);
   if (yamlEntry.size > MAX_SUITE_FILE_BYTES) return fail(`${SUITE_YAML} is too large`, SUITE_YAML);

@@ -27,7 +27,7 @@ import type { McpServerInput } from '@hermes-evals/shared';
 import { newId } from '../../database/ids.js';
 import { TOOL_SEARCH_OFF } from '../../execution/attempt/trial-config.js';
 import { ATTEMPT_TOKEN_ENV } from '../../execution/providers-map.js';
-import { hermesMcpEntry } from '../../resources/mcp/hermes-config.js';
+import { egressRouteHeaders, hermesMcpEntry } from '../../resources/mcp/hermes-config.js';
 import {
   newAttemptToken,
   type EgressClient,
@@ -174,7 +174,7 @@ export async function runHttpMcpTest(
           {
             name: definition.name,
             url,
-            headers: definition.headers.map(({ header, env }) => ({ header, env })),
+            headers: egressRouteHeaders(definition.headers),
           },
         ],
       });

@@ -321,6 +321,8 @@ describe('POST /suites/import/validate, then POST /suites/import', () => {
       suite: { name: 'vendor-statements-v1', versionLabel: '0.1' },
       nameTaken: null,
       scripts: [],
+      verifyCounts: { files: 0, checkScripts: 0 },
+      rootFilesNotKept: [],
       tasks: [
         {
           key: 'unmatched_lines',
@@ -349,6 +351,27 @@ describe('POST /suites/import/validate, then POST /suites/import', () => {
       .post('/api/suites/import')
       .send({ token: validation.token, name: 'vendor-statements-v1', trustScripts: false })
       .expect(404);
+  });
+
+  it('names the root files besides suite.yaml that the import will not keep (P5b-2)', async () => {
+    const validation = await postZip(
+      await buildZip(
+        vendorStatements('', [
+          { path: 'README.md', content: '# Vendor statements\n' },
+          { path: 'LICENSE', content: 'MIT\n' },
+        ]),
+      ),
+    );
+    expect(validation).toMatchObject({ outcome: 'valid', problems: [] });
+    expect(validation.rootFilesNotKept).toEqual([
+      { path: 'LICENSE', sizeBytes: 4 },
+      { path: 'README.md', sizeBytes: 20 },
+    ]);
+    await http()
+      .post('/api/suites/import')
+      .send({ token: validation.token, name: 'vendor-statements-v1', trustScripts: false })
+      .expect(201);
+    expect(drafts.created[0]!.tasks.map((task) => task.key)).toEqual(['unmatched_lines']);
   });
 
   it('rejects a zip a reload would refuse, with no token', async () => {
@@ -424,12 +447,12 @@ describe('POST /suites/import/validate, then POST /suites/import', () => {
 });
 
 describe.each([
-  ['invoices-v1', true],
-  ['memory-v1', true],
-  ['tools-v1', true],
-  ['mcp-v1', false],
-  ['knowledge-v1', false],
-])('the committed suite %s as a zip', (suite, hasScripts) => {
+  ['invoices-v1', true, 2],
+  ['memory-v1', true, 2],
+  ['tools-v1', true, 1],
+  ['mcp-v1', false, 0],
+  ['knowledge-v1', false, 0],
+])('the committed suite %s as a zip', (suite, hasScripts, checkScripts) => {
   it(
     hasScripts ? 'imports only with the trust tick' : 'imports without the trust tick',
     async () => {
@@ -438,6 +461,9 @@ describe.each([
       expect(validation.outcome).toBe('valid');
       expect(validation.scripts.length > 0).toBe(hasScripts);
       for (const script of validation.scripts) expect(script.path).toMatch(/^[^/]+\/verify\//);
+      // Each script a check runs has its expected_*.json beside it (Phase 5b question 12).
+      expect(validation.verifyCounts).toEqual({ files: 2 * checkScripts, checkScripts });
+      expect(validation.rootFilesNotKept).toEqual([]);
       const name = `zz-smoke-${suite}`;
       if (hasScripts) {
         const refused = await http()

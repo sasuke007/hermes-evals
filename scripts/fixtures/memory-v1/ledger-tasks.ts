@@ -232,6 +232,7 @@ export function vendorAlias(): MemoryTask {
       ),
     ],
     offPasses: false,
+    answersFromFixtures: true,
   };
 }
 
@@ -277,6 +278,7 @@ export function standingExclusion(): MemoryTask {
     ],
     offSteps: [...reads('invoices.csv'), answerStep('Every vendor with unpaid invoices.', all)],
     offPasses: false,
+    answersFromFixtures: true,
   };
 }
 

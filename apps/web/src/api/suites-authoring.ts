@@ -46,15 +46,15 @@ import type {
 import type { SuiteLoadErrorView } from './types/suites';
 import { apiGet, apiSend, isApiError } from './client';
 import * as drafts from './drafts';
-import { apiMode, fixture, hasScenario } from './source';
-import { SAVE_FAILURE, draftStateFrom } from '@/fixtures/suites-authoring';
-import { suiteZipValidationFixture, taskImportValidationFixture } from '@/fixtures/suites-import';
+import { apiMode, fixture, fixtureWorld, hasScenario } from './source';
+import type { DraftFixtureState } from '@/fixtures/suites-authoring';
 
 const seg = (value: string): string => encodeURIComponent(value);
 const draftPath = (folder: string): string => `/suites/${seg(folder)}/draft`;
 
 /** The save states of Review and save that the editor's draft fixtures do not draw. */
-const saveScenarios = () => draftStateFrom(hasScenario);
+const saveScenarios = async (): Promise<DraftFixtureState> =>
+  (await fixtureWorld()).suitesAuthoring.draftStateFrom(hasScenario);
 
 /** The error body of a refused call (ApiError.body), parsed with `schema`; null otherwise. */
 function bodyOf<T>(err: unknown, schema: ZodType<T>): T | null {
@@ -112,7 +112,7 @@ export const getDraftTaskDiff = (folder: string, key: string): Promise<DraftTask
 export async function getDraftReview(folder: string): Promise<DraftReview> {
   const review = await drafts.getDraftReview(folder);
   if (apiMode === 'live') return review;
-  const state = saveScenarios();
+  const state = await saveScenarios();
   if (state.noChanges) {
     return {
       draft: { ...review.draft, changes: [] },
@@ -178,19 +178,22 @@ export async function saveSuiteDraft(
   folder: string,
   request: SaveSuiteDraftRequest,
 ): Promise<DraftSaveOutcome> {
-  const state = saveScenarios();
   if (apiMode === 'fixtures') fixtureSaveStarted = Date.now();
   try {
-    if (apiMode === 'fixtures' && state.saveFailed) {
-      await fixture(null, { request: `POST /api${draftPath(folder)}/save`, latencyMs: 900 });
+    const state = apiMode === 'fixtures' ? await saveScenarios() : null;
+    if (state?.saveFailed) {
+      const failure = await fixture((w) => w.suitesAuthoring.SAVE_FAILURE, {
+        request: `POST /api${draftPath(folder)}/save`,
+        latencyMs: 900,
+      });
       return {
         kind: 'failed',
-        step: SAVE_FAILURE.step,
-        message: SAVE_FAILURE.message,
-        error: SAVE_FAILURE.error,
+        step: failure.step,
+        message: failure.message,
+        error: failure.error,
       };
     }
-    if (apiMode === 'fixtures' && state.noChanges) {
+    if (state?.noChanges) {
       const view = await drafts.getSuiteDraft(folder);
       if (view.base) {
         return {
@@ -282,10 +285,13 @@ export function validateTaskImport(
   if (apiMode === 'live') {
     return apiSend('POST', path, importBody(file, settings, workspace), TaskImportValidationSchema);
   }
-  return fixture(() => taskImportValidationFixture(file.name, file.size, settings, takenKeys), {
-    request: `POST /api${path}`,
-    latencyMs: 400,
-  });
+  return fixture(
+    (w) => w.suitesImport.taskImportValidationFixture(file.name, file.size, settings, takenKeys),
+    {
+      request: `POST /api${path}`,
+      latencyMs: 400,
+    },
+  );
 }
 
 /** How Add ended: the tasks added, or rows that still need a fix (422 with the preview). */
@@ -342,7 +348,7 @@ export function validateSuiteZip(file: File): Promise<SuiteZipValidation> {
     body.append('file', file);
     return apiSend('POST', '/suites/import/validate', body, SuiteZipValidationSchema);
   }
-  return fixture(() => suiteZipValidationFixture(file.name, file.size), {
+  return fixture((w) => w.suitesImport.suiteZipValidationFixture(file.name, file.size), {
     request: 'POST /api/suites/import/validate',
     latencyMs: 900,
   });

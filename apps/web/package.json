@@ -13,6 +13,7 @@
     "lint:eslint": "eslint . --fix --cache",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
+    "check:live-bundle": "node scripts/check-live-bundle.mjs",
     "format": "prettier --write src/"
   },
   "dependencies": {

@@ -340,7 +340,12 @@ describe('runHttpMcpTest', () => {
         frame(`stderr ${token}\n`, 2),
       ]) as unknown as IncomingMessage;
 
-    const run = await runHttpMcpTest(parts, { definition: VENDOR_API, timeoutMs: 60_000 });
+    // A Bearer API (P6-6): .env holds the raw key, and the prefix goes to egress with the route.
+    const definition = {
+      ...VENDOR_API,
+      headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Bearer ' }],
+    };
+    const run = await runHttpMcpTest(parts, { definition, timeoutMs: 60_000 });
 
     expect(token).toMatch(/^[0-9a-f]{64}$/);
     const body = JSON.parse(JSON.stringify(seen.body)) as {
@@ -382,7 +387,7 @@ describe('runHttpMcpTest', () => {
           {
             name: 'vendor-api',
             url: 'https://vendor-api.example.com/mcp',
-            headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }],
+            headers: [{ header: 'Authorization', env: 'VENDOR_API_TOKEN', prefix: 'Bearer ' }],
           },
         ],
       },

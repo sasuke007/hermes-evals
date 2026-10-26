@@ -117,13 +117,22 @@ beforeEach(() => {
           { header: 'X-Other', env: 'OTHER_TOKEN' },
         ],
       },
+      {
+        name: 'prefixed',
+        url: `${base()}/mcp`,
+        headers: [{ header: 'Authorization', env: 'RAW_TOKEN', prefix: 'Bearer ' }],
+      },
       { name: 'streamer', url: `${base()}/mcp/stream`, headers: [] },
       { name: 'holder', url: `${base()}/mcp/hold`, headers: [] },
       { name: 'mover', url: `${base()}/redirect`, headers: [] },
       { name: 'gone', url: 'http://127.0.0.1:9/mcp', headers: [] },
     ],
   });
-  env = { VENDOR_API_TOKEN: `Bearer ${VENDOR_SECRET}`, OTHER_TOKEN: OTHER_SECRET };
+  env = {
+    VENDOR_API_TOKEN: `Bearer ${VENDOR_SECRET}`,
+    OTHER_TOKEN: OTHER_SECRET,
+    RAW_TOKEN: VENDOR_SECRET,
+  };
   seen.length = 0;
   elsewhereHits.length = 0;
   processLog.length = 0;
@@ -239,6 +248,24 @@ describe('MCP gateway: forwarding', () => {
         bytesDown: Buffer.byteLength(answer.text),
         ms: expect.any(Number),
       },
+    ]);
+    expectNoValue(answer);
+  });
+
+  it('writes a header’s prefix before the raw value, so .env holds only the token (Phase 7)', async () => {
+    const answer = await call('/mcp/prefixed', {
+      headers: { 'content-type': 'application/json' },
+      body: initialize,
+    });
+    expect(answer.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.headers.authorization).toBe(`Bearer ${VENDOR_SECRET}`);
+    // Without a prefix the variable is the whole value, as before (the vendor-api route above).
+    await call('/mcp/vendor-api', { body: initialize });
+    expect(seen[1]!.headers.authorization).toBe(`Bearer ${VENDOR_SECRET}`);
+    expect(mcpLog().map((e) => [e.server, e.status, e.origin])).toEqual([
+      ['prefixed', 200, undefined],
+      ['vendor-api', 200, undefined],
     ]);
     expectNoValue(answer);
   });

@@ -5,11 +5,26 @@
  * from Phase 2, every trial build their config from this, so a test checks
  * exactly what a run gets.
  */
-import type { McpServerInput } from '@hermes-evals/shared';
+import type { McpHeader, McpServerInput } from '@hermes-evals/shared';
 import { MCP_GATEWAY_HEADERS } from '../../execution/providers-map.js';
+import { headerPair } from './definition.js';
 
 /** Where a trial reaches an http server: the egress MCP gateway, which adds the headers (plan 5.3). */
 export const egressMcpUrl = (name: string): string => `http://egress:8080/mcp/${name}`;
+
+/**
+ * An http server's headers as its egress route carries them (the
+ * registration's `mcp[].headers`, apps/egress/src/registry.ts): the header,
+ * the variable egress reads its value from and, when the definition gives
+ * one, the prefix egress writes before that value (`Bearer `, Phase 7).
+ * Names only; egress holds the values. Both a trial's registration and an
+ * MCP Test start's use it, so a test checks what a run gets.
+ */
+export function egressRouteHeaders(
+  headers: readonly McpHeader[],
+): Array<{ header: string; env: string; prefix?: string }> {
+  return headers.map(headerPair);
+}
 
 /**
  * The server's config.yaml entry. Never holds a value:

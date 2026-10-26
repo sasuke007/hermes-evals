@@ -4,7 +4,8 @@
  * the changed tasks ("added · self-check passed · 16:31", "changed · reference passes
  * `answer`"), with the tasks that would be stored invalid.
  */
-import type { DraftChange, DraftReview, DraftWrite } from './types/authoring';
+import { refusedUploadMessage } from '@hermes-evals/shared';
+import type { DraftChange, DraftReview, DraftTaskDetail, DraftWrite } from './types/authoring';
 import { findDraft } from './drafts-fixture-ops';
 import { draftView, taskDetailView, taskRowView } from './drafts-fixture-views';
 import { stateOf, type FixtureDraft, type FixtureTask } from './drafts-fixtures';
@@ -58,6 +59,14 @@ function detailOf(draft: FixtureDraft, change: DraftChange): string {
     case 'order':
       return 'task order in suite.yaml';
   }
+}
+
+/** True when every file-limits problem of the task is an upload refused for its size. */
+function onlyRefused(task: FixtureTask, detail: DraftTaskDetail): boolean {
+  const refused = new Set((task.refused ?? []).map(refusedUploadMessage));
+  return detail.readiness.issues
+    .filter((i) => i.rule === 'file_limits' && i.severity === 'problem')
+    .every((i) => refused.has(i.message));
 }
 
 /** "self-check passed · 16:31", "reference passes `answer`", or the first problem. */
@@ -130,11 +139,14 @@ export function review(folder: string): DraftReview {
       note: `${state} · ${readinessNote(draft, task)}`,
     });
     const detail = taskDetailView(draft, task);
-    if (detail.readiness.counts.problems > 0) {
-      const selfCheck = detail.readiness.rules.find(
-        (r) => r.rule === 'self_check' && r.status === 'problem',
-      );
-      const first = detail.readiness.rules.find((r) => r.status === 'problem');
+    // An upload refused for its size leaves no file behind: alone, it does not make the task
+    // load invalid (Phase 5b #11), as the API's draft-review.ts decides.
+    const problems = detail.readiness.rules.filter(
+      (r) => r.status === 'problem' && !(r.rule === 'file_limits' && onlyRefused(task, detail)),
+    );
+    if (problems.length > 0) {
+      const selfCheck = problems.find((r) => r.rule === 'self_check');
+      const first = problems[0];
       invalid.push({
         key: task.key,
         reason: selfCheck ? 'self-check failed' : (first?.message ?? 'has problems'),

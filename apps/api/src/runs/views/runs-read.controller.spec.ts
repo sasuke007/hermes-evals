@@ -10,6 +10,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  AttemptStderrSchema,
   RunDetailSchema,
   RunEventsPageSchema,
   RunListResultSchema,
@@ -19,7 +20,7 @@ import { createTestDatabase, type TestDatabase } from '../../../test/support/dat
 import { DB } from '../../database/db.provider.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { RunViewsModule } from './run-views.module.js';
-import { seedAllStates, type AllStates } from './run-states-spec.js';
+import { PROVIDER_STDERR_LOG, seedAllStates, type AllStates } from './run-states-spec.js';
 import { REPORT_HTML, SUMMARY_CSV, viewsConfig } from './run-fixtures-spec.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
@@ -171,5 +172,34 @@ describe('artifacts', () => {
     const html = await http().get(`${base()}/${seed.artifactIds.report}/preview`).expect(200);
     expect(html.text).toBe('null');
     expect(html.headers['content-type']).toMatch(/^application\/json/);
+  });
+});
+
+describe('GET /api/runs/:id/attempts/:n/stderr (Phase 7)', () => {
+  it('answers the stored stderr.log of the attempt', async () => {
+    const res = await http()
+      .get(`/api/runs/${seed.cell('dup_invoices/baseline/4')}/attempts/1/stderr`)
+      .expect(200);
+    expect(AttemptStderrSchema.parse(res.body)).toEqual({
+      runId: seed.cell('dup_invoices/baseline/4'),
+      attempt: 1,
+      text: PROVIDER_STDERR_LOG,
+      sizeBytes: Buffer.byteLength(PROVIDER_STDERR_LOG),
+      totalLines: 57,
+      truncated: false,
+    });
+  });
+
+  it('answers 404 with the error shape when no log was stored, and 400 for a bad number', async () => {
+    const missing = await http()
+      .get(`/api/runs/${seed.cell('dup_invoices/baseline/1')}/attempts/1/stderr`)
+      .expect(404);
+    expect(missing.body).toEqual({ statusCode: 404, message: 'stderr.log of attempt 1 not found' });
+    await http().get('/api/runs/01NOSUCHRUN000000000000000/attempts/1/stderr').expect(404);
+    for (const n of ['0', 'x', '1.5']) {
+      await http()
+        .get(`/api/runs/${seed.cell('dup_invoices/baseline/1')}/attempts/${n}/stderr`)
+        .expect(400);
+    }
   });
 });

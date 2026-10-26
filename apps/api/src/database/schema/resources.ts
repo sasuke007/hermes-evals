@@ -104,12 +104,16 @@ export const mcpServers = pgTable(
  * variable names only, never values.
  *
  * jsonpath for mcp_server_versions_headers_ck: an entry that is not
- * `{ header, env }` with both strings in the shapes McpHeaderSchema accepts.
- * The check refuses the row when any entry matches.
+ * `{ header, env }` with both strings in the shapes McpHeaderSchema accepts,
+ * and, when it has one, a `prefix` string in MCP_HEADER_PREFIX_PATTERN's
+ * shape (1 to 64 printable ASCII characters, space to tilde; migration
+ * 0010, Phase 6 question 6). A prefix is absent rather than null. The check
+ * refuses the row when any entry matches.
  */
 const BAD_HEADER_ENTRY =
   '$[*] ? (!(@.header.type() == "string" && @.env.type() == "string"' +
-  ' && @.header like_regex "^[A-Za-z0-9-]{1,64}$" && @.env like_regex "^[A-Z_][A-Z0-9_]*$"))';
+  ' && @.header like_regex "^[A-Za-z0-9-]{1,64}$" && @.env like_regex "^[A-Z_][A-Z0-9_]*$"' +
+  ' && (!(exists(@.prefix)) || (@.prefix.type() == "string" && @.prefix like_regex "^[ -~]{1,64}$"))))';
 
 export const mcpServerVersions = pgTable(
   'mcp_server_versions',
@@ -130,9 +134,10 @@ export const mcpServerVersions = pgTable(
     url: text('url'),
     /**
      * http: header name and the egress environment variable holding its
-     * value, e.g. `{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }`.
-     * Egress adds the header on the way to the server; the value never
-     * enters a trial (plan 5.3).
+     * value, e.g. `{ header: 'Authorization', env: 'VENDOR_API_TOKEN' }`,
+     * with an optional `prefix` written before the value (`Bearer `,
+     * migration 0010). Egress adds the header on the way to the server; the
+     * value never enters a trial (plan 5.3).
      */
     headers: jsonValue<McpHeader[]>('headers').notNull().default(emptyJsonArray),
     /** Tool allow and deny lists passed to Hermes. */

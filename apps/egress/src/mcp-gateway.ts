@@ -5,8 +5,9 @@
  * from the container environment. The gateway checks that token, finds the
  * attempt's route by name, and forwards the request to the definition's
  * exact URL with the definition's headers added from egress's own
- * environment. Header values never enter a trial, and none is ever logged or
- * echoed: errors name the variable, never its value.
+ * environment, each after its fixed prefix when the definition gives one
+ * (`Bearer `, Phase 7). Header values never enter a trial, and none is ever
+ * logged or echoed: errors name the variable, never its value.
  *
  * Streamable HTTP: POST carries JSON-RPC and may be answered with JSON or an
  * SSE stream, GET opens the server's SSE stream, DELETE ends the session, and
@@ -107,7 +108,7 @@ function upstreamHeaders(
     const value = req.headers[name];
     if (typeof value === 'string') headers[name] = value;
   }
-  for (const { header, env: variable } of route.headers) {
+  for (const { header, env: variable, prefix } of route.headers) {
     const value = env[variable];
     if (!value) return { ok: false, reason: `${variable} is not set in egress's environment` };
     if (INVALID_HEADER_VALUE.test(value)) {
@@ -116,7 +117,8 @@ function upstreamHeaders(
     // A route header replaces a forwarded one of the same name (case-insensitively).
     const lower = header.toLowerCase();
     for (const key of Object.keys(headers)) if (key === lower) delete headers[key];
-    headers[header] = value;
+    // The prefix (`Bearer `) is the definition's, printable ASCII by the registration's rule.
+    headers[header] = `${prefix ?? ''}${value}`;
   }
   return { ok: true, headers };
 }

@@ -63,11 +63,15 @@
  * and scripts/phase6b-tools-v1-mock-scripts.json (tools-v1/mock-scripts.ts
  * says how the scripts make the arms differ only through the toolsets).
  * Written by hand, and never touched here: suite.yaml, the other five
- * task.yaml files and `verify/check_stock.py`.
+ * task.yaml files and `verify/check_stock.py`; but for one key of task.yaml,
+ * `self_check.answers_from_fixtures: true`, which extract_ibans and
+ * small_lookup get, their answers being picked from their fixtures
+ * (../answers-from-fixtures.ts): their task.yaml is written too.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { markedTaskYaml } from './answers-from-fixtures.ts';
 import { jsonFile, type ToolsTask } from './tools-v1/common.ts';
 import { bigCsv, joinThree, smallLookup } from './tools-v1/data-tasks.ts';
 import { mockScripts } from './tools-v1/mock-scripts.ts';
@@ -95,6 +99,9 @@ export function generatedFiles(tasks: readonly ToolsTask[]): Map<string, string>
     }
     for (const [path, content] of task.files) files.set(`${SUITE}/${task.key}/${path}`, content);
     files.set(`${SUITE}/${task.key}/reference.json`, jsonFile(task.reference));
+    if (task.answersFromFixtures) {
+      files.set(`${SUITE}/${task.key}/task.yaml`, markedTaskYaml(SUITE, task.key));
+    }
   }
   files.set(MOCK_SCRIPTS, jsonFile(mockScripts(tasks)));
   return files;

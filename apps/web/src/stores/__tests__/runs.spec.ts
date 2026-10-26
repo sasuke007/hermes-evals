@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { ApiError } from '@/api/client';
-import { EXPERIMENT_IDS } from '@/api/experiments';
+import { EXPERIMENT_IDS } from '@/fixtures/experiments';
 import * as runsApi from '@/api/runs';
 import { RUNS_REFRESH_DELAY_MS, useRunsStore } from '@/stores/runs';
 import { useScenario } from './scenarioEnv';
