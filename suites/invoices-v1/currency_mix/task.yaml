@@ -1,0 +1,13 @@
+summary: Total still due in EUR over invoices in four currencies
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: total_eur
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: total_eur, rel: 0.001 }

@@ -22,16 +22,27 @@ import type { z } from 'zod';
  * - `script`: run the verifier with reference.json against the fixtures;
  * - `workspace`: run against the hidden expected workspace, then against the
  *   untouched fixtures as a negative control;
+ * - `home`: run against the expected home (the home seeds overlaid with
+ *   `self_check.expected_home`), then against the seeds alone as a negative
+ *   control (Phase 6 P2);
  * - `none`: params are validated, nothing runs.
  */
-export type SelfCheckMode = 'answer' | 'script' | 'workspace' | 'none';
+export type SelfCheckMode = 'answer' | 'script' | 'workspace' | 'home' | 'none';
+
+/** The known-good folders a task declares in task.yaml's `self_check`. */
+export interface SelfCheckFolders {
+  /** `expected_workspace`: the fixtures overlaid with it. */
+  expectedWorkspace: boolean;
+  /** `expected_home`: the home seeds overlaid with it (Phase 6 P2). */
+  expectedHome: boolean;
+}
 
 export interface ScorerDefinition<T extends ScorerType = ScorerType> {
   type: T;
   /** Positive integer, bumped on any behaviour change. */
   version: number;
   params: (typeof SCORER_PARAM_SCHEMAS)[T];
-  /** The mode for a task without an expected workspace; see selfCheckModeFor. */
+  /** The mode for a task without known-good folders; see selfCheckModeFor. */
   selfCheck: SelfCheckMode;
   /**
    * Grades the extracted answer, so a missing or invalid answer makes the key
@@ -65,6 +76,7 @@ export const SCORERS: Registry = {
     selfCheck: 'answer',
     needsAnswer: true,
   },
+  // `root: home` (Phase 6 P2) reads a new folder; workspace checks grade as before.
   file_check: {
     type: 'file_check',
     version: 1,
@@ -81,9 +93,12 @@ export const SCORERS: Registry = {
     selfCheck: 'none',
     needsAnswer: false,
   },
+  // 2: the script also gets `--home <dir>` (Phase 6 P2), which a strict
+  // argument parser that does not declare it refuses, so the same script can
+  // grade differently.
   verifier_script: {
     type: 'verifier_script',
-    version: 1,
+    version: 2,
     params: SCORER_PARAM_SCHEMAS.verifier_script,
     selfCheck: 'script',
     needsAnswer: false,
@@ -136,14 +151,33 @@ export const isAnswerScorerType = (type: ScorerType): type is AnswerScorerType =
   (ANSWER_SCORER_TYPES as readonly ScorerType[]).includes(type);
 
 /**
- * The self-check mode of one entry. A verifier is answer-based unless the task
- * declares an expected workspace, in which case it is judged on files. A
- * file_check is always `workspace`; one without an expected workspace cannot
- * be self-checked, which the loader reports as `self_check_unsupported`.
+ * The self-check mode of one entry. A verifier is judged on files when the
+ * task declares a known-good folder: the expected workspace when there is
+ * one (its home then is the expected home, when declared), else the
+ * expected home; otherwise it is answer-based. A file_check is `home` when
+ * its `root` is home and `workspace` otherwise; one without its folder
+ * cannot be self-checked, which the loader reports as
+ * `self_check_unsupported`. `root` is read as written, so an entry whose
+ * params do not parse still gets a mode.
  */
-export function selfCheckModeFor(type: ScorerType, hasExpectedWorkspace: boolean): SelfCheckMode {
-  if (type === 'verifier_script') return hasExpectedWorkspace ? 'workspace' : 'script';
-  return SCORERS[type].selfCheck;
+export function selfCheckModeFor(
+  entry: { type: ScorerType; params?: unknown },
+  folders: SelfCheckFolders,
+): SelfCheckMode {
+  if (entry.type === 'verifier_script') {
+    if (folders.expectedWorkspace) return 'workspace';
+    return folders.expectedHome ? 'home' : 'script';
+  }
+  if (entry.type === 'file_check')
+    return fileCheckRootOf(entry.params) === 'home' ? 'home' : 'workspace';
+  return SCORERS[entry.type].selfCheck;
+}
+
+/** A file_check's `root` as written: `home` only when it says so. */
+export function fileCheckRootOf(params: unknown): 'workspace' | 'home' {
+  const root =
+    typeof params === 'object' && params !== null ? (params as { root?: unknown }).root : undefined;
+  return root === 'home' ? 'home' : 'workspace';
 }
 
 /** Validates and defaults one entry's params against its type's strict schema. */

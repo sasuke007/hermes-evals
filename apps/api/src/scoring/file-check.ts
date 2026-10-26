@@ -1,8 +1,9 @@
 /**
- * file_check (plan 9.3): checks one file the agent left in the workspace.
- * Pure over a directory, so the evaluator (artifacts materialised from
- * blobs) and the loader's self-check (the expected workspace, then the
- * untouched fixtures) run the same code.
+ * file_check (plan 9.3): checks one file the agent left in the workspace,
+ * or, with `root: home` (Phase 6 P2), in the home's `memories/`. Pure over a
+ * directory, the one `root` names, so the evaluator (artifacts materialised
+ * from blobs) and the loader's self-check (the expected workspace or home,
+ * then the untouched fixtures or the home seeds alone) run the same code.
  *
  * The workspace is agent-made, so the file is found without following any
  * link: every component of the path is lstat-ed, a link anywhere is refused,
@@ -132,15 +133,16 @@ function checkJson(text: string, params: FileCheckParams): Check[] {
   return checks;
 }
 
-/** Runs every declared check on the file; the key passes only when all of them do. */
-export async function checkFile(
-  params: FileCheckParams,
-  workspaceDir: string,
-): Promise<ScorerResult> {
+/**
+ * Runs every declared check on the file; the key passes only when all of them
+ * do. `rootDir` is the folder `params.root` names: the workspace, or the
+ * home (whose collected files are all under `memories/`).
+ */
+export async function checkFile(params: FileCheckParams, rootDir: string): Promise<ScorerResult> {
   return guardedAsync(async () => {
     const expected = expectedOf(params);
     const observed: Record<string, JsonValue> = { path: params.path };
-    const located = await locateRegularFile(workspaceDir, params.path);
+    const located = await locateRegularFile(rootDir, params.path);
     if (located.state === 'absent') {
       observed.exists = false;
       return params.must_exist
@@ -151,11 +153,7 @@ export async function checkFile(
       return binary(false, `refused: ${located.reason}`, { observed, expected });
     }
     observed.exists = true;
-    const read = await readTrialFile(
-      await realpath(workspaceDir),
-      located.path,
-      MAX_CHECKED_FILE_BYTES,
-    );
+    const read = await readTrialFile(await realpath(rootDir), located.path, MAX_CHECKED_FILE_BYTES);
     if (!read.ok) {
       if (read.reason === 'unreadable') {
         return scorerError(`${params.path} could not be read: ${read.detail}`);
@@ -205,9 +203,10 @@ export async function checkFile(
   });
 }
 
-/** The declared checks, as the score row's `expected`. */
+/** The declared checks, as the score row's `expected`; `root` only when it is not the workspace. */
 function expectedOf(params: FileCheckParams): JsonValue {
   const expected: Record<string, JsonValue> = { path: params.path, must_exist: params.must_exist };
+  if (params.root !== 'workspace') expected.root = params.root;
   if (params.format !== undefined) expected.format = params.format;
   if (params.columns !== undefined) expected.columns = params.columns;
   if (params.row_count !== undefined) expected.row_count = params.row_count;

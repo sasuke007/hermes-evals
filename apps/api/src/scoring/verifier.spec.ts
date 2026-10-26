@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { VerifierScriptParamsSchema, type JsonValue } from '@hermes-evals/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  EMPTY_HOME_DIR,
   VERIFIER_TAIL_BYTES,
+  homeOptionHint,
   parseVerifierLine,
   runVerifier,
   scoreVerifierScript,
@@ -23,13 +25,17 @@ const realPython = spawnSync('python3', ['-c', 'import sys; print(sys.executable
   encoding: 'utf8',
 }).stdout.trim();
 
-/** Common argument parsing, as every verifier in a suite does it. */
+/** Common argument parsing, as every verifier in a suite does it (`--home` since Phase 6). */
 const PRELUDE = `import argparse, json, os, sys, subprocess, time
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer", required=True)
 parser.add_argument("--workspace", required=True)
+parser.add_argument("--home", required=True)
 args = parser.parse_args()
 `;
+
+/** How verifiers were written before Phase 6: no `--home`, which argparse then refuses. */
+const OLD_PRELUDE = PRELUDE.replace('parser.add_argument("--home", required=True)\n', '');
 
 describe('parseVerifierLine', () => {
   it('reads a score and an optional comment, ignoring other keys', () => {
@@ -70,7 +76,13 @@ describe('runVerifier', () => {
   /** Writes a script and runs it with a fresh scratch directory. */
   async function run(
     body: string,
-    options: { answer?: JsonValue | null; timeoutS?: number; python?: string } = {},
+    options: {
+      answer?: JsonValue | null;
+      timeoutS?: number;
+      python?: string;
+      homeDir?: string;
+      prelude?: string;
+    } = {},
   ) {
     n += 1;
     const dir = join(root, `task-${n}`);
@@ -78,11 +90,12 @@ describe('runVerifier', () => {
     mkdirSync(join(dir, 'verify'), { recursive: true });
     mkdirSync(scratch);
     const scriptPath = join(dir, 'verify', 'check.py');
-    writeFileSync(scriptPath, PRELUDE + body);
+    writeFileSync(scriptPath, (options.prelude ?? PRELUDE) + body);
     const result = await runVerifier({
       scriptPath,
       answer: options.answer === undefined ? { total: 1 } : options.answer,
       workspaceDir: workspace,
+      ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),
       timeoutS: options.timeoutS ?? 10,
       scratchDir: scratch,
       python: options.python,
@@ -115,7 +128,42 @@ describe('runVerifier', () => {
     });
     expect(evidence.argv.slice(0, 1)).toEqual(['python3']);
     expect(evidence.argv.slice(2, 3)).toEqual(['--answer']);
-    expect(evidence.argv.at(-1)).toBe(workspace);
+    expect(evidence.argv.slice(4, 6)).toEqual(['--workspace', workspace]);
+    expect(evidence.argv.at(-2)).toBe('--home');
+  });
+
+  it('passes --home: the collected home files, or an empty folder when there are none', async () => {
+    const home = join(root, 'home');
+    mkdirSync(join(home, 'memories'), { recursive: true });
+    writeFileSync(join(home, 'memories', 'USER.md'), 'Reports in EUR.');
+    const script =
+      'path = os.path.join(args.home, "memories", "USER.md")\n' +
+      'text = open(path).read() if os.path.exists(path) else None\n' +
+      'print(json.dumps({"score": 1 if text else 0, "comment": f"{text!r} in {sorted(os.listdir(args.home))}"}))\n';
+    const seeded = await run(script, { homeDir: home });
+    expect(seeded.outcome).toEqual({
+      ok: true,
+      score: 1,
+      comment: "'Reports in EUR.' in ['memories']",
+    });
+    expect(seeded.evidence.argv.slice(-2)).toEqual(['--home', home]);
+
+    const bare = await run(script);
+    expect(bare.outcome).toEqual({ ok: true, score: 0, comment: 'None in []' });
+    expect(bare.evidence.argv.slice(-2)).toEqual(['--home', join(bare.scratch, EMPTY_HOME_DIR)]);
+  });
+
+  it('says how to fix a script written before --home existed', async () => {
+    const { outcome, evidence } = await run('print(json.dumps({"score": 1}))\n', {
+      prelude: OLD_PRELUDE,
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error:
+        "exited with code 2: the script does not accept --home, which every verifier is given (Phase 6); add parser.add_argument('--home') to it",
+    });
+    expect(evidence.stderr_tail).toMatch(/unrecognized arguments: --home/);
+    expect(homeOptionHint('error: unrecognized arguments: --verbose')).toBeNull();
   });
 
   it('passes the answer as a file, and JSON null when there is none', async () => {

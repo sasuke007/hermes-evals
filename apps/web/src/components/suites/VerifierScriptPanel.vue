@@ -93,7 +93,8 @@ const partial = computed(() => range.value.from > 1 || range.value.to < lines.va
       <p class="text-12 text-text-3">
         Contract for every verifier script: the platform runs
         <code
-          >python3 verify/&lt;script&gt; --answer &lt;answer.json&gt; --workspace &lt;dir&gt;</code
+          >python3 verify/&lt;script&gt; --answer &lt;answer.json&gt; --workspace &lt;dir&gt; --home
+          &lt;dir&gt;</code
         >
         in the script's folder. The last line it prints must be JSON
         <code>{"score": 0.0–1.0, "comment": "…"}</code>. A non-zero exit, a timeout or a missing
@@ -152,7 +153,8 @@ const partial = computed(() => range.value.from > 1 || range.value.to < lines.va
       <p class="text-12 text-text-3">
         Runs
         <code
-          >python3 {{ verifier.path }} --answer &lt;answer.json&gt; --workspace &lt;dir&gt;</code
+          >python3 {{ verifier.path }} --answer &lt;answer.json&gt; --workspace &lt;dir&gt; --home
+          &lt;dir&gt;</code
         >
         in the script's folder. The last line it prints must be JSON
         <code>{"score": 0.0–1.0, "comment": "…"}</code>. A non-zero exit, a timeout or a missing

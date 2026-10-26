@@ -19,6 +19,7 @@ import { baseName, formatThreshold, listPhrase, suiteDisplayPath } from './forma
 import {
   diagnose,
   failurePhrase,
+  isHomeCheck,
   keyChecks,
   keyStatus,
   lastLine,
@@ -67,7 +68,7 @@ function checkFailure(input: FailureInput, check: KeyCheck): SelfCheckFailureVie
   const status = keyStatus(check);
   const title =
     d.kind === 'negative_control_passed'
-      ? `${check.type} ${subjectOf(check)} passed on the untouched fixtures (negative control)`
+      ? `${check.type} ${subjectOf(check)} passed on ${untouchedOf(check)} (negative control)`
       : `${check.type} ${subjectOf(check)} ${failurePhrase(check, d)} · score status ${status}`;
   return {
     key: check.key,
@@ -152,12 +153,16 @@ function previousRun(
   };
 }
 
+/** What a key's negative control runs on: the untouched fixtures, or the home seeds alone. */
+const untouchedOf = (check: KeyCheck): string =>
+  isHomeCheck(check) ? 'the home seeds alone' : 'the untouched fixtures';
+
 /** The runs of one key as captured: command, output, exit, then what was expected. */
 function transcriptOf(check: KeyCheck, d: Diagnosis): string {
   const runs: string[] = [];
   if (check.run) runs.push(runTranscript(check, check.run, null));
   if (check.negative)
-    runs.push(runTranscript(check, check.negative, 'negative control, on the untouched fixtures'));
+    runs.push(runTranscript(check, check.negative, `negative control, on ${untouchedOf(check)}`));
   if (d.kind === 'negative_control_passed') runs.push('expected the negative control not to pass');
   return runs.join('\n\n');
 }
@@ -182,7 +187,7 @@ function runTranscript(check: KeyCheck, run: SelfCheckResult, label: string | nu
     }
   } else {
     lines.push(
-      `${check.type} ${check.key} on ${run.expect === 'fail' ? 'the untouched fixtures' : targetOf(check)}`,
+      `${check.type} ${check.key} on ${run.expect === 'fail' ? untouchedOf(check) : targetOf(check)}`,
     );
     if (check.entry) lines.push(`params: ${JSON.stringify(check.entry.params)}`);
   }
@@ -205,14 +210,19 @@ function exceptionOf(run: SelfCheckResult | undefined): string | null {
 
 function explain(check: KeyCheck, d: Diagnosis): string {
   const comment = check.run?.comment ? `: ${withStop(check.run.comment)}` : '.';
-  const whatIsChecked =
-    targetOf(check) === 'the expected workspace' ? 'the files in expected/' : 'reference.json';
+  const home = isHomeCheck(check);
+  const whatIsChecked = home
+    ? 'the files in the expected home (self_check.expected_home)'
+    : targetOf(check) === 'the expected workspace'
+      ? 'the files in expected/'
+      : 'reference.json';
   switch (d.kind) {
     case 'negative_control_passed':
-      return (
-        'The check also passes on the untouched fixtures, so it would pass an agent that did nothing. ' +
-        'Make it check what the task asks the agent to produce, or make sure expected/ really differs from fixtures/.'
-      );
+      return home
+        ? 'The check also passes on the home seeds alone, so it would pass an agent that saved nothing. ' +
+            'Make it check what the task asks the agent to save, or make sure the expected home really differs from home/.'
+        : 'The check also passes on the untouched fixtures, so it would pass an agent that did nothing. ' +
+            'Make it check what the task asks the agent to produce, or make sure expected/ really differs from fixtures/.';
     case 'timed_out':
       return `The script ran past its ${d.timeoutS ?? 30} s timeout on ${targetOf(check)}. Make it faster, or raise timeout_s in task.yaml (at most 300).`;
     case 'below_pass_at':
@@ -236,6 +246,9 @@ function explain(check: KeyCheck, d: Diagnosis): string {
     case 'nonzero_exit':
       return `The script printed a result but exited with code ${d.exitCode}. A verifier must exit 0 after printing its result line.`;
     case 'check_failed':
+      if (home) {
+        return `The expected home (home/ overlaid with self_check.expected_home) does not pass this check${comment} Fix the expected home or the entry's params in task.yaml.`;
+      }
       return targetOf(check) === 'the expected workspace'
         ? `The expected workspace (fixtures/ overlaid with expected/) does not pass this check${comment} Fix expected/ or the entry's params in task.yaml.`
         : `reference.json does not satisfy its own ${check.type} check${comment} Fix reference.json or the entry's params in task.yaml.`;

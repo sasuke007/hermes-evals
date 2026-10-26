@@ -40,6 +40,7 @@ function valuesOf(record: VersionRecord, duplicatedFromVersionId: string | null)
     toolsets: [...v.toolsets],
     memoryEnabled: v.memoryEnabled,
     skillIds: v.skills.map((s) => s.skillId),
+    skillLoading: v.skillLoading,
     documentIds: v.documents.map((d) => d.documentId),
     mcpServerVersionIds: v.mcpServers.map((m) => m.versionId),
     maxTurns: v.maxTurns,

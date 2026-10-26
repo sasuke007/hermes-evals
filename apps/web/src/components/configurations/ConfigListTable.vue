@@ -13,7 +13,7 @@ import { ROUTE_NAMES } from '@/router';
  * version, with a checkbox to pick it for Compare. Clicking a row (or Enter on it) opens the
  * detail; a picked row is tinted. Loading draws skeleton rows at the real columns; with no
  * configurations the header stays and the body explains what one is (LibraryStates ›
- * Configurations · empty).
+ * Configurations · empty). Skills loaded on demand (Phase 6 P5) carry an "on demand" tag.
  */
 const props = withDefaults(
   defineProps<{
@@ -42,6 +42,7 @@ const view = computed(() =>
       toolsets: v.toolsets.slice(0, TOOLSET_TAGS),
       moreToolsets: v.toolsets.slice(TOOLSET_TAGS),
       skills: v.skills.map((s) => s.name).join(', '),
+      onDemand: v.skills.length > 0 && v.skillLoading === 'on_demand',
       servers: v.mcpServers.map((m) => m.name).join(', '),
       documents: v.documents.length,
     };
@@ -150,12 +151,18 @@ const skeleton: SkeletonColumn[] = [
           </td>
           <td class="text-text-2">{{ item.row.latest.memoryEnabled ? 'on' : 'off' }}</td>
           <td>
-            <span
-              v-if="item.skills"
-              class="block max-w-240 truncate font-mono text-12"
-              :title="item.skills"
-              >{{ item.skills }}</span
-            >
+            <span v-if="item.skills" class="flex items-center gap-6">
+              <span class="block max-w-240 truncate font-mono text-12" :title="item.skills">{{
+                item.skills
+              }}</span>
+              <span
+                v-if="item.onDemand"
+                class="tag font-sans whitespace-nowrap"
+                title="Skill loading: on demand (installed for the agent to find)"
+                data-testid="on-demand"
+                >on demand</span
+              >
+            </span>
             <span v-else class="font-mono text-text-3">—</span>
           </td>
           <td>

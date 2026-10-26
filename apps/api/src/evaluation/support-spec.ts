@@ -8,6 +8,8 @@ import { eq } from 'drizzle-orm';
 import { vi } from 'vitest';
 import type {
   ArtifactOrigin,
+  ArtifactRoot,
+  ArtifactSkipReason,
   JsonValue,
   RunEventPayload,
   SelfCheck,
@@ -201,10 +203,18 @@ export async function seedScenario(
 
 export interface AttemptEvidence {
   finalText: string | null;
-  /** Workspace files with content, as collection stores them. */
-  files?: Array<{ path: string; content: string; origin?: ArtifactOrigin }>;
-  /** Workspace files recorded without content because they were too large. */
-  skipped?: Array<{ path: string; size: number }>;
+  /** Files with content, as collection stores them: in the workspace unless `root` says home. */
+  files?: Array<{ path: string; content: string; origin?: ArtifactOrigin; root?: ArtifactRoot }>;
+  /**
+   * Files recorded without content: in the workspace unless `root` says home,
+   * skipped as too large unless `reason` says the collection budget ran out.
+   */
+  skipped?: Array<{
+    path: string;
+    size: number;
+    root?: ArtifactRoot;
+    reason?: ArtifactSkipReason;
+  }>;
   /** Stored events, numbered 1, 2, 3... in this order. */
   events?: RunEventPayload[];
 }
@@ -226,6 +236,7 @@ export async function executeRun(
     const ref = await storeBlob(db, store, file.content);
     await db.insert(artifacts).values({
       attemptId,
+      root: file.root ?? 'workspace',
       path: file.path,
       origin: file.origin ?? 'agent',
       size: ref.size,
@@ -247,11 +258,12 @@ export async function executeRun(
   for (const file of evidence.skipped ?? []) {
     await db.insert(artifacts).values({
       attemptId,
+      root: file.root ?? 'workspace',
       path: file.path,
       origin: 'agent',
       size: file.size,
       sha256: null,
-      skippedReason: 'too_large',
+      skippedReason: file.reason ?? 'too_large',
     });
   }
   return db.transaction(async (tx) => {

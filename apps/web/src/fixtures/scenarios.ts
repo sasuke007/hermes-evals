@@ -10,6 +10,7 @@
  */
 import { EXPERIMENT_IDS, SAMPLE_RUN_ID } from './experiments';
 import { runIdOf } from './inspector';
+import { CONFIG_IDS } from './resources';
 import { SUITE_V1_ID, SUITE_V2_ID } from './suites';
 
 export type ScenarioDomain =
@@ -266,6 +267,14 @@ export const SCENARIOS: ScenarioEntry[] = [
     baseData: true,
   },
   {
+    name: 'memory-files',
+    domain: 'inspector',
+    description:
+      "per_vendor seeds the agent's memory (home/memories/MEMORY.md and USER.md): its runs list the memory files in a Memory group (MEMORY.md home seed · unchanged; USER.md home seed · modified where the answer passed), the launch record lists both seeds, and Task detail shows the seeds, the expected_home file and a file_check with root home.",
+    route: run('skillVsNoSkill', 'per_vendor', 'with-skill', 1),
+    alsoAt: [`/suites/${SUITE_V1_ID}/tasks/per_vendor`],
+  },
+  {
     name: 'sample-run',
     domain: 'inspector',
     description:
@@ -335,15 +344,28 @@ export const SCENARIOS: ScenarioEntry[] = [
     description:
       'Test start of invoice-db exits with code 1 after 0.6 s ("Error: INVOICE_DB_URL is not set"); Secrets shows INVOICE_DB_URL not set.',
     route: '/resources/mcp',
-    alsoAt: ['/resources/secrets'],
+    alsoAt: ['/resources/secrets', '/experiments/new'],
   },
   {
     name: 'secret-not-set',
     domain: 'library',
     description:
-      'INVOICE_DB_URL is not set in the worker environment: the Secrets row reads "not set" with its warning, and Test start fails.',
+      'INVOICE_DB_URL is not set in the worker environment: the Secrets row reads "not set" with its warning, Test start fails, and New experiment tags with-mcp "INVOICE_DB_URL not set" and disables Launch with "with-mcp: INVOICE_DB_URL (invoice-db, read by the worker) is not set".',
     route: '/resources/secrets',
-    alsoAt: ['/resources/mcp'],
+    alsoAt: ['/resources/mcp', '/experiments/new'],
+  },
+  {
+    name: 'skills-on-demand',
+    domain: 'library',
+    description:
+      "with-skill v1 loads invoice-method on demand: the form's Skill loading reads on demand, the detail and the diff show it (skill_loading preload → on demand), and its runs launch without -s, with the skills toolset.",
+    route: `/configurations/${CONFIG_IDS['with-skill']}/edit`,
+    alsoAt: [
+      `/configurations/${CONFIG_IDS['with-skill']}`,
+      '/configurations',
+      '/experiments/new',
+      run('skillVsNoSkill', 'dup_invoices', 'with-skill', 3),
+    ],
   },
 
   // System (defined in src/fixtures/system.ts) -----------------------------------------

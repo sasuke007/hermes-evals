@@ -7,12 +7,17 @@
  * a link, and reads that refuse links, FIFOs, devices and anything that
  * resolves outside the workspace.
  *
- * Each regular file becomes an artifact: its content goes to the blob store
- * and its origin comes from comparing it with the inputs copied in before the
- * run (fixture or document, unchanged or modified), or `agent` for anything
- * else. Files over 25 MB are recorded with `too_large` and no content.
- * Links, special files and unreadable names are not artifacts; the
- * `collected` event lists them, with the inputs the agent deleted.
+ * Each regular file becomes an artifact with root `workspace`: its content
+ * goes to the blob store and its origin comes from comparing it with the
+ * inputs copied in before the run (fixture or document, unchanged or
+ * modified), or `agent` for anything else (collect-files.ts). Files over
+ * 25 MB are recorded with `too_large` and no content. Links, special files
+ * and unreadable names are not artifacts; the `collected` event lists them,
+ * with the inputs the agent deleted.
+ *
+ * collectTrialFiles then collects the home's memories/ (collect-home.ts,
+ * Phase 6 P2) with what the workspace left of the budget, before the runner
+ * deletes the home, and the same event describes both.
  *
  * What one attempt may add to the blob store is bounded too
  * (MAX_COLLECTED_BYTES): each file's apparent size, which is what the store
@@ -23,22 +28,19 @@
  * the disk Postgres shares. Content the store already holds (an unchanged
  * input, a repeated file) is not charged.
  */
-import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
-import { open, readlink, realpath } from 'node:fs/promises';
-import type { ArtifactOrigin, ArtifactSkipReason } from '@hermes-evals/shared';
+import type { AttemptEventInput, AttemptArtifact, PlannedHomeSeed } from '../contracts.js';
 import {
-  MAX_ARTIFACT_BYTES,
   MAX_COLLECTED_BYTES,
-  readTrialFile,
+  restoreOwnerAccess,
   walkTrialTree,
 } from '../../sandbox/trial-files.js';
 import type { BlobStore } from '../../storage/blob-store.js';
-import type { AttemptArtifact, AttemptEventInput } from '../contracts.js';
+import { collectEntries } from './collect-files.js';
+import { collectHomeMemories, type HomeCollection } from './collect-home.js';
 import type { InputFile } from './materialise.js';
 
 /** Entries the `collected` event lists by name; the rest are counted. */
-const MAX_LISTED = 50;
+export const MAX_LISTED = 50;
 
 export interface Collection {
   artifacts: AttemptArtifact[];
@@ -46,43 +48,10 @@ export interface Collection {
   event: AttemptEventInput;
 }
 
-const originOf = (input: InputFile | undefined, sha256: string | null): ArtifactOrigin => {
-  if (!input) return 'agent';
-  return sha256 === input.sha256 ? `${input.source}_unchanged` : `${input.source}_modified`;
-};
-
-/**
- * The sha256 of a file too large to store, read in chunks with the same
- * refusals as readTrialFile (no final link, regular files only, and on Linux
- * nothing that resolved outside the root). Null when it cannot be read.
- * Used only to tell whether an oversized input is unchanged.
- */
-async function hashLargeFile(root: string, relPath: string): Promise<string | null> {
-  const rootReal = await realpath(root);
-  let handle;
-  try {
-    handle = await open(
-      `${rootReal}/${relPath}`,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
-  } catch {
-    return null;
-  }
-  try {
-    const landed = await readlink(`/proc/self/fd/${handle.fd}`).catch(() => null);
-    if (landed !== null && !landed.startsWith(`${rootReal}/`)) return null;
-    if (!(await handle.stat()).isFile()) return null;
-    const hash = createHash('sha256');
-    const buffer = Buffer.alloc(1024 * 1024);
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-      if (bytesRead === 0) break;
-      hash.update(buffer.subarray(0, bytesRead));
-    }
-    return hash.digest('hex');
-  } finally {
-    await handle.close();
-  }
+/** The workspace's collection, and what it charged the attempt's budget. */
+export interface WorkspaceCollection extends Collection {
+  /** Bytes new to the blob store. */
+  newBytes: number;
 }
 
 /** Walks the workspace, stores what can be stored, and labels every file. */
@@ -92,68 +61,16 @@ export async function collectWorkspace(
   blobs: BlobStore,
   now = Date.now,
   budgetBytes = MAX_COLLECTED_BYTES,
-): Promise<Collection> {
+): Promise<WorkspaceCollection> {
   const tree = await walkTrialTree(workspace);
-  const artifacts: AttemptArtifact[] = [];
-  const notCollected: Array<{ path: string; kind: string; detail?: string }> = [];
-  /** Content stored for this attempt, and the part of it new to the store (what the budget counts). */
-  let storedBytes = 0;
-  let newBytes = 0;
-  const seen = new Set<string>();
-
-  /** A file recorded without content; an input of the same size is hashed to tell if it changed. */
-  const skipped = async (path: string, size: number, reason: ArtifactSkipReason) => {
-    const input = manifest.get(path);
-    // The size alone proves a change; only a same-sized input is worth reading in full.
-    const sha = input && input.size === size ? await hashLargeFile(workspace, path) : null;
-    const origin: ArtifactOrigin = input
-      ? sha === input.sha256
-        ? `${input.source}_unchanged`
-        : `${input.source}_modified`
-      : 'agent';
-    artifacts.push({ path, origin, size, sha256: null, skippedReason: reason });
-  };
-  const overBudget = (size: number) => newBytes + size > budgetBytes;
-
-  for (const entry of tree.entries) {
-    if (entry.kind === 'dir') continue;
-    seen.add(entry.path);
-    if (entry.kind === 'symlink') {
-      notCollected.push({ path: entry.path, kind: 'symlink', detail: entry.target });
-    } else if (entry.kind === 'special') {
-      notCollected.push({ path: entry.path, kind: entry.type });
-    } else if (entry.kind === 'unreadable') {
-      notCollected.push({ path: entry.path, kind: 'unreadable', detail: entry.reason });
-    } else if (entry.size > MAX_ARTIFACT_BYTES) {
-      await skipped(entry.path, entry.size, 'too_large');
-    } else if (overBudget(entry.size) && manifest.get(entry.path)?.size !== entry.size) {
-      // Not read at all: only an input that may be unchanged is worth reading past the budget.
-      await skipped(entry.path, entry.size, 'over_budget');
-    } else {
-      const read = await readTrialFile(workspace, entry.path);
-      if (read.ok) {
-        const fresh = !(await blobs.exists(read.sha256));
-        if (fresh && overBudget(read.content.length)) {
-          await skipped(entry.path, entry.size, 'over_budget');
-          continue;
-        }
-        const ref = await blobs.putBuffer(read.content);
-        storedBytes += ref.size;
-        if (fresh) newBytes += ref.size;
-        artifacts.push({
-          path: entry.path,
-          origin: originOf(manifest.get(entry.path), ref.sha256),
-          size: ref.size,
-          sha256: ref.sha256,
-          skippedReason: null,
-        });
-      } else if (read.reason === 'too_large') {
-        await skipped(entry.path, entry.size, 'too_large');
-      } else {
-        notCollected.push({ path: entry.path, kind: read.reason, detail: read.detail });
-      }
-    }
-  }
+  const { artifacts, notCollected, storedBytes, newBytes, seen } = await collectEntries(
+    workspace,
+    tree.entries,
+    'workspace',
+    manifest,
+    blobs,
+    budgetBytes,
+  );
   const overBudgetPaths = artifacts
     .filter((a) => a.skippedReason === 'over_budget')
     .map((a) => a.path);
@@ -186,5 +103,91 @@ export async function collectWorkspace(
       truncated: tree.truncated,
     },
   };
-  return { artifacts, event };
+  return { artifacts, event, newBytes };
+}
+
+/** What collectTrialFiles reads: the attempt's two directories and what was placed in them. */
+export interface TrialFilesInput {
+  /** AttemptPlan.paths.workspace and .home. */
+  workspace: string;
+  home: string;
+  /** The workspace inputs (MaterialisedTrial.manifest). */
+  manifest: ReadonlyMap<string, InputFile>;
+  /** The home seeds the plan placed (AttemptPlan.task.homeSeeds), by home-relative path. */
+  homeSeeds: readonly PlannedHomeSeed[];
+  blobs: BlobStore;
+  now?: () => number;
+  /** MAX_COLLECTED_BYTES by default, shared by both directories, the workspace first. */
+  budgetBytes?: number;
+}
+
+/**
+ * The home part of the `collected` event: how many memory files, which of
+ * them the agent wrote, what was not collected and which seeds it deleted.
+ * A failure to collect the home is `home_error`; the workspace's artifacts
+ * stand either way.
+ */
+function homeFields(home: HomeCollection | { error: string }): Record<string, unknown> {
+  if ('error' in home) return { home_files: 0, home_error: home.error };
+  return {
+    home_files: home.artifacts.length,
+    home_stored: home.artifacts.filter((a) => a.sha256 !== null).length,
+    home_new_bytes: home.newBytes,
+    home_agent_files: home.artifacts.filter((a) => a.origin === 'agent').length,
+    home_too_large: home.artifacts
+      .filter((a) => a.skippedReason === 'too_large')
+      .map((a) => `home/${a.path}`),
+    home_over_budget: home.artifacts
+      .filter((a) => a.skippedReason === 'over_budget')
+      .map((a) => `home/${a.path}`)
+      .slice(0, MAX_LISTED),
+    home_not_collected: home.notCollected
+      .slice(0, MAX_LISTED)
+      .map((n) => ({ ...n, path: `home/${n.path}` })),
+    home_not_collected_count: home.notCollected.length,
+    deleted_home_seeds: home.deletedSeeds.map((path) => `home/${path}`),
+    home_truncated: home.truncated,
+  };
+}
+
+/**
+ * Collects everything an attempt leaves (plan 8.5, Phase 6 P2): the
+ * workspace, with the owner permissions the agent removed restored first,
+ * then the home's memories/ with what is left of the budget. Call it after
+ * the container is removed and before the home is deleted. A workspace that
+ * cannot be collected throws (the runner records it on the event); a home
+ * that cannot be collected is `home_error` on the event and no artifact.
+ */
+export async function collectTrialFiles(input: TrialFilesInput): Promise<Collection> {
+  const now = input.now ?? Date.now;
+  const budget = input.budgetBytes ?? MAX_COLLECTED_BYTES;
+  // A directory the agent made unlistable would otherwise hide its files from collection.
+  await restoreOwnerAccess(input.workspace);
+  const workspace = await collectWorkspace(
+    input.workspace,
+    input.manifest,
+    input.blobs,
+    now,
+    budget,
+  );
+  const seeds = new Map(input.homeSeeds.map((s) => [s.path, { sha256: s.sha256, size: s.size }]));
+  let home: HomeCollection | { error: string };
+  try {
+    home = await collectHomeMemories(
+      input.home,
+      seeds,
+      input.blobs,
+      Math.max(0, budget - workspace.newBytes),
+    );
+  } catch (err) {
+    home = { error: err instanceof Error ? err.message : String(err) };
+  }
+  const homeArtifacts = 'error' in home ? [] : home.artifacts;
+  return {
+    artifacts: [...workspace.artifacts, ...homeArtifacts],
+    event: {
+      ...workspace.event,
+      payload: { ...workspace.event.payload, ...homeFields(home) },
+    },
+  };
 }

@@ -36,6 +36,9 @@ export function getSystemSummary(): Promise<SystemSummary> {
   204 or a body nobody reads.
 - **The fixture branch** names the request it stands in for, so the `error` scenario's
   message reads like the real one.
+- **A field the shared contract lacks** is added in one local schema that extends the
+  shared one, with a default for an answer without it, and removed once the contract has
+  it.
 
 ## Errors
 

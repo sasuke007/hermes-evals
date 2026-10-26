@@ -200,6 +200,7 @@ const DETAIL: RunDetail = {
     items: [
       {
         id: 'art_01',
+        root: 'workspace',
         path: 'workspace/invoices.csv',
         origin: 'fixture_unchanged',
         sizeBytes: 4210,
@@ -224,6 +225,7 @@ const DETAIL: RunDetail = {
       diskCap: { bytes: 2 * 1024 ** 3, files: 50000 },
       worker: { name: 'worker-1', startedAt: '2026-10-22T10:20:15', exitCode: 0 },
       skills: [],
+      skillLoading: 'preload',
       mcpServers: [],
     },
     command: 'hermes chat … --api-key ‹run token, revoked›',
@@ -231,6 +233,8 @@ const DETAIL: RunDetail = {
     configPath: '/opt/data/config.yaml',
     configYaml: 'model:\n  default: openai/gpt-6.1-sol',
     configNote: null,
+    homeSeeds: [],
+    backgroundReview: { memoryNudgeInterval: 0, skillCreationNudgeInterval: 0 },
   },
   counterpart: {
     runId: 'run_01JB7X4K3P',

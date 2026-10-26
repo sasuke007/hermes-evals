@@ -496,6 +496,7 @@ describe.skipIf(!SERVER_URL)('Phase 1 on Postgres 17: API and worker', () => {
         toolsets: ['file', 'terminal'],
         memoryEnabled: false,
         skillIds: [skillId],
+        skillLoading: 'preload',
         documentIds: [documentId],
         mcpServerVersionIds: [invoiceDb.versionId],
         maxTurns: 20,

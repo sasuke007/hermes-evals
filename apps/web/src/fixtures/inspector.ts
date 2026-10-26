@@ -13,7 +13,8 @@
  *   running          currency_mix · with-mcp · rep 5 of MCP vs baseline
  * Scenarios that change a run (see scenarios.ts): cancelled, multi-attempt,
  * disk-limit, token-cap, timeout-silent, provider-lapsed, verdict-updated,
- * no-worker.
+ * no-worker; memory-files (per_vendor's memory files and home seeds, from
+ * home.ts) and skills-on-demand (with-skill's launch without -s).
  */
 import type { JsonValue } from '@hermes-evals/shared';
 import type {
@@ -32,7 +33,7 @@ import type {
   TimelineEvent,
 } from '@/api/types/runs';
 import type { TablePreview } from '@/api/types/suites';
-import { CONFIG_VERSIONS, MODEL } from './configurations';
+import { configVersionIn, MODEL } from './configurations';
 import { runComment, SAMPLE_RUN_COMMENT } from './comparison';
 import {
   configRef,
@@ -44,6 +45,7 @@ import {
   runKey,
   runsOf,
 } from './experiments';
+import { homeArtifactsFor, homeArtifactText, homeSeedsFor } from './home';
 import { MCP_INVOICE_DB, SKILL_INVOICE_METHOD } from './resources';
 import { runNeeds } from './runs';
 import {
@@ -1077,7 +1079,7 @@ const SUMMARY_PREVIEW: TablePreview = {
   totalRows: 3,
 };
 
-function artifactsFor(run: RunSeed): ArtifactsView {
+function artifactsFor(run: RunSeed, active: Active): ArtifactsView {
   if (run.status === 'queued' || run.status === 'running') {
     return { items: [], note: 'collected when the run ends', agentWroteNothing: false };
   }
@@ -1088,6 +1090,7 @@ function artifactsFor(run: RunSeed): ArtifactsView {
     preview: TablePreview,
   ): ArtifactView => ({
     id: ulid('art', `${run.id}:summary.csv`),
+    root: 'workspace',
     path: 'workspace/summary.csv',
     origin: 'agent',
     sizeBytes,
@@ -1104,6 +1107,7 @@ function artifactsFor(run: RunSeed): ArtifactsView {
   }
   const fixtures: ArtifactView[] = taskSeed(run.taskKey).fixtures.map((f) => ({
     id: ulid('art', `${run.id}:${f.path}`),
+    root: 'workspace',
     path: `workspace/${f.path}`,
     origin: 'fixture_unchanged',
     sizeBytes: f.sizeBytes,
@@ -1111,7 +1115,7 @@ function artifactsFor(run: RunSeed): ArtifactsView {
     skippedReason: null,
     preview: f.path === 'invoices.csv' ? INVOICES_PREVIEW : null,
   }));
-  const items = [...fixtures];
+  const items = [...fixtures, ...homeArtifactsFor(active, run)];
   if (run.taskKey === 'summary_file' && run.status === 'scored') {
     const rows = run.primaryStatus === 'passed' ? 5 : 4;
     items.push(
@@ -1125,7 +1129,9 @@ function artifactsFor(run: RunSeed): ArtifactsView {
       }),
     );
   }
-  return { items, note: null, agentWroteNothing: !items.some((a) => a.origin === 'agent') };
+  // As the API: about the workspace only, whatever the home's memory files say.
+  const wrote = items.some((a) => a.root === 'workspace' && a.origin === 'agent');
+  return { items, note: null, agentWroteNothing: !wrote };
 }
 
 const CONFIG_YAML_BASE = `model:
@@ -1136,6 +1142,9 @@ toolsets: [file, terminal]
 memory:
   memory_enabled: false
   user_profile_enabled: false
+  nudge_interval: 10
+skills:
+  creation_nudge_interval: 10
 mcp_servers: {}
 agent:
   max_turns: 20
@@ -1153,11 +1162,15 @@ const MCP_YAML = `mcp_servers:
     tools: { include: [list_invoices, get_invoice] }
     timeout_s: 30`;
 
-function launchRecordFor(run: RunSeed): LaunchRecordView {
-  const config = CONFIG_VERSIONS[run.config];
+function launchRecordFor(run: RunSeed, active: Active): LaunchRecordView {
+  const config = configVersionIn(active, run.config);
   const withSkill = config.skills.length > 0;
   const withMcp = config.mcpServers.length > 0;
-  const tools = `-t file,terminal${withSkill ? ' -s invoice-method' : ''}`;
+  const onDemand = withSkill && config.skillLoading === 'on_demand';
+  // On demand passes no -s and adds the skills toolset, so the agent finds the skill itself.
+  const tools = onDemand
+    ? '-t file,terminal,skills'
+    : `-t file,terminal${withSkill ? ' -s invoice-method' : ''}`;
   return {
     container: {
       image: 'nousresearch/hermes-agent:v0.22.4',
@@ -1193,6 +1206,7 @@ function launchRecordFor(run: RunSeed): LaunchRecordView {
             },
           ]
         : [],
+      skillLoading: config.skillLoading,
       mcpServers: withMcp
         ? [
             {
@@ -1210,12 +1224,16 @@ function launchRecordFor(run: RunSeed): LaunchRecordView {
   ${tools} --max-turns 20 --yolo --in /workspace`,
     commandNote:
       run.config === 'baseline'
-        ? 'The with-skill counterpart adds -s invoice-method after -t file,terminal. The run token is issued for this run only and revoked when it ends.'
-        : 'The run token is issued for this run only and revoked when it ends.',
+        ? `The with-skill counterpart adds ${configVersionIn(active, 'with-skill').skillLoading === 'on_demand' ? 'the skills toolset (its skill loads on demand)' : '-s invoice-method after -t file,terminal'}. The run token is issued for this run only and revoked when it ends.`
+        : onDemand
+          ? 'invoice-method is installed in the home without -s; the skills toolset lets the agent list and open it. The run token is issued for this run only and revoked when it ends.'
+          : 'The run token is issued for this run only and revoked when it ends.',
     configPath: '/opt/data/config.yaml',
     configYaml: withMcp ? CONFIG_YAML_BASE.replace('mcp_servers: {}', MCP_YAML) : CONFIG_YAML_BASE,
     configNote:
       'Plus settings that keep runs identical across configurations: plugins, curator and title generation off.',
+    homeSeeds: homeSeedsFor(active, run),
+    backgroundReview: { memoryNudgeInterval: 10, skillCreationNudgeInterval: 10 },
   };
 }
 
@@ -1337,8 +1355,8 @@ export function runDetailFixture(active: Active, runId: string): RunDetail | nul
           : events.length,
     },
     finalResponse: finalResponseFor(seed, run),
-    artifacts: artifactsFor(run),
-    launchRecord: launchRecordFor(run),
+    artifacts: artifactsFor(run, active),
+    launchRecord: launchRecordFor(run, active),
     counterpart: counterpartFor(seed, run),
     needs: runNeeds(run),
   };
@@ -1353,6 +1371,29 @@ export function runEventsFixture(active: Active, runId: string, after = 0): RunE
     events,
     lastSeq: events.length ? (events[events.length - 1]?.seq ?? after) : after,
     live: detail.timeline.live,
+  };
+}
+
+/**
+ * The content of one artifact as text: a memory file's text, or a table artifact's rows as
+ * CSV (the fixtures store tables, not bytes). Null when there is neither.
+ */
+export function artifactTextFixture(
+  active: Active,
+  runId: string,
+  artifactId: string,
+): { text: string; truncated: boolean } | null {
+  const artifact = runDetailFixture(active, runId)?.artifacts.items.find(
+    (a) => a.id === artifactId,
+  );
+  if (!artifact) return null;
+  const text = homeArtifactText(artifact);
+  if (text !== null) return { text, truncated: false };
+  const preview = artifact.preview;
+  if (!preview) return null;
+  return {
+    text: [preview.columns, ...preview.rows].map((row) => row.join(',')).join('\n'),
+    truncated: preview.totalRows > preview.rows.length,
   };
 }
 

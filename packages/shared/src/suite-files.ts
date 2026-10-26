@@ -12,7 +12,7 @@
  */
 import { z } from 'zod';
 import { JsonValueSchema, TaskLimitsSchema, VerificationEntrySchema } from './records.js';
-import { TRAJECTORY_MODES, type ScorerType } from './vocab.js';
+import { ARTIFACT_ROOTS, TRAJECTORY_MODES, type ScorerType } from './vocab.js';
 
 /**
  * A suite or task directory name, and the shape of suite.yaml's `name`. The
@@ -40,6 +40,55 @@ const passAt = (fallback: number) => z.number().min(0).max(1).default(fallback);
 const answerPath = z.string().min(1).optional();
 
 const unique = (values: readonly string[]) => new Set(values).size === values.length;
+
+// ---------------------------------------------------------------------------
+// Home seeds (Phase 6 P1)
+// ---------------------------------------------------------------------------
+
+/** The task folder whose files seed the trial's home. Only HOME_SEED_PATHS may be in it. */
+export const TASK_HOME_DIR = 'home';
+
+/**
+ * The only files a task's `home/` folder may hold: Hermes's two memory
+ * files. Any other path there is a load error. Each is copied, hash
+ * re-checked, to the same path under the trial home (homeSeedTarget), in
+ * every arm whatever `memory_enabled` says, so the same seed in both arms
+ * isolates the setting.
+ */
+export const HOME_SEED_PATHS = ['home/memories/MEMORY.md', 'home/memories/USER.md'] as const;
+export type HomeSeedPath = (typeof HOME_SEED_PATHS)[number];
+
+/** The one home folder collected after a run (P2): artifacts with root home live under it. */
+export const HOME_MEMORIES_DIR = 'memories';
+
+/**
+ * Hermes's default character budgets of the two memory files
+ * (agent/agent_init.py: memory_char_limit 2200, user_char_limit 1375 at
+ * v0.22.4). The loader warns, not errors, when a seed is over its budget:
+ * Hermes still loads it, but a real agent could not have written it.
+ */
+export const MEMORY_CHAR_LIMITS = { 'MEMORY.md': 2200, 'USER.md': 1375 } as const;
+
+/**
+ * What separates two entries of a memory file: a section sign on a line of
+ * its own (ENTRY_DELIMITER in tools/memory_tool_store.py, v0.22.4). Hermes
+ * splits on it, trims each entry and drops empty ones; the loader warns
+ * when a seed does not read as such a list.
+ */
+export const MEMORY_ENTRY_DELIMITER = '\n§\n';
+
+/** Whether a task-folder path is one of HOME_SEED_PATHS. */
+export const isHomeSeedPath = (path: string): path is HomeSeedPath =>
+  (HOME_SEED_PATHS as readonly string[]).includes(path);
+
+/**
+ * Where a home seed lands, relative to the trial home: `home/memories/MEMORY.md`
+ * becomes `memories/MEMORY.md`. The same relative path is the artifact's
+ * path when the agent's copy is collected, so seed and artifact compare by it.
+ */
+export function homeSeedTarget(path: HomeSeedPath): string {
+  return path.slice(TASK_HOME_DIR.length + 1);
+}
 
 // ---------------------------------------------------------------------------
 // suite.yaml
@@ -102,13 +151,20 @@ export const FILE_CHECK_FORMATS = ['csv', 'json', 'text'] as const;
 export type FileCheckFormat = (typeof FILE_CHECK_FORMATS)[number];
 
 /**
- * Checks one file the agent leaves in the workspace. Every declared check
- * must pass. Column and row checks read the file as CSV, so they need
- * `format: csv`; a JSON schema needs `format: json`.
+ * Checks one file the agent leaves in the workspace, or in the home's
+ * `memories/` (Phase 6 P2). Every declared check must pass. Column and row
+ * checks read the file as CSV, so they need `format: csv`; a JSON schema
+ * needs `format: json`.
  */
 export const FileCheckParamsSchema = z
   .strictObject({
-    /** Relative to the workspace root. */
+    /**
+     * Which collected files the path is in: the workspace (the default), or
+     * the home, of which only `memories/` is collected, e.g.
+     * `root: home, path: memories/USER.md`.
+     */
+    root: z.enum(ARTIFACT_ROOTS).default('workspace'),
+    /** Relative to the root. */
     path: relativePath('path'),
     /** false: an absent file passes, and the other checks apply only when it exists. */
     must_exist: z.boolean().default(true),
@@ -133,6 +189,13 @@ export const FileCheckParamsSchema = z
         code: 'custom',
         path: ['json_schema'],
         message: 'json_schema needs format: json',
+      });
+    }
+    if (p.root === 'home' && !p.path.startsWith(`${HOME_MEMORIES_DIR}/`)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['path'],
+        message: `with root: home the path must be under ${HOME_MEMORIES_DIR}/, the only home folder collected`,
       });
     }
   });
@@ -262,20 +325,50 @@ export const TaskYamlSchema = z.strictObject({
     path: answerPath,
   }),
   verification: z.array(VerificationYamlSchema).min(1),
-  /** Only file-producing tasks need this (plan section 4.3). */
+  /** Only file-producing and memory-writing tasks need this (plan sections 4.3 and 18.2 P2). */
   self_check: z
     .strictObject({
       /** Folder in the task, overlaid on fixtures/ to give the end state a correct agent leaves. */
       expected_workspace: relativePath('expected_workspace').optional(),
       /**
-       * Also run the checks on the untouched fixtures, which must not pass.
-       * Absent means true when expected_workspace is set.
+       * Folder in the task, overlaid on the home seeds (`home/`) to give the
+       * memory files a correct agent leaves, e.g. `expected_home` holding
+       * `memories/USER.md`. Its files are stored as kind `expected_home` and
+       * never copied into a trial. Home checks (a file_check with root home,
+       * or a verifier reading `--home`) must pass against it.
+       */
+      expected_home: relativePath('expected_home').optional(),
+      /**
+       * Also run the checks on the untouched inputs (the fixtures, and the
+       * home seeds alone), which must not pass. Absent means true when
+       * expected_workspace or expected_home is set.
        */
       negative_control: z.boolean().optional(),
     })
-    .refine((s) => s.negative_control !== true || s.expected_workspace !== undefined, {
-      path: ['negative_control'],
-      message: 'negative_control needs expected_workspace',
+    .superRefine((s, ctx) => {
+      const folders = [s.expected_workspace, s.expected_home];
+      if (s.negative_control === true && folders.every((f) => f === undefined)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['negative_control'],
+          message: 'negative_control needs expected_workspace or expected_home',
+        });
+      }
+      if (s.expected_home !== undefined && s.expected_home === s.expected_workspace) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['expected_home'],
+          message: 'expected_home and expected_workspace must be different folders',
+        });
+      }
+      const home = s.expected_home?.replace(/^(\.\/)+/, '');
+      if (home === TASK_HOME_DIR || home?.startsWith(`${TASK_HOME_DIR}/`)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['expected_home'],
+          message: `expected_home must be a folder of its own, not ${TASK_HOME_DIR}/, which holds the seeds`,
+        });
+      }
     })
     .optional(),
 });

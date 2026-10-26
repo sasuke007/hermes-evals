@@ -383,6 +383,7 @@ import argparse, csv, json, os
 parser = argparse.ArgumentParser()
 parser.add_argument('--answer', required=True)
 parser.add_argument('--workspace', required=True)
+parser.add_argument('--home', required=True)
 args = parser.parse_args()
 with open(args.answer, encoding='utf-8') as f:
     answer = json.load(f)
@@ -420,6 +421,7 @@ import argparse, json, sys
 parser = argparse.ArgumentParser()
 parser.add_argument('--answer', required=True)
 parser.add_argument('--workspace', required=True)
+parser.add_argument('--home', required=True)
 args = parser.parse_args()
 with open(args.answer, encoding='utf-8') as f:
     answer = json.load(f)
@@ -648,8 +650,9 @@ if [ "$DOCKER" = 1 ] && [ -n "$EXP" ]; then
   check_file 'evidence.json_match: 5 of 5 keys, then 4 of 5 (status)' "$WORK/scores.json" \
     "$(sx A_LEDGER record)['evidence']['json_match'] == {'unit': 'keys', 'matched': 5, 'total': 5, 'mismatches': []} and $(sx B_LEDGER record)['evidence']['json_match'] == {'unit': 'keys', 'matched': 4, 'total': 5, 'mismatches': ['status']}" \
     "json.dumps($(sx B_LEDGER record)['evidence']['json_match'])"
-  check_file 'scorer versions on the rows: llm_judge 2, trajectory_match 2, text_match 1' "$WORK/scores.json" \
-    "{x['type']: x['version'] for x in d} == {'numeric_tolerance': 1, 'json_match': 1, 'exact_match': 1, 'text_match': 1, 'file_check': 1, 'trajectory_match': 2, 'llm_judge': 2, 'verifier_script': 1}" \
+  # verifier_script is 2 since Phase 6, which passes --home <dir> as well.
+  check_file 'scorer versions on the rows: llm_judge 2, trajectory_match 2, verifier_script 2, text_match 1' "$WORK/scores.json" \
+    "{x['type']: x['version'] for x in d} == {'numeric_tolerance': 1, 'json_match': 1, 'exact_match': 1, 'text_match': 1, 'file_check': 1, 'trajectory_match': 2, 'llm_judge': 2, 'verifier_script': 2}" \
     "' '.join(sorted('{}@{}'.format(t, v) for t, v in {x['type']: x['version'] for x in d}.items()))"
 
   # The judge's requests as the mock received them: through egress (the only

@@ -17,6 +17,7 @@ import {
   ConfigurationFormOptionsSchema,
   ConfigurationListRowSchema,
   ConfigurationSaveResultSchema,
+  SKILL_LOADING_NEEDS_SKILLS,
 } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import { DB } from '../database/db.provider.js';
@@ -126,6 +127,43 @@ describe('MCP servers whose names sanitise alike', () => {
   });
 });
 
+describe('skill loading', () => {
+  it('answers 400 for on demand loading without a skill, on POST and on PUT', async () => {
+    const body = { ...input(), skillLoading: 'on_demand' };
+    const refused = {
+      statusCode: 400,
+      message: 'Validation failed',
+      issues: [{ path: 'skillLoading', message: SKILL_LOADING_NEEDS_SKILLS }],
+    };
+    expect((await http().post('/api/configurations').send(body).expect(400)).body).toEqual(refused);
+    const saved = await create({ skillIds: [lib.skillId], skillLoading: 'on_demand' });
+    const put = await http()
+      .put(`/api/configurations/${saved.configurationId}`)
+      .send(body)
+      .expect(400);
+    expect(put.body).toEqual(refused);
+  });
+
+  it('saves a body without the field as preload, as a client from before Phase 6 sends it', async () => {
+    const body: Record<string, unknown> = { ...input({ skillIds: [lib.skillId] }) };
+    delete body.skillLoading;
+    const res = await http().post('/api/configurations').send(body).expect(201);
+    const saved = ConfigurationSaveResultSchema.parse(res.body);
+    const shown = await http().get(`/api/configurations/${saved.configurationId}`).expect(200);
+    expect(ConfigurationDetailSchema.parse(shown.body).latest.skillLoading).toBe('preload');
+
+    const onDemand = await create({
+      name: 'on-demand',
+      skillIds: [lib.skillId],
+      skillLoading: 'on_demand',
+    });
+    const diff = await http()
+      .get(`/api/configurations/diff?versions=${saved.versionId},${onDemand.versionId}`)
+      .expect(200);
+    expect(ConfigDiffSchema.parse(diff.body).differing).toEqual(['skill_loading']);
+  });
+});
+
 describe('reads', () => {
   it('lists, shows a configuration and one of its versions', async () => {
     const saved = await create({ mcpServerVersionIds: [lib.mcpV1] });
@@ -172,6 +210,7 @@ describe('reads', () => {
     const res = await http().get('/api/configurations/form-options').expect(200);
     const options = ConfigurationFormOptionsSchema.parse(res.body);
     expect(options.mcpServers.map((m) => m.name)).toEqual(['invoice-db', 'vendor-api']);
+    expect(options.skillLoading.map((o) => o.id)).toEqual(['preload', 'on_demand']);
   });
 });
 

@@ -2,15 +2,17 @@
  * Runs one task's self-checks (plan 4.3) on copies of its files, never on
  * SUITES_DIR: each check that touches files gets a fresh scratch directory
  * holding the fixtures, the expected workspace (fixtures overlaid with the
- * expected folder) and the verifier scripts, written from the bytes the
- * loader hashed. So the checks judge exactly the content that is stored, and
- * a verifier that writes to its workspace cannot change the next check.
+ * expected folder), the home seeds, the expected home (seeds overlaid with
+ * the expected_home folder, Phase 6 P2) and the verifier scripts, written
+ * from the bytes the loader hashed. So the checks judge exactly the content
+ * that is stored, and a verifier that writes to its folders cannot change
+ * the next check.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import type { SelfCheck } from '@hermes-evals/shared';
-import { selfCheckModeFor } from '../../scoring/registry.js';
+import { homeSeedTarget, isHomeSeedPath, type SelfCheck } from '@hermes-evals/shared';
+import { selfCheckModeFor, type SelfCheckFolders } from '../../scoring/registry.js';
 import {
   runSelfChecks,
   selfCheckSeconds,
@@ -19,7 +21,7 @@ import {
 } from '../../scoring/self-check.js';
 import type { ScratchDir } from '../../storage/blob-store.js';
 import { FIXTURES_DIR, VERIFY_DIR } from './limits.js';
-import type { AnalysedTask } from './task.js';
+import type { AnalysedTask, SelfCheckPlan } from './task.js';
 import type { StoredTaskFile } from './task-files.js';
 
 export interface SelfCheckDeps {
@@ -34,10 +36,16 @@ export function taskSelfCheckSeconds(task: Pick<AnalysedTask, 'plan'>): number {
   if (plan === null) return 0;
   return selfCheckSeconds({
     entries: plan.entries,
-    expectedWorkspace: plan.expectedDir !== null,
+    ...foldersOf(plan),
     negativeControl: plan.negativeControl,
   });
 }
+
+/** Which known-good folders the plan declares. */
+const foldersOf = (plan: SelfCheckPlan): SelfCheckFolders => ({
+  expectedWorkspace: plan.expectedDir !== null,
+  expectedHome: plan.expectedHomeDir !== null,
+});
 
 /**
  * The declared worst case of a suite's self-checks, in seconds, with its
@@ -87,6 +95,39 @@ export function expectedWorkspace(
   return out;
 }
 
+/**
+ * The home a trial starts with, home-relative path → bytes: each home seed at
+ * its target (`home/memories/USER.md` → `memories/USER.md`).
+ */
+export function seededHome(files: readonly StoredTaskFile[]): Map<string, StoredTaskFile> {
+  const out = new Map<string, StoredTaskFile>();
+  for (const f of files) {
+    if (f.kind === 'home_seed' && isHomeSeedPath(f.path)) out.set(homeSeedTarget(f.path), f);
+  }
+  return out;
+}
+
+/**
+ * The expected home, home-relative path → bytes: the seeds, then every
+ * expected_home file on top (the folder mirrors the home, so
+ * `<expected_home>/memories/USER.md` replaces the USER.md seed).
+ */
+export function expectedHome(
+  files: readonly StoredTaskFile[],
+  expectedHomeDir: string,
+): Map<string, StoredTaskFile> {
+  const out = seededHome(files);
+  for (const f of files) {
+    if (f.kind !== 'expected_home') continue;
+    const path = stripPrefix(f.path, expectedHomeDir);
+    for (const existing of out.keys()) {
+      if (existing.startsWith(`${path}/`) || path.startsWith(`${existing}/`)) out.delete(existing);
+    }
+    out.set(path, f);
+  }
+  return out;
+}
+
 async function writeTree(root: string, files: Iterable<[string, StoredTaskFile]>): Promise<void> {
   await mkdir(root, { recursive: true });
   for (const [path, file] of files) {
@@ -100,20 +141,24 @@ async function writeTree(root: string, files: Iterable<[string, StoredTaskFile]>
   }
 }
 
-/** The three folders one file-touching check runs on. */
+/** The folders one file-touching check runs on. */
 interface Materialised {
   fixturesDir: string;
   expectedWorkspaceDir: string | null;
+  homeDir: string;
+  expectedHomeDir: string | null;
   verifyDir: string;
 }
 
 async function materialise(
   root: string,
   task: AnalysedTask,
-  expectedDir: string | null,
+  plan: SelfCheckPlan,
 ): Promise<Materialised> {
+  const { expectedDir } = plan;
   const fixturesDir = join(root, 'workspace');
   const verifyDir = join(root, 'verify');
+  const homeDir = join(root, 'home');
   await writeTree(
     fixturesDir,
     task.files
@@ -131,7 +176,13 @@ async function materialise(
     expectedWorkspaceDir = join(root, 'expected-workspace');
     await writeTree(expectedWorkspaceDir, expectedWorkspace(task.files, expectedDir));
   }
-  return { fixturesDir, expectedWorkspaceDir, verifyDir };
+  await writeTree(homeDir, seededHome(task.files));
+  let expectedHomeDir: string | null = null;
+  if (plan.expectedHomeDir !== null) {
+    expectedHomeDir = join(root, 'expected-home');
+    await writeTree(expectedHomeDir, expectedHome(task.files, plan.expectedHomeDir));
+  }
+  return { fixturesDir, expectedWorkspaceDir, homeDir, expectedHomeDir, verifyDir };
 }
 
 /** Runs every check of the plan in entry order. Never throws for the task's content. */
@@ -144,7 +195,7 @@ export async function selfCheckTask(task: AnalysedTask, deps: SelfCheckDeps): Pr
   const results: SelfCheckResult[] = [];
 
   for (const entry of plan.entries) {
-    const mode = selfCheckModeFor(entry.type, plan.expectedDir !== null);
+    const mode = selfCheckModeFor(entry, foldersOf(plan));
     const input = {
       entries: [entry],
       reference: plan.reference,
@@ -159,6 +210,8 @@ export async function selfCheckTask(task: AnalysedTask, deps: SelfCheckDeps): Pr
           ...input,
           fixturesDir: '',
           expectedWorkspaceDir: null,
+          homeDir: '',
+          expectedHomeDir: null,
           verifyDir: '',
         })),
       );
@@ -167,7 +220,7 @@ export async function selfCheckTask(task: AnalysedTask, deps: SelfCheckDeps): Pr
     let scratch: ScratchDir | null = null;
     try {
       scratch = await deps.scratch('suite-check');
-      const dirs = await materialise(scratch.path, task, plan.expectedDir);
+      const dirs = await materialise(scratch.path, task, plan);
       results.push(...(await runSelfChecks({ ...input, ...dirs })));
     } catch (err) {
       results.push({
@@ -186,15 +239,28 @@ export async function selfCheckTask(task: AnalysedTask, deps: SelfCheckDeps): Pr
   const expectedFiles =
     plan.expectedDir === null
       ? undefined
-      : [...expectedWorkspace(task.files, plan.expectedDir)]
-          .filter(([, f]) => f.kind === 'expected')
-          .map(([path, f]) => ({ path, sha256: f.sha256 }))
-          .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      : listed(expectedWorkspace(task.files, plan.expectedDir), 'expected');
+  const expectedHomeFiles =
+    plan.expectedHomeDir === null
+      ? undefined
+      : listed(expectedHome(task.files, plan.expectedHomeDir), 'expected_home');
   return {
     status: selfCheckStatus(results),
     ran_at: ranAt,
     duration_ms: Math.round(performance.now() - started),
     results,
     ...(expectedFiles ? { expected_workspace: expectedFiles } : {}),
+    ...(expectedHomeFiles ? { expected_home: expectedHomeFiles } : {}),
   };
+}
+
+/** The files of an overlaid tree that came from its expected folder, by path. */
+function listed(
+  tree: Map<string, StoredTaskFile>,
+  kind: 'expected' | 'expected_home',
+): Array<{ path: string; sha256: string }> {
+  return [...tree]
+    .filter(([, f]) => f.kind === kind)
+    .map(([path, f]) => ({ path, sha256: f.sha256 }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }

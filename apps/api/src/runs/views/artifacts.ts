@@ -1,7 +1,9 @@
 /**
  * The inspector's Artifacts section (UI_FLOWS 18, plan 8.5): the files the
- * worker collected from the workspace after the container was removed,
- * labelled by origin, with the first rows of each small CSV or TSV.
+ * worker collected from the workspace after the container was removed, and
+ * from the home's memories/ before the home was deleted (Phase 6 P2: root
+ * `home`, which the Files tab shows as a Memory group), labelled by origin,
+ * with the first rows of each small CSV or TSV.
  *
  * Every name and byte here was written by the agent. The views only describe
  * them; downloads go out as attachments that a browser saves rather than
@@ -20,13 +22,18 @@ export const ARTIFACT_INLINE_PREVIEW_LIMIT = INLINE_PREVIEW_LIMIT;
 export const hasInlinePreview = (a: Pick<ArtifactRecord, 'path' | 'sha256' | 'size'>): boolean =>
   a.sha256 !== null && tabularFormatOf(a.path) !== null && a.size <= ARTIFACT_INLINE_PREVIEW_LIMIT;
 
-/** Artifact paths are stored relative to the workspace; the view names them from the trial root. */
-export const artifactDisplayPath = (path: string): string => `workspace/${path}`;
+/**
+ * Artifact paths are stored relative to their root; the view names them from
+ * the trial root: `workspace/summary.csv`, `home/memories/MEMORY.md`.
+ */
+export const artifactDisplayPath = (a: Pick<ArtifactRecord, 'root' | 'path'>): string =>
+  `${a.root}/${a.path}`;
 
 export function artifactView(a: ArtifactRecord, preview: TablePreview | null): ArtifactView {
   return {
     id: a.id,
-    path: artifactDisplayPath(a.path),
+    root: a.root,
+    path: artifactDisplayPath(a),
     origin: a.origin,
     sizeBytes: a.size,
     sha256: a.sha256,
@@ -68,10 +75,17 @@ export function artifactsView(
       `${plural(skipped, 'file')} over ${MAX_ARTIFACT_BYTES / 1024 / 1024} MB listed without content`,
     );
   }
-  const sorted = [...items].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  // By displayed path: the workspace's files, then the home's (`home/` sorts first, so by root first).
+  const shown = (a: ArtifactRecord) => [a.root === 'workspace' ? 0 : 1, a.path] as const;
+  const sorted = [...items].sort((a, b) => {
+    const [ra, pa] = shown(a);
+    const [rb, pb] = shown(b);
+    return ra - rb || (pa < pb ? -1 : pa > pb ? 1 : 0);
+  });
   return {
     items: sorted.map((a) => artifactView(a, previews.get(a.id) ?? null)),
     note: notes.length ? notes.join(' · ') : null,
-    agentWroteNothing: !items.some((a) => a.origin === 'agent'),
+    // About the workspace only: the inspector's note reads "The agent wrote no files in its workspace".
+    agentWroteNothing: !items.some((a) => a.root === 'workspace' && a.origin === 'agent'),
   };
 }

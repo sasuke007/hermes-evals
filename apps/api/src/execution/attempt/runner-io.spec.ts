@@ -321,6 +321,7 @@ describe('artifacts', () => {
       size: 11,
     });
     expect(byPath['huge.bin']).toEqual({
+      root: 'workspace',
       path: 'huge.bin',
       origin: 'agent',
       size: big.length,
@@ -344,6 +345,49 @@ describe('artifacts', () => {
       'invoices.csv',
       'out',
     ]);
+    expect(existsSync(plan.paths.home)).toBe(false);
+  });
+
+  it('collects the memory files left in the home before deleting it, labelled against the seeds', async () => {
+    const seed = await world.blobs.putBuffer(Buffer.from('Works in Lisbon.'));
+    const plan = world.plan({
+      task: { homeSeeds: [{ path: 'memories/USER.md', sha256: seed.sha256, size: seed.size }] },
+    });
+    const run = hermesRun('done');
+    run.steps!.push(
+      {
+        file: {
+          in: 'home',
+          path: 'memories/USER.md',
+          content: 'Works in Lisbon.\n§\nReports in EUR.',
+        },
+      },
+      { file: { in: 'home', path: 'memories/MEMORY.md', content: 'ACME is one vendor.' } },
+      // Nothing else of the home is collected, and no link is followed.
+      { file: { in: 'home', path: 'notes.txt', content: 'not collected' } },
+      { symlink: { in: 'home', path: 'memories/escape', target: world.trialsDir } },
+    );
+    const { runner } = runnerKit(world, () => run);
+    const sink = new MemorySink(plan.attemptId);
+    const outcome = await runner.run(plan, sink, new AbortController().signal);
+    expect(
+      outcome.artifacts.filter((a) => a.root === 'home').map((a) => [a.path, a.origin]),
+    ).toEqual([
+      ['memories/MEMORY.md', 'agent'],
+      ['memories/USER.md', 'home_seed_modified'],
+    ]);
+    const collected = outcome.finalEvents.find((e) => e.payload.subtype === 'collected')!;
+    expect(collected.payload).toMatchObject({
+      home_files: 2,
+      home_agent_files: 1,
+      home_not_collected: [
+        { path: 'home/memories/escape', kind: 'symlink', detail: world.trialsDir },
+      ],
+      deleted_home_seeds: [],
+    });
+    expect(
+      LaunchRecordSchema.parse(sink.launch).inputs.filter((i) => i.source === 'home_seed'),
+    ).toEqual([{ path: 'memories/USER.md', sha256: seed.sha256, source: 'home_seed' }]);
     expect(existsSync(plan.paths.home)).toBe(false);
   });
 });

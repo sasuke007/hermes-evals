@@ -1,0 +1,13 @@
+{
+  "base_currency": "EUR",
+  "quoted_on": "2026-09-30",
+  "convention": "Each rate is the EUR value of one unit of the currency.",
+  "rates": {
+    "GBP": 1.1725,
+    "USD": 0.9184,
+    "SEK": 11.238
+  },
+  "notes": {
+    "SEK": "Quoted the other way round, as the bank sends it: SEK per one EUR."
+  }
+}

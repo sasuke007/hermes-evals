@@ -211,7 +211,8 @@ describe('fixtures conform to the shared contracts', { timeout: 120_000 }, () =>
           conforms(SuiteDetailSchema, suite, at(`GET /suites/${version.suiteId}`));
           for (const task of suite.tasks) {
             const label = at(`task ${task.key} of ${version.suiteId}`);
-            conforms(TaskDetailSchema, await getTask(suite.suiteId, task.key), label);
+            const detail = await getTask(suite.suiteId, task.key);
+            conforms(TaskDetailSchema, detail, label);
             const versions = await getTaskHistory(suite.suiteId, task.key);
             conforms(TaskVersionEntrySchema.array(), versions, label);
             for (const other of current.versions) {

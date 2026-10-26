@@ -30,6 +30,7 @@ import type {
 import { apiGet, apiSend } from './client';
 import { apiMode, fixture, hasScenario, notFound, withQuery } from './source';
 import { experimentsOnSuiteFixture, taskUsageFixture } from '@/fixtures/experiments';
+import { withHomeFiles } from '@/fixtures/home';
 import {
   fixturePreviewFixture,
   noSuitesFrom,
@@ -107,7 +108,10 @@ export function getSuiteHistory(id: string): Promise<SuiteHistoryEntry[]> {
   );
 }
 
-/** GET /suites/:id/tasks/:key: prompt, fixtures, verification, reference, self-check, usage. */
+/**
+ * GET /suites/:id/tasks/:key: prompt, fixtures, home files, verification, reference,
+ * self-check, usage.
+ */
 export function getTask(suiteId: string, key: string): Promise<TaskDetail> {
   if (apiMode === 'live') return apiGet(taskPath(suiteId, key), TaskDetailSchema);
   const request = `GET /api/suites/${suiteId}/tasks/${key}`;
@@ -115,7 +119,10 @@ export function getTask(suiteId: string, key: string): Promise<TaskDetail> {
     () => {
       const detail = taskDetailFixture(state(), suiteId, key);
       if (!detail) throw notFound(request, `task ${key}`);
-      return { ...detail, experiments: taskUsageFixture(hasScenario, key) };
+      return withHomeFiles(hasScenario, {
+        ...detail,
+        experiments: taskUsageFixture(hasScenario, key),
+      });
     },
     { request },
   );

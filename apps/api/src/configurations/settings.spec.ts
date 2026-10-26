@@ -56,6 +56,7 @@ const baseline: ResolvedSettings = {
   toolsets: ['file', 'terminal'],
   memoryEnabled: false,
   skills: [],
+  skillLoading: 'preload',
   documents: [],
   mcpServers: [],
   maxTurns: 20,
@@ -124,6 +125,33 @@ describe('configHash', () => {
       configHash({ ...baseline, mcpServers: [mcp('invoice-db', 2, 'stdio', hex('f'))] }),
     ).not.toBe(withMcp);
   });
+
+  // Computed with the configHash of Phase 5 (commit 660fff1), before skill
+  // loading existed: every stored version holds such a hash, and estimates
+  // from its attempts match on it, so `preload` must leave it unchanged.
+  const skilled: ResolvedSettings = {
+    ...baseline,
+    skills: [skill('invoice-method', '1.0.0')],
+    documents: [doc('policy.pdf')],
+    mcpServers: [mcp('invoice-db')],
+  };
+
+  it('hashes a preload version exactly as before Phase 6', () => {
+    expect(configHash(baseline)).toBe(
+      'd9312275194154d6dfdd5288000d8cfc1676616755c3a71f11f0eedd3b55e71c',
+    );
+    expect(configHash(skilled)).toBe(
+      '61ba05a085a5c5e1c17ccab1fc26e7b97813f39f1f2b61c0612bc04b8554aa56',
+    );
+  });
+
+  it('hashes on demand loading differently from preload', () => {
+    const onDemand = configHash({ ...skilled, skillLoading: 'on_demand' });
+    expect(onDemand).toMatch(/^[0-9a-f]{64}$/);
+    expect(onDemand).not.toBe(configHash(skilled));
+    // Still a function of the settings alone.
+    expect(configHash({ ...skilled, skillLoading: 'on_demand' })).toBe(onDemand);
+  });
 });
 
 describe('sameSettings', () => {
@@ -136,6 +164,8 @@ describe('sameSettings', () => {
         { ...baseline, skills: [skill('a', '1', 'skl_other')] },
       ),
     ).toBe(false);
+    const skilled = { ...baseline, skills: [skill('a', '1')] };
+    expect(sameSettings(skilled, { ...skilled, skillLoading: 'on_demand' })).toBe(false);
   });
 });
 
@@ -163,6 +193,14 @@ describe('fieldValue', () => {
       'on',
     );
     expect(fieldValue('x', { ...baseline, toolsets: [] }, 'toolsets')).toBe('—');
+  });
+
+  it('shows skill loading as preload or on demand, preload without skills', () => {
+    expect(fieldValue('x', baseline, 'skill_loading')).toBe('preload');
+    expect(fieldValue('x', withEverything, 'skill_loading')).toBe('preload');
+    expect(fieldValue('x', { ...withEverything, skillLoading: 'on_demand' }, 'skill_loading')).toBe(
+      'on demand',
+    );
   });
 
   it('shows where a custom provider points', () => {
@@ -194,6 +232,7 @@ describe('configDiff', () => {
       'toolsets',
       'memory',
       'skills',
+      'skill_loading',
       'documents',
       'mcp_servers',
       'max_turns',
@@ -210,6 +249,30 @@ describe('configDiff', () => {
       'invoice-method@1.0.0',
     ]);
     expect(diff.columns.map((c) => c.name)).toEqual(['baseline', 'with-skill']);
+    // Adding a skill that preloads changes the skills alone, not their loading.
+    expect(diff.rows.find((r) => r.field === 'skill_loading')).toEqual({
+      field: 'skill_loading',
+      values: ['preload', 'preload'],
+      differs: false,
+    });
+  });
+
+  it('has a Skill loading row that differs when only the mode does', () => {
+    const skilled = { ...baseline, skills: [skill('invoice-method', '1.0.0')] };
+    const diff = configDiff([
+      { ref: ref('with-skill'), settings: skilled },
+      { ref: ref('on-demand'), settings: { ...skilled, skillLoading: 'on_demand' } },
+    ]);
+    expect(diff.differing).toEqual(['skill_loading']);
+    expect(diff.rows.find((r) => r.field === 'skill_loading')!.values).toEqual([
+      'preload',
+      'on demand',
+    ]);
+    // Against a version without skills, both the skills and their loading differ.
+    expect(differingFields(baseline, { ...skilled, skillLoading: 'on_demand' })).toEqual([
+      'skills',
+      'skill_loading',
+    ]);
   });
 
   it('marks a field that differs between any two of three columns', () => {
@@ -301,6 +364,23 @@ describe('history lines', () => {
     ).toEqual(['changed base URL']);
     expect(changeParts({ ...baseline, memoryEnabled: true }, baseline)).toEqual([
       'turned memory off',
+    ]);
+  });
+
+  it('names a change of skill loading after the skills', () => {
+    const skilled = { ...baseline, skills: [skill('invoice-method', '1.0.0')] };
+    const onDemand = { ...skilled, skillLoading: 'on_demand' as const };
+    expect(
+      changeNote({ kind: 'duplicated', source: ref('with-skill'), settings: skilled }, onDemand),
+    ).toBe('Duplicated from with-skill v1; set skill loading to on demand');
+    expect(changeParts(baseline, { ...onDemand, documents: [doc('policy.pdf')] })).toEqual([
+      'added skill invoice-method@1.0.0',
+      'set skill loading to on demand',
+      'added document policy.pdf',
+    ]);
+    expect(changeParts(onDemand, baseline)).toEqual([
+      'removed skill invoice-method@1.0.0',
+      'set skill loading to preload',
     ]);
   });
 });

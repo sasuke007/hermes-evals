@@ -287,10 +287,11 @@ export function verdict(
     );
   if (!culprit) return { valid: false, invalidReason: `self-check ${selfCheck.status}` };
   if (culprit.expect === 'fail') {
+    const on = culprit.mode === 'home' ? 'the home seeds alone' : 'the untouched fixtures';
     return {
       valid: false,
       invalidReason: oneLine(
-        `${culprit.key}: the check passes on the untouched fixtures, so it would pass any agent`,
+        `${culprit.key}: the check passes on ${on}, so it would pass any agent`,
       ),
     };
   }

@@ -5,7 +5,7 @@
  * database, and on one migrated by the Phase 1 build that already holds a
  * paused experiment, a worker and a revoked attempt.
  */
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RunEventPayloadSchema, type RunEventPayload } from '@hermes-evals/shared';
 import {
@@ -28,7 +28,6 @@ import {
   artifacts,
   attempts,
   configurations,
-  configurationVersions,
   experiments,
   runEvents,
   runs,
@@ -229,25 +228,18 @@ async function seedPhase1Rows(
       contentHash: sha('task'),
     })
     .returning();
+  // Raw SQL: the Drizzle table names columns later migrations add (skill_loading, 0008).
   const versionIds = await db.db.transaction(async (tx) => {
     const ids: string[] = [];
     for (const name of ['baseline', 'candidate']) {
       const [configuration] = await tx.insert(configurations).values({ name }).returning();
-      const [version] = await tx
-        .insert(configurationVersions)
-        .values({
-          configurationId: configuration!.id,
-          version: 1,
-          model: 'scripted',
-          provider: 'custom',
-          baseUrl: 'http://mock-model:8090/v1',
-          maxTurns: 20,
-          timeBudgetS: 300,
-          configHash: sha(name),
-          frozenAt: new Date(),
-        })
-        .returning();
-      ids.push(version!.id);
+      const id = newId();
+      await tx.execute(sql`
+        insert into configuration_versions
+          (id, configuration_id, version, model, provider, base_url, max_turns, time_budget_s, config_hash, frozen_at)
+        values (${id}, ${configuration!.id}, 1, 'scripted', 'custom', 'http://mock-model:8090/v1',
+          20, 300, ${sha(name)}, now())`);
+      ids.push(id);
     }
     return ids;
   });

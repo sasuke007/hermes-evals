@@ -16,11 +16,13 @@ import {
 } from '../status.js';
 import {
   ARTIFACT_ORIGINS,
+  ARTIFACT_ROOTS,
   ARTIFACT_SKIP_REASONS,
   MCP_TRANSPORTS,
   NETWORK_DECISIONS,
   NETWORK_EVENT_KINDS,
   SCORER_TYPES,
+  SKILL_LOADING_MODES,
   TRAJECTORY_MODES,
 } from '../vocab.js';
 import { countView, isoTimeView, rateView, secondsView, sha256View, usdView } from './common.js';
@@ -324,24 +326,53 @@ export const FinalResponseViewSchema = z.object({
 });
 export type FinalResponseView = z.infer<typeof FinalResponseViewSchema>;
 
-export const ArtifactViewSchema = z.object({
-  id: z.string(),
-  /** Relative to the trial root: `workspace/summary.csv`. */
-  path: z.string(),
-  origin: z.enum(ARTIFACT_ORIGINS),
-  sizeBytes: countView,
-  /** Null when the content was not stored (skippedReason). */
-  sha256: sha256View.nullable(),
-  skippedReason: z.enum(ARTIFACT_SKIP_REASONS).nullable(),
-  preview: TablePreviewSchema.nullable(),
-});
+/** A home seed's origin: only an artifact with root `home` can carry one. */
+const HOME_SEED_ORIGINS: ReadonlySet<string> = new Set([
+  'home_seed_unchanged',
+  'home_seed_modified',
+]);
+
+export const ArtifactViewSchema = z
+  .object({
+    id: z.string(),
+    /**
+     * Which directory it was collected from (Phase 6 P2): the inspector's
+     * Files tab draws `home` artifacts (the agent's memory files) in a
+     * Memory group of their own.
+     */
+    root: z.enum(ARTIFACT_ROOTS),
+    /** Relative to the trial root, so it starts with the root: `workspace/summary.csv`, `home/memories/MEMORY.md`. */
+    path: z.string(),
+    /** Fixtures and documents label workspace files; home seeds label home files. */
+    origin: z.enum(ARTIFACT_ORIGINS),
+    sizeBytes: countView,
+    /** Null when the content was not stored (skippedReason). */
+    sha256: sha256View.nullable(),
+    skippedReason: z.enum(ARTIFACT_SKIP_REASONS).nullable(),
+    preview: TablePreviewSchema.nullable(),
+  })
+  .superRefine((a, ctx) => {
+    if (!a.path.startsWith(`${a.root}/`)) {
+      ctx.addIssue({ code: 'custom', path: ['path'], message: `path must start with ${a.root}/` });
+    }
+    if (a.origin !== 'agent' && HOME_SEED_ORIGINS.has(a.origin) !== (a.root === 'home')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['origin'],
+        message: `origin ${a.origin} does not belong to root ${a.root}`,
+      });
+    }
+  });
 export type ArtifactView = z.infer<typeof ArtifactViewSchema>;
 
 export const ArtifactsViewSchema = z.object({
   items: z.array(ArtifactViewSchema),
   /** e.g. "partial · written before the cancel". */
   note: z.string().nullable(),
-  /** True when no artifact has origin `agent`: "The agent wrote no files …". */
+  /**
+   * True when no workspace artifact has origin `agent`: "The agent wrote no
+   * files in its workspace". Memory files in the home do not count.
+   */
   agentWroteNothing: z.boolean(),
 });
 export type ArtifactsView = z.infer<typeof ArtifactsViewSchema>;
@@ -370,6 +401,12 @@ export const LaunchContainerViewSchema = z.object({
     exitCode: z.number().int().nullable(),
   }),
   skills: z.array(z.object({ name: z.string(), version: z.string(), contentHash: sha256View })),
+  /**
+   * How the skills reached the agent (Phase 6 P5): `-s` per skill, or the
+   * `skills` toolset. `preload` for records from before Phase 6, which all
+   * preloaded.
+   */
+  skillLoading: z.enum(SKILL_LOADING_MODES),
   mcpServers: z.array(
     z.object({
       name: z.string(),
@@ -391,6 +428,22 @@ export const LaunchRecordViewSchema = z.object({
   /** /opt/data/config.yaml verbatim (MCP secret values replaced by `<from env NAME>`). */
   configYaml: z.string(),
   configNote: z.string().nullable(),
+  /**
+   * The task's home seeds copied into the home before the run (Phase 6 P1,
+   * the launch record's inputs of source `home_seed`), relative to the home:
+   * `memories/MEMORY.md` is /opt/data/memories/MEMORY.md in the trial. Empty
+   * when the task has none.
+   */
+  homeSeeds: z.array(z.object({ path: z.string(), sha256: sha256View })),
+  /**
+   * config.yaml's background review intervals (Phase 6 P3): user turns
+   * between memory reviews and tool iterations between skill reviews; 0 is
+   * off. Null on records from before Phase 6, which left Hermes's defaults
+   * implicit.
+   */
+  backgroundReview: z
+    .object({ memoryNudgeInterval: countView, skillCreationNudgeInterval: countView })
+    .nullable(),
 });
 export type LaunchRecordView = z.infer<typeof LaunchRecordViewSchema>;
 

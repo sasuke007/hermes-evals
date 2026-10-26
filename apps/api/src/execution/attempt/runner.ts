@@ -12,7 +12,8 @@
  *   egress    remove the attempt (the token dies), keep usage and the connection log
  *   classify  plan 8.4, with the MCP servers Hermes's errors.log says failed to start
  *   collect   the workspace, after the container is gone (owner permissions
- *             the agent removed restored first); then delete the home
+ *             the agent removed restored first), and the home's memories/
+ *             (Phase 6 P2); then delete the home
  *
  * Anything the agent, the trial or its setup did is an outcome. It throws
  * only what the lifecycle must handle itself: LeaseLostError and
@@ -33,7 +34,6 @@ import type {
   EgressUsage,
 } from '../../sandbox/egress-client.js';
 import type { EngineClient } from '../../sandbox/engine-client.js';
-import { restoreOwnerAccess } from '../../sandbox/trial-files.js';
 import { forceRemoveTree, prepareTrialDirs } from '../../sandbox/trial-runner.js';
 import type { BlobStore } from '../../storage/blob-store.js';
 import {
@@ -46,7 +46,7 @@ import {
 } from '../contracts.js';
 import { ATTEMPT_TOKEN_ENV, egressModelAccess } from '../providers-map.js';
 import { classifyAttempt, tokenCapRefusalOf } from './classify.js';
-import { collectWorkspace, type Collection } from './collect.js';
+import { collectTrialFiles, type Collection } from './collect.js';
 import { AttemptSetupError } from './errors.js';
 import { EventBatcher } from './event-batcher.js';
 import { finalEvents } from './final-events.js';
@@ -323,15 +323,24 @@ export class TrialAttemptRunner implements AttemptRunner {
     };
   }
 
-  /** Collection never fails the attempt: a platform fault is recorded on the `collected` event. */
+  /**
+   * Collection never fails the attempt: a platform fault is recorded on the
+   * `collected` event. The home's memories/ is collected here too, before
+   * finish() deletes the home.
+   */
   private async collect(
     plan: AttemptPlan,
     manifest: ReadonlyMap<string, InputFile>,
   ): Promise<Collection> {
     try {
-      // A directory the agent made unlistable would otherwise hide its files from collection.
-      await restoreOwnerAccess(plan.paths.workspace);
-      return await collectWorkspace(plan.paths.workspace, manifest, this.deps.blobs, this.now);
+      return await collectTrialFiles({
+        workspace: plan.paths.workspace,
+        home: plan.paths.home,
+        manifest,
+        homeSeeds: plan.task.homeSeeds,
+        blobs: this.deps.blobs,
+        now: this.now,
+      });
     } catch (err) {
       this.deps.logger?.warn(
         { attemptId: plan.attemptId, err: messageOf(err) },

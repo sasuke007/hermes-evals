@@ -1,7 +1,7 @@
 /**
  * Rebuilds what file-based scorers read from blobs (plan 8.5, 9.3): the
- * attempt's workspace as it was when the container stopped, and the task's
- * `verify/` folder. Re-scoring therefore never depends on a trial directory
+ * attempt's workspace as it was when the container stopped, its home's
+ * memory files (Phase 6 P2), and the task's `verify/` folder. Re-scoring therefore never depends on a trial directory
  * surviving its retention period, and grades exactly the stored bytes.
  *
  * Everything is written into a fresh scratch directory under DATA_DIR/tmp
@@ -18,6 +18,7 @@
 import { constants } from 'node:fs';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import type { ArtifactRoot } from '@hermes-evals/shared';
 import type { BlobStore } from '../storage/blob-store.js';
 import type { ArtifactRecord, VerifierFileRecord } from './evidence.js';
 
@@ -51,26 +52,47 @@ async function placeBlob(
   await copyFile(store.path(sha256), target, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
 }
 
-/**
- * Writes every artifact that has content into `dir` at its workspace path:
- * fixtures and documents as the agent left them, and the files it made. An
- * artifact skipped for size has no content and is absent, which file_check
- * reports on its own (score.ts). Returns how many files were written.
- */
-export async function materialiseWorkspace(
+/** Writes every artifact of `root` that has content into `dir` at its path. */
+async function materialiseRoot(
   store: BlobStore,
   artifacts: readonly ArtifactRecord[],
+  root: ArtifactRoot,
   dir: string,
 ): Promise<number> {
   await mkdir(dir, { recursive: true });
   let written = 0;
   for (const artifact of artifacts) {
-    if (artifact.sha256 === null) continue;
+    if (artifact.root !== root || artifact.sha256 === null) continue;
     await placeBlob(store, artifact.sha256, dir, artifact.path);
     written++;
   }
   return written;
 }
+
+/**
+ * Writes every workspace artifact that has content into `dir` at its
+ * workspace path: fixtures and documents as the agent left them, and the
+ * files it made. An artifact skipped for size has no content and is absent,
+ * which file_check reports on its own (score.ts). Returns how many files
+ * were written.
+ */
+export const materialiseWorkspace = (
+  store: BlobStore,
+  artifacts: readonly ArtifactRecord[],
+  dir: string,
+): Promise<number> => materialiseRoot(store, artifacts, 'workspace', dir);
+
+/**
+ * Writes every home artifact that has content into `dir` at its
+ * home-relative path (`memories/USER.md`): the memory files as the agent
+ * left them. An attempt with none gives an empty folder, which is what a
+ * verifier's `--home` then names.
+ */
+export const materialiseHome = (
+  store: BlobStore,
+  artifacts: readonly ArtifactRecord[],
+  dir: string,
+): Promise<number> => materialiseRoot(store, artifacts, 'home', dir);
 
 /** Writes the task's `verify/` files into `dir`, without the `verify/` prefix. */
 export async function materialiseVerifyDir(

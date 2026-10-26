@@ -174,3 +174,44 @@ describe('file_check', () => {
     expect(await locateRegularFile(ws, '../x')).toMatchObject({ state: 'refused' });
   });
 });
+
+describe('file_check with root: home (Phase 6 P2)', () => {
+  let home: string;
+  beforeAll(() => {
+    home = mkdtempSync(join(tmpdir(), 'file-check-home-'));
+    mkdirSync(join(home, 'memories'));
+    writeFileSync(
+      join(home, 'memories', 'USER.md'),
+      'Prefers reports in EUR.\n§\nWorks in Lisbon.',
+    );
+  });
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
+  const params = (p: Record<string, unknown>) =>
+    FileCheckParamsSchema.parse({ root: 'home', ...p });
+
+  it('reads the memory file under the home folder it is given', async () => {
+    expect(
+      await checkFile(params({ path: 'memories/USER.md', contains: ['EUR'] }), home),
+    ).toMatchObject({
+      status: 'passed',
+      comment: 'memories/USER.md: exists, contains all 1 strings',
+      expected: { root: 'home', path: 'memories/USER.md', must_exist: true },
+    });
+    expect(await checkFile(params({ path: 'memories/MEMORY.md' }), home)).toMatchObject({
+      status: 'failed',
+      comment: 'memories/MEMORY.md does not exist',
+    });
+  });
+
+  it('says nothing about the root of a workspace check, as before', async () => {
+    const result = await checkFile(FileCheckParamsSchema.parse({ path: 'memories/USER.md' }), home);
+    expect(result.expected).toEqual({ path: 'memories/USER.md', must_exist: true });
+  });
+
+  it('is refused outside memories/, the only home folder collected', () => {
+    const parsed = FileCheckParamsSchema.safeParse({ root: 'home', path: 'config.yaml' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]).toMatchObject({ path: ['path'] });
+  });
+});

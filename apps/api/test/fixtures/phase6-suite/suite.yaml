@@ -1,0 +1,4 @@
+name: phase6
+version_label: '6.0'
+description: Phase 6 e2e. One task with home seeds, scored on the memory file the agent saves.
+tasks: [remember]

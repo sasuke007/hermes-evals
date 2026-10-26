@@ -174,6 +174,11 @@ describe('verificationSentence', () => {
     expect(verificationSentence(entry('file_check', { path: 'log.txt', format: 'text' }))).toBe(
       'file_check: log.txt exists as text',
     );
+    expect(
+      verificationSentence(
+        entry('file_check', { root: 'home', path: 'memories/USER.md', contains: ['EUR'] }),
+      ),
+    ).toBe('file_check: memories/USER.md in the home exists; contains "EUR"');
   });
 
   it('says so when params do not validate', () => {

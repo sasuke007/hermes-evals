@@ -3,8 +3,10 @@
  * user types anything (UI_FLOWS 11.1). Each suite directory at its current
  * version with every task (invalid ones with their reason, so the form can
  * disable them), each configuration at its latest version with the hash the
- * launch sends back and its per-run estimate on each suite, the concurrency
- * the proven workers allow, and the price table.
+ * launch sends back, its per-run estimate on each suite and the MCP
+ * variables it needs that are not set (Phase 6 S7: the form shows them and
+ * disables Launch, as launch would answer 409), the concurrency the proven
+ * workers allow, and the price table.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import type {
@@ -17,6 +19,7 @@ import { buildVersions, loadLatestPairs } from '../../configurations/views.js';
 import { DB } from '../../database/db.provider.js';
 import type { AppDb } from '../../database/types.js';
 import { MAX_RUN_BUDGET_SECONDS } from '../../queue/queues.js';
+import { unsetMcpVariablesByVersion } from '../../resources/secrets/unset-variables.js';
 import { currentSuites, tasksOf } from '../../suites/suites.queries.js';
 import { suiteDisplayPath } from '../../suites/views/format.js';
 import { limitsOf, type TaskRow } from '../../suites/views/rows.js';
@@ -79,6 +82,10 @@ export class NewOptionsService {
       prices,
     );
     const workersNow = await liveWorkers(this.db);
+    const unset = await unsetMcpVariablesByVersion(
+      this.db,
+      versions.map(({ row }) => row.id),
+    );
 
     const suiteOptions = current.map(({ source, suite }): NewExperimentSuiteOption => {
       const own = taskRows.filter((t) => t.suiteId === suite.id);
@@ -110,7 +117,9 @@ export class NewOptionsService {
       provider: view.provider,
       memoryEnabled: view.memoryEnabled,
       skills: view.skills.map((s) => `${s.name}@${s.version}`),
+      skillLoading: view.skillLoading,
       mcpServers: view.mcpServers.map((m) => `${m.name} (${m.transport})`),
+      missingSecrets: unset.get(row.id) ?? [],
       estimates: Object.fromEntries(perRun.get(row.id) ?? new Map()),
     }));
 

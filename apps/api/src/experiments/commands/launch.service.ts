@@ -6,10 +6,14 @@
  * issue per problem); a connected worker must have proven isolation, and the
  * proven workers must run one Hermes revision; every configuration's provider
  * must be ready (409 with the reason the form shows, e.g. "Nous Portal is not
- * connected"); and when a selected task has an llm_judge key, it must have a
- * judge model (the check's `model:` or JUDGE_MODEL, Phase 3 question 2: 409
- * with how to set one) and the judge's provider must be ready too (Phase 3
- * S3: JUDGE_PROVIDER, the rule the scorer and Re-score use). An estimate
+ * connected"); every variable the chosen configurations' MCP server
+ * versions name must be set where it is read, stdio env names in the live
+ * worker's environment and http header variables in egress's (409 naming
+ * each with its server, Phase 6 S7, missing-secrets.ts); and when a
+ * selected task has an llm_judge key, it must have a judge model (the
+ * check's `model:` or JUDGE_MODEL, Phase 3 question 2: 409 with how to set
+ * one) and the judge's provider must be ready too (Phase 3 S3:
+ * JUDGE_PROVIDER, the rule the scorer and Re-score use). An estimate
  * over the spend ceiling does not block: the spend guard pauses at the
  * ceiling (UI_FLOWS 19 #10).
  *
@@ -52,6 +56,7 @@ import { effectiveBudgetS } from '../../execution/budget.js';
 import { loadPriceTable } from '../../execution/pricing.js';
 import { judgeReadiness } from '../../providers/judge-readiness.js';
 import { QueueService } from '../../queue/queue.service.js';
+import { unsetMcpVariablesByVersion } from '../../resources/secrets/unset-variables.js';
 import { judgeSettingsFrom } from '../../runs/judge-needs.js';
 import { serverError } from '../../suites/http-errors.js';
 import { EstimatesService } from '../estimates/estimates.service.js';
@@ -59,6 +64,7 @@ import { estimateSnapshot } from '../estimates/per-run-estimate.js';
 import { bossOf, conflict } from './command-support.js';
 import { sendExecuteRuns } from './jobs.js';
 import { launchHermes, liveWorkers } from './live-workers.js';
+import { missingSecretsConflict } from './missing-secrets.js';
 import { blockedMessage, ProviderGate } from './provider-gate.js';
 
 type SuiteRow = typeof suites.$inferSelect;
@@ -101,6 +107,12 @@ export class LaunchService {
     if (!hermes.ok) throw conflict(hermes.reason);
     const blocks = await this.gate.blocked(resolved.versions.map((v) => v.row.provider));
     if (blocks.length > 0) throw conflict(blockedMessage(blocks));
+    const unset = await unsetMcpVariablesByVersion(
+      this.db,
+      resolved.versions.map((v) => v.row.id),
+    );
+    const secrets = missingSecretsConflict(resolved.versions, unset);
+    if (secrets) throw secrets;
     const judge = await judgeReadiness(
       resolved.tasks.flatMap((t) => t.verification.map((entry) => ({ ...entry, task: t.key }))),
       judgeSettingsFrom(this.config),

@@ -128,6 +128,7 @@ import os
 parser = argparse.ArgumentParser()
 parser.add_argument('--answer', required=True)
 parser.add_argument('--workspace', required=True)
+parser.add_argument('--home', required=True)
 args = parser.parse_args()
 
 with open(args.answer, encoding='utf-8') as f:

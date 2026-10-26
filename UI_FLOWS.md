@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`). **Planned**: suite authoring (Phase 5b).
+Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`); the platform additions of Phase 6 (home seeds, the agent's memory files collected, skill loading, the launch check for unset MCP variables) and the two sample MCP servers, `invoice-db` (stdio, in the trial image) and `vendor-directory` (http, Compose profile `samples`, on a network only egress shares; `docs/phases/phase-6.md`). **Planned**: suite authoring (Phase 5b).
 
 ```mermaid
 flowchart LR
@@ -511,7 +511,7 @@ flowchart TD
 
 ## 8. Suites and tasks
 
-Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5). **Planned**: the remaining sample tasks (Phase 6) and authoring in the UI (Phase 5b).
+Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5); home seeds, the expected home and home checks in the format, the loader and Task detail, and all 12 `invoices-v1` tasks (Phase 6; `docs/phases/phase-6.md`). **Planned**: the capability suites (Phase 6b) and authoring in the UI (Phase 5b).
 
 Suites are folders under `./suites`, edited on disk with any editor. It shows what was loaded, whether every task passes its own self-check, and every version. Phase 5b adds creating and editing suites in the UI: edits go into a draft, and saving writes the same files and loads them as a reload does (plan section 4.6). Its flows are added here when that phase is built.
 
@@ -543,8 +543,8 @@ sequenceDiagram
     WK->>DB: BEGIN, advisory lock on the directory
     WK->>FS: read suite.yaml and every task file (never follows a link)
     WK->>WK: hash every file, parse task.yaml, validate with zod<br/>one primary key, unique keys, known scorer types, valid params
-    WK->>WK: self-check each task against its own reference answer<br/>(verifier scripts as a subprocess, the task's timeout_s, minimal env)
-    WK->>B: write each fixture, verifier, rubric, expected file by sha256 (temp, fsync, rename)
+    WK->>WK: self-check each task against its own reference answer, expected workspace or expected home<br/>(verifier scripts as a subprocess, the task's timeout_s, minimal env)
+    WK->>B: write each fixture, home seed, verifier, rubric, expected and expected-home file by sha256 (temp, fsync, rename)
     WK->>DB: insert blobs rows (new content only)
     alt same content hash and check hash as an existing version
       WK->>DB: reuse it (outcome unchanged, or reverted if it is an older one)
@@ -579,17 +579,17 @@ After a load, **nothing reads `./suites` again**. Trials, verifiers, judges and 
 
 ### 8.2 Browsing suites and tasks
 
-| User action                           | Call                                               | What the API reads                                                                                                                  |
-| ------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Open Suites                           | `GET /suites`                                      | `suite_sources` with the current `suites` row: name, v5, label 0.3, task and valid counts, last change                              |
-| Open a suite                          | `GET /suites/:id`                                  | that suite version's tasks with validity and self-check failures                                                                    |
-| Pick an older version in the selector | `GET /suites/:olderId`                             | the same, for that version, read-only notice                                                                                        |
-| History panel                         | `GET /suites/:id/history`                          | every version of the directory, its changes, and the experiments that used each                                                     |
-| Expand a failed self-check            | (already in the suite payload)                     | verifier output, the contract, what changed                                                                                         |
-| Open a task                           | `GET /suites/:id/tasks/:key`                       | prompt, fixtures with hashes, verification entries, hidden reference, verifier source, self-check, limits, experiments that used it |
-| Task History                          | `GET /suites/:id/tasks/:key/history`               | the task key's versions and where each first appeared                                                                               |
-| Open a diff                           | `GET /suites/:id/tasks/:key/diff?against=:suiteId` | prompt and task.yaml text diffs, reference JSON diff, file list changes                                                             |
-| Preview or download a fixture         | `GET /suites/:id/tasks/:key/fixtures/:path`        | the blob by hash                                                                                                                    |
+| User action                           | Call                                               | What the API reads                                                                                                                                                                             |
+| ------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open Suites                           | `GET /suites`                                      | `suite_sources` with the current `suites` row: name, v5, label 0.3, task and valid counts, last change                                                                                         |
+| Open a suite                          | `GET /suites/:id`                                  | that suite version's tasks with validity and self-check failures                                                                                                                               |
+| Pick an older version in the selector | `GET /suites/:olderId`                             | the same, for that version, read-only notice                                                                                                                                                   |
+| History panel                         | `GET /suites/:id/history`                          | every version of the directory, its changes, and the experiments that used each                                                                                                                |
+| Expand a failed self-check            | (already in the suite payload)                     | verifier output, the contract, what changed                                                                                                                                                    |
+| Open a task                           | `GET /suites/:id/tasks/:key`                       | prompt, fixtures with hashes, home seeds and expected-home files (`homeFiles`, Phase 6), verification entries, hidden reference, verifier source, self-check, limits, experiments that used it |
+| Task History                          | `GET /suites/:id/tasks/:key/history`               | the task key's versions and where each first appeared                                                                                                                                          |
+| Open a diff                           | `GET /suites/:id/tasks/:key/diff?against=:suiteId` | prompt and task.yaml text diffs, reference JSON diff, file list changes                                                                                                                        |
+| Preview or download a fixture         | `GET /suites/:id/tasks/:key/fixtures/:path`        | the blob by hash                                                                                                                                                                               |
 
 ```mermaid
 sequenceDiagram
@@ -618,7 +618,9 @@ sequenceDiagram
   A-->>W: first rows
 ```
 
-The reference answer is shown to the user (it is their own task) but marked "Hidden from the agent": it is never copied into a trial. Only task files of kind `fixture` ever enter a workspace.
+The reference answer is shown to the user (it is their own task) but marked "Hidden from the agent": it is never copied into a trial. Only task files of kind `fixture` ever enter a workspace, and only those of kind `home_seed` the home.
+
+**Home files on Task detail** (Phase 6). A task that seeds the agent's memory (`home/memories/MEMORY.md`, `USER.md`) shows a **Home seeds** panel after Fixtures, marked visible to the agent: "Copied into the agent's memories/ before every run, in every configuration; read only with memory on". A task that declares `self_check.expected_home` shows an **Expected home** panel after the reference answer, marked hidden: what a home check expects the memory files to hold, laid over the seeds, never copied into a run. Each row has the path in the task folder, its kind, where it sits in the home (`memories/USER.md`, as the API works it out), size, hash, and the file's text (up to 16 KB), the first one open. A `file_check` with `root: home` carries a `root: home` tag, and its sentence reads "file_check: memories/USER.md in the home exists …". A home check's self-check reads "passes on the expected home; fails on the home seeds alone, as it should"; one that passes on the seeds alone makes the task invalid, "passes on the home seeds alone too, so it would pass any agent". A verifier's contract now reads `--answer <file> --workspace <dir> --home <dir>`.
 
 ---
 
@@ -720,7 +722,7 @@ The form says, per transport, what the agent can read. Under a stdio server's en
 
 Status: **Built**: the endpoint and presence reporting (Phase 1), the egress MCP gateway that adds header values (Phase 2, spike I15 passed), and the Secrets tab and the System page's secrets against the real API (Phase 5).
 
-`GET /resources/secrets` lists every name that MCP definitions reference: set or not set, its source, what references it, its exposure, and when it was last checked. Values are never shown, stored, typed or sent to the browser. A value is set by adding it to `.env` and restarting the service that reads it (`docker compose up -d egress worker`).
+`GET /resources/secrets` lists every name that MCP definitions reference: set or not set, its source, what references it, its exposure, and when it was last checked. Values are never shown, stored, typed or sent to the browser. A value is set by adding it to `.env` and restarting the service that reads it (`docker compose up -d egress worker`). Egress sends an http header variable's value unchanged as the whole header, so a Bearer API needs `Bearer <key>` in the variable; for the sample `vendor-directory`, `.env` holds only the token and Compose writes the prefix for egress (Phase 6). A name that is not set also blocks Launch for the configurations that use it (section 11.1).
 
 How a value reaches a run depends on the server's transport:
 
@@ -755,9 +757,9 @@ flowchart LR
 
 ## 10. Configurations
 
-Status: **Built**: tables, versioning triggers (a frozen version never changes), the config hash, and every endpoint (Phase 1); `GET /configurations/new-draft` for a new configuration's form, and the list, form and detail against the real API (Phase 5).
+Status: **Built**: tables, versioning triggers (a frozen version never changes), the config hash, and every endpoint (Phase 1); `GET /configurations/new-draft` for a new configuration's form, and the list, form and detail against the real API (Phase 5); skill loading, preload or on demand, in the form, detail, list, diff, duplicate and history (Phase 6; `docs/phases/phase-6.md`).
 
-A configuration is a record of how Hermes is set up: model, provider, toolsets, memory, skills, documents, MCP servers and limits. It is only a definition: saving one never calls a model, so Save is never blocked by provider status.
+A configuration is a record of how Hermes is set up: model, provider, toolsets, memory, skills and how they load, documents, MCP servers and limits. It is only a definition: saving one never calls a model, so Save is never blocked by provider status.
 
 ### 10.1 Create, edit, duplicate
 
@@ -771,7 +773,7 @@ sequenceDiagram
 
   W->>A: GET /configurations/form-options (models with prices, providers,<br/>toolsets the live worker found in the trial image, skills, documents, MCP versions)
   W->>A: GET /providers (for the ProviderNotice under the provider field)
-  U->>W: fills name, model, provider, toolsets, memory, skills, documents, MCP servers, limits
+  U->>W: fills name, model, provider, toolsets, memory, skills (and, once one is chosen,<br/>skill loading: preload or on demand), documents, MCP servers, limits
   W->>W: unknown model? warn 'no price: cost will show as —'
   U->>W: Save
   alt new configuration
@@ -789,22 +791,26 @@ sequenceDiagram
   A-->>W: saved version
 ```
 
+**Skill loading** (Phase 6). Once a skill is chosen, the Skills row shows a two-option control, **preload** or **on demand**, with one line of help: "Preload puts the skills in the prompt; on demand installs them for the agent to find, with the `skills` toolset." With no skills the control is hidden and the form saves `preload`, so it never meets the API's 400 for on demand without skills ("Skill loading applies only when the configuration has skills", shown under Skills if it comes). The aside's change summary names `skill_loading`. A change of mode alone is a change: saved in place on an unused version, a new version on a frozen one. The mode enters the config hash only when it is on demand, so every earlier version kept its hash.
+
 The form shows the versioning rule before saving: on a configuration an experiment already used, the banner reads that saving creates version 2 and that the experiments keep version 1. The button reads **Save as version 2**.
 
-**Duplicate** (`POST /configurations/:id/duplicate`) returns a prefilled draft. No row exists until the user saves.
+**Duplicate** (`POST /configurations/:id/duplicate`) returns a prefilled draft, skill loading included. No row exists until the user saves. The version's history line names a change of mode ("Duplicated from with-skill v1; set skill loading to on demand").
 
 ### 10.2 List, compare, detail
 
-| User action                  | Call                                      | Result                                                                                            |
-| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Open Configurations          | `GET /configurations`                     | name, latest version, model, provider, skill/doc/MCP counts, used in N experiments                |
-| Select two or three, Compare | `GET /configurations/diff?versions=a,b,c` | one row per field with each value and a `differs` flag; same rows feed ConfigDiffTable everywhere |
-| Open one                     | `GET /configurations/:id`                 | fields, every version, duplicated-from, used in which experiments                                 |
-| Open an older version        | `GET /configurations/:id/versions/:v`     | that version's fields, read-only                                                                  |
+| User action                  | Call                                      | Result                                                                                                                                                     |
+| ---------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open Configurations          | `GET /configurations`                     | name, latest version, model, provider, skill/doc/MCP counts (skills loaded on demand tagged "on demand"), used in N experiments                            |
+| Select two or three, Compare | `GET /configurations/diff?versions=a,b,c` | one row per field with each value and a `differs` flag (the `skill_loading` row reads "preload" or "on demand"); same rows feed ConfigDiffTable everywhere |
+| Open one                     | `GET /configurations/:id`                 | fields (a **Skill loading** row with the mode and what it does, or "(no added skills to load)"), every version, duplicated-from, used in which experiments |
+| Open an older version        | `GET /configurations/:id/versions/:v`     | that version's fields, read-only                                                                                                                           |
 
 ### 10.3 What a configuration becomes at run time
 
-A configuration version is turned into the trial's `config.yaml` and command line (section 12.2): model and provider pointed at the egress gateway, toolsets plus one `-t` entry per MCP server name, `-s` per skill, memory on or off, max turns and time budget. The platform adds the rest itself so arms differ only where the user intended: bundled Hermes skills off, update checks off, approvals off.
+A configuration version is turned into the trial's `config.yaml` and command line (section 12.2): model and provider pointed at the egress gateway, toolsets plus one `-t` entry per MCP server name, the skills copied into the home and, with preload, `-s` per skill (on demand: no `-s`, and the `skills` toolset added once, so the agent lists the skills and opens one with `skill_view`), memory on or off, max turns and time budget. The platform adds the rest itself so arms differ only where the user intended: bundled Hermes skills off, update checks off, approvals off, and the background review's intervals written at Hermes's defaults (10 and 10), the same in every arm; a one-shot run is a finite turn, for which Hermes starts no review.
+
+Memory on lets Hermes read the task's home seeds into the prompt; it does not give the agent a way to save. Hermes's `memory` tool is in the `memory` toolset, so a configuration that should let the agent save memory needs that toolset too (Phase 6 found this; whether the platform should add it is an open question in `docs/phases/phase-6.md`).
 
 Hermes always installs its own `hermes-agent` skill in every home and it cannot be turned off. So `baseline` has "no added skills", not "no skills": every arm has that one skill.
 
@@ -812,7 +818,7 @@ Hermes always installs its own `hermes-agent` skill in every home and it cannot 
 
 ## 11. New experiment and launch
 
-Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2); the page against the real API (Phase 5).
+Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2); the page against the real API (Phase 5); the 409 and the per-configuration tags and blocker for MCP variables that are not set (Phase 6, Phase 5 #13; `docs/phases/phase-6.md`).
 
 ### 11.1 Filling the form
 
@@ -824,7 +830,7 @@ sequenceDiagram
   participant A as API
   participant DB as DB
 
-  W->>A: GET suites with valid tasks, configurations with latest versions and config hashes
+  W->>A: GET /experiments/new-options: suites with valid tasks, configurations with latest versions,<br/>config hashes, skill loading and the MCP variables not set where they are read
   W->>A: GET /providers
   U->>W: picks suite invoices-v1 v5, tasks (invalid ones disabled with the reason)
   U->>W: picks baseline + candidate(s)
@@ -845,7 +851,9 @@ flowchart TD
   V -- no --> D1["Launch disabled: the missing field"]
   V -- yes --> PR{"Every selected configuration's provider connected?"}
   PR -- no --> D2["Launch disabled: 'Nous Portal is not connected'<br/>+ Connect Nous Portal in the panel"]
-  PR -- yes --> SB{"Sandbox proven and a worker live?"}
+  PR -- yes --> MS{"Every chosen configuration's MCP variables set?"}
+  MS -- no --> D4["Launch disabled: 'with-mcp: INVOICE_DB_URL (invoice-db,<br/>read by the worker) is not set.' + what to set, the command, Check again"]
+  MS -- yes --> SB{"Sandbox proven and a worker live?"}
   SB -- no --> D3["Launch disabled: runs cannot start until the sandbox passes"]
   SB -- yes --> SP{"Estimate over the spend ceiling?"}
   SP -- yes --> WARN["Warning, Launch still allowed:<br/>the spend guard will pause at the ceiling"]
@@ -871,6 +879,10 @@ sequenceDiagram
   alt a provider is not connected
     A-->>W: 409 'Nous Portal is not connected'
   end
+  A->>DB: the chosen versions' MCP variables against the live worker's and egress's env names
+  alt a variable is not set where it is read
+    A-->>W: 409 naming each variable with its server, nothing written
+  end
   A->>DB: BEGIN
   A->>DB: freeze baseline + candidate versions (UPDATE ... SET frozen_at = now() WHERE frozen_at IS NULL)
   A->>DB: SELECT config_hash FOR SHARE, compare with expected_config_hashes
@@ -889,6 +901,8 @@ sequenceDiagram
 ```
 
 If the response is a 409, the form keeps everything entered and shows the reason where the panel's error sits ("Launch refused… POST /api/experiments → 409").
+
+**MCP variables that are not set** (Phase 6). `GET /experiments/new-options` gives each configuration its `missingSecrets`: every variable its MCP server versions name that is not set where it is read, a stdio env name in the live worker's environment, an http header variable in egress's. The row carries one amber tag per variable ("INVOICE_DB_URL not set · invoice-db", the full sentence on hover). Choosing such a configuration adds a blocker with the reason ("with-mcp: INVOICE_DB_URL (invoice-db, read by the worker) is not set.", or "… (vendor-directory, added by egress) …" for an http header), the hint "Set each in .env, then recreate the worker (stdio) or egress (http) so it reads them.", the command (`docker compose up -d worker`, `egress`, or both), **Check again**, which reloads the options, and **Open Secrets**; Launch is disabled with the same reason. While no worker is live, the tags and these blockers are hidden: the no-worker blocker explains. If the state changed after the form loaded, `POST /experiments` answers 409 `MissingSecretsConflict`, one issue per variable on the field that chose its configuration (`baselineVersionId`, `candidateVersionIds.<i>`), and writes nothing; the form shows "Launch refused: an MCP server's variables are not set." and reloads the options. The Skills column reads "1 · on demand" for a configuration whose skills load on demand.
 
 ### 11.3 Duplicate, and running on a newer suite version
 
@@ -918,7 +932,7 @@ sequenceDiagram
 
 ## 12. What happens to one run: execution
 
-Status: **Built and proven live** (Phase 2): the `execute-run` handler around the trial runner (claim, admission, leases and heartbeat, the cancel watcher, event batching into `run_events`, artifact collection, recovery), run on the Compose stack with real Hermes and the scripted mock model (`docs/phases/phase-2.md` section 6).
+Status: **Built and proven live** (Phase 2): the `execute-run` handler around the trial runner (claim, admission, leases and heartbeat, the cancel watcher, event batching into `run_events`, artifact collection, recovery), run on the Compose stack with real Hermes and the scripted mock model (`docs/phases/phase-2.md` section 6); home seeds copied in, the memory files collected, skill loading and the background review's intervals (Phase 6, proven live; `docs/phases/phase-6.md` section 5.4).
 
 The user sees none of this directly. They see a run go `queued → running → executed`, its events stream into the inspector, and the counters move. This section is what happens underneath.
 
@@ -977,8 +991,9 @@ sequenceDiagram
   WK->>V: create trials/<attempt>/home and /workspace (fresh, lstat-checked)
   WK->>V: copy fixtures (hash re-checked) to workspace, documents to workspace/docs
   WK->>V: copy skills to home/skills/<name>, write home/.no-bundled-skills
-  WK->>V: write home/task.txt (the prompt) and home/config.yaml<br/>(no key · stdio MCP env as ${NAME} · http MCP url = egress:8080/mcp/<name>)
-  WK->>DB: write the launch record: argv, container spec, config.yaml, inputs + hashes, Hermes revision
+  WK->>V: copy the task's home seeds to home/memories/ (hash re-checked), in every arm
+  WK->>V: write home/task.txt (the prompt) and home/config.yaml<br/>(no key · stdio MCP env as ${NAME} · http MCP url = egress:8080/mcp/<name><br/>· memory and skills review intervals 10 and 10)
+  WK->>DB: write the launch record: argv (-s per skill, or none on demand), container spec,<br/>config.yaml, inputs + hashes (home seeds included), skill loading, Hermes revision
   WK->>E: register attempt: token, provider, model, max tokens, expiry,<br/>http MCP routes, public mode if web toolsets
   WK->>G: POST /containers/create (trial spec, plus stdio MCP env values)
   G->>G: validate every field, pin the image by id
@@ -1006,6 +1021,8 @@ sequenceDiagram
   WK->>DB: connection log rows as platform events (allowed, refused, Hermes background call)
   WK->>V: walk workspace with lstat, never follow links, read with O_NOFOLLOW
   WK->>DB: blobs for new files, artifacts rows labelled fixture/document unchanged or modified, or agent
+  WK->>V: then home/memories/ only, the same safe walk, with what is left of the budget
+  WK->>DB: artifacts with root home, labelled home seed unchanged or modified, or agent
   WK->>DB: BEGIN: final platform events, finish the attempt (classified)
   WK->>DB: if executed: run executed, INSERT evaluation generation 1, send evaluate-run
   WK->>DB: COMMIT
@@ -1016,7 +1033,8 @@ Why each piece is there:
 
 - **A container per trial.** Hermes runs its agent loop in a detached gateway daemon, so killing a process does not stop a run, and it can read any absolute path. A container bounds its files, network and processes, and stopping it ends everything.
 - **The attempt token.** The trial never holds a provider credential. It holds a token that is valid only from its slot network, for one model, until the attempt ends. The only secrets it holds are its stdio MCP servers' env values (section 9.4).
-- **The safe reader.** The agent controls every file name, link and file type in its workspace. The worker never follows a link and never opens a FIFO or device.
+- **The safe reader.** The agent controls every file name, link and file type in its workspace and its home. The worker never follows a link and never opens a FIFO or device; of the home it reads `memories/` alone, and a `memories/` that is a link is listed, never followed.
+- **Seeds in every arm.** With memory off Hermes builds no memory store and injects nothing, so the same seed in both arms isolates `memory_enabled`.
 - **The answer** is always the `result` event's text, never the streamed pieces joined back together: Hermes can drop a newline-only delta.
 
 ### 12.3 How the attempt ends
@@ -1081,7 +1099,7 @@ A missing heartbeat alone never proves the trial stopped. A replacement starts o
 
 ## 13. What happens to one run: scoring
 
-Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`); verdict entries appended by reconcile (Phase 4; `docs/phases/phase-4.md`).
+Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`); verdict entries appended by reconcile (Phase 4; `docs/phases/phase-4.md`); `file_check` on the home's memory files (`root: home`) and `--home` for every verifier (Phase 6; `docs/phases/phase-6.md`).
 
 Scoring is separate from execution, so a scorer bug is fixed by re-scoring. Hermes is never run again for it.
 
@@ -1110,10 +1128,10 @@ sequenceDiagram
     else trajectory_match
       WK->>DB: tool_use/tool_result events: count the matching calls, or match the trajectory
     else file_check
-      WK->>B: read the artifact by hash, check format, columns, rows, schema
+      WK->>B: read the artifact of its root (workspace, or home with root home) by hash,<br/>check format, columns, rows, schema
     else verifier_script
-      WK->>B: materialise verifier files + artifacts into a temp dir
-      WK->>WK: python3 verify/check.py --answer tmp.json --workspace dir (30 s, outside any trial)
+      WK->>B: materialise verifier files, the workspace and the home files into a temp dir
+      WK->>WK: python3 verify/check.py --answer tmp.json --workspace dir --home dir (30 s, outside any trial)
     else llm_judge
       WK->>E: register one judge call (the judge model only, minutes), then the chat completion
       E->>J: rubric, task and reference as facts, agent text as untrusted data,<br/>temperature 0, at most 4,096 tokens, egress's credential added
@@ -1375,7 +1393,7 @@ sequenceDiagram
 
 ## 18. Run inspector
 
-Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3).
+Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3); the Memory group of home artifacts and the launch record's skill loading, home seeds and background review (Phase 6; `docs/phases/phase-6.md`).
 
 A right-hand drawer over the experiment, 75% of the window, with its own route (`/experiments/:id/runs/:runId`, or `?run=` from the comparison). Esc closes it back to where it was opened.
 
@@ -1396,7 +1414,7 @@ sequenceDiagram
   A->>DB: run_events by seq (paged)
   A-->>W: timeline: text, tool calls with input/output, network rows, platform events
   W->>A: GET /runs/:id/artifacts
-  A-->>W: files with origin (fixture unchanged/modified, document, agent), size, hash
+  A-->>W: files with root and origin (fixture or document unchanged/modified, home seed<br/>unchanged/modified, agent), size, hash
   U->>W: Preview summary.csv
   W->>A: GET /runs/:id/artifacts/:artifactId/content
   A->>B: blob by hash
@@ -1414,13 +1432,13 @@ sequenceDiagram
 
 The five sections and what each proves:
 
-| Section        | Shows                                                                                                                                                                        | From                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| Outcome        | run status, each score key with expected vs observed and comment, or the execution error banner with category and stderr tail                                                | `scores`, `attempts`                        |
-| Timeline       | every event in order with a scrubber: model text, tool calls, network rows (allowed, refused by sandbox, Hermes background call)                                             | `run_events`                                |
-| Final response | the recorded final text with the extracted JSON block highlighted, the parsed value, and the reference beside it                                                             | `attempts.final_text`, `evaluations.answer` |
-| Artifacts      | what the agent left in the workspace, labelled by origin, with previews                                                                                                      | `artifacts`, blobs                          |
-| Launch record  | the container (image + digest, mounts, network, limits), the exact Hermes command, `config.yaml`, inputs with hashes; each MCP secret as `<from env NAME>` with its exposure | `attempts.launch_record`                    |
+| Section        | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | From                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| Outcome        | run status, each score key with expected vs observed and comment, or the execution error banner with category and stderr tail                                                                                                                                                                                                                                                                                                                                                                                                                                      | `scores`, `attempts`                        |
+| Timeline       | every event in order with a scrubber: model text, tool calls, network rows (allowed, refused by sandbox, Hermes background call)                                                                                                                                                                                                                                                                                                                                                                                                                                   | `run_events`                                |
+| Final response | the recorded final text with the extracted JSON block highlighted, the parsed value, and the reference beside it                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `attempts.final_text`, `evaluations.answer` |
+| Artifacts      | what the agent left in the workspace, labelled by origin, with previews; then a **Memory** group for the home's `memories/` (`home/memories/USER.md` · home seed · modified, or written by agent), shown when the run has home files, a changed file's preview open                                                                                                                                                                                                                                                                                                | `artifacts`, blobs                          |
+| Launch record  | the container (image + digest, mounts, network, limits), the exact Hermes command, `config.yaml`, inputs with hashes; each MCP secret as `<from env NAME>` with its exposure; **Skill loading** (when the run had skills: preload with `-s`, or on demand through the `skills` toolset), **Home seeds** (each `memories/X.md → /opt/data/memories/X.md` with its hash, or that `memories/` started empty) and **Background review** (`memory.nudge_interval` and `skills.creation_nudge_interval`, written the same in every run; a one-shot run starts no review) | `attempts.launch_record`                    |
 
 Actions in the drawer:
 

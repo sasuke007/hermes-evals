@@ -91,6 +91,7 @@ describe('ArtifactsSection', () => {
   }
   const agentFile = {
     id: 'art_txt',
+    root: 'workspace' as const,
     path: 'workspace/duplicates.txt',
     origin: 'agent' as const,
     sizeBytes: 114,

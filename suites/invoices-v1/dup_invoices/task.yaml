@@ -1,0 +1,13 @@
+summary: Pairs of invoices that bill the same vendor, date and amount under two numbers
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: duplicates
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: duplicates, unordered: true, inner_unordered: true }

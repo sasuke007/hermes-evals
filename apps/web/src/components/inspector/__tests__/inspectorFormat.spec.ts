@@ -160,6 +160,7 @@ describe('attempts, artifacts, evidence', () => {
   it('previews CSV and TSV as tables and text files as text', () => {
     const art: ArtifactView = {
       id: 'a',
+      root: 'workspace',
       path: 'workspace/summary.csv',
       origin: 'agent',
       sizeBytes: 10,

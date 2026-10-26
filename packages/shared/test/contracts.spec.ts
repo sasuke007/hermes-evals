@@ -45,6 +45,7 @@ const CONFIG: ConfigurationInput = {
   toolsets: ['file', 'terminal'],
   memoryEnabled: false,
   skillIds: ['skill_01JAX9C41E07'],
+  skillLoading: 'preload',
   documentIds: [],
   mcpServerVersionIds: [],
   maxTurns: 20,
@@ -310,6 +311,7 @@ describe('ConfigurationInputSchema', () => {
       [{ maxTurns: 201 }, 'maxTurns'],
       [{ timeBudgetS: 29 }, 'timeBudgetS'],
       [{ timeBudgetS: 3601 }, 'timeBudgetS'],
+      [{ skillIds: [], skillLoading: 'on_demand' }, 'skillLoading'],
     ];
     for (const [change, path] of bad) {
       expect(issuePaths(ConfigurationInputSchema.safeParse({ ...CONFIG, ...change }))).toEqual([

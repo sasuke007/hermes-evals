@@ -210,6 +210,58 @@ describe('selfCheckView', () => {
     });
   });
 
+  it("names the expected home and the home seeds for a check on the agent's home", () => {
+    const entry: VerificationEntry = {
+      key: 'saved',
+      type: 'file_check',
+      primary: true,
+      params: { root: 'home', path: 'memories/USER.md', contains: ['EUR'] },
+    };
+    const run: SelfCheckResult = {
+      key: 'saved',
+      type: 'file_check',
+      mode: 'home',
+      status: 'passed',
+      score: 1,
+      comment: 'ok',
+    };
+    const good = selfCheckView(
+      check('passed', [run, { ...run, expect: 'fail', status: 'failed', score: 0 }]),
+      [entry],
+      RAN_AT,
+    );
+    expect(good.results[0]?.note).toBe(
+      'passes on the expected home; fails on the home seeds alone, as it should',
+    );
+    const bad = selfCheckView(check('failed', [run, { ...run, expect: 'fail' }]), [entry], RAN_AT);
+    expect(bad.results[0]?.note).toBe(
+      'passes on the home seeds alone too, so it would pass any agent',
+    );
+    const view = selfCheckFailureView(
+      failureInput({
+        verification: [entry],
+        selfCheck: check('failed', [run, { ...run, expect: 'fail', duration_ms: 5 }]),
+        previous: null,
+      }),
+    );
+    expect(SelfCheckFailureViewSchema.parse(view)).toMatchObject({
+      title: 'file_check memories/USER.md passed on the home seeds alone (negative control)',
+    });
+    expect(view?.transcript).toContain('# negative control, on the home seeds alone');
+    expect(view?.explanation).toMatch(/would pass an agent that saved nothing/);
+    const failing = selfCheckFailureView(
+      failureInput({
+        verification: [entry],
+        selfCheck: check('failed', [{ ...run, status: 'failed', score: 0, comment: 'no EUR' }]),
+        previous: null,
+      }),
+    );
+    expect(failing?.title).toBe(
+      'file_check memories/USER.md fails on the expected home · score status failed',
+    );
+    expect(failing?.explanation).toMatch(/^The expected home \(home\/ overlaid with/);
+  });
+
   it('marks entries of a task with load errors as not run, and dates them by the load', () => {
     const view = selfCheckView(
       { status: 'skipped', ran_at: null, duration_ms: null, results: [] },

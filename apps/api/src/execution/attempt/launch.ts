@@ -8,6 +8,12 @@
  * command line carries the token as `--api-key`. The launch record carries
  * none of them: argv shows the token as `<attempt-token>`, the environment is
  * listed by name, and config.yaml shows each `${NAME}` as `<from env NAME>`.
+ *
+ * Skills (Phase 6 P5): both modes copy them into home/skills/<name>/
+ * (materialise.ts). `preload` passes `-s <name>` per skill, so Hermes loads
+ * each into the session at start; `on_demand` passes none, and the plan has
+ * already added the `skills` toolset (plannedToolsets, lifecycle/plan.ts),
+ * so the agent lists and opens them itself.
  */
 import type { LaunchContainerRecord, LaunchRecord } from '@hermes-evals/shared';
 import {
@@ -19,7 +25,12 @@ import {
 } from '../../sandbox/trial-spec.js';
 import type { AttemptPlan } from '../contracts.js';
 import { ATTEMPT_TOKEN_ENV, hermesModelArgs } from '../providers-map.js';
-import { displayConfigYaml, TRIAL_CONFIG_PATH, trialToolsets } from './trial-config.js';
+import {
+  backgroundReviewRecord,
+  displayConfigYaml,
+  TRIAL_CONFIG_PATH,
+  trialToolsets,
+} from './trial-config.js';
 
 /** How the launch record shows the attempt token in argv. */
 export const ATTEMPT_TOKEN_PLACEHOLDER = '<attempt-token>';
@@ -92,7 +103,10 @@ export function hermesChatCmd(plan: AttemptPlan): string[] {
     ...hermesModelArgs(configuration.provider, configuration.model, plan.token),
     // An empty -t list is left out rather than passed as '' (whose meaning Hermes does not document).
     ...(toolsets.length > 0 ? ['-t', toolsets.join(',')] : []),
-    ...configuration.skills.flatMap((skill) => ['-s', skill.name]),
+    // On demand loading passes no -s: the skills toolset finds them (plannedToolsets).
+    ...(configuration.skillLoading === 'on_demand'
+      ? []
+      : configuration.skills.flatMap((skill) => ['-s', skill.name])),
     '--max-turns',
     String(plan.limits.maxTurns),
     '--yolo',
@@ -176,6 +190,7 @@ export function buildTrialLaunch(
       version: s.version,
       content_hash: s.contentHash,
     })),
+    skill_loading: configuration.skillLoading,
     mcp_servers: configuration.mcpServers.map((s) => ({
       mcp_server_version_id: s.versionId,
       name: s.name,
@@ -184,6 +199,8 @@ export function buildTrialLaunch(
       definition_hash: s.definitionHash,
     })),
     inputs: input.inputs,
+    // The intervals config.yaml sets (trial-config.ts BACKGROUND_REVIEW), the same in every arm.
+    background_review: backgroundReviewRecord(),
     limits: {
       max_turns: plan.limits.maxTurns,
       run_budget_seconds: budget,

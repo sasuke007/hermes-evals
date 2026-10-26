@@ -13,6 +13,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type {
   ArtifactOrigin,
+  ArtifactRoot,
   ArtifactSkipReason,
   JsonValue,
   PriceTable,
@@ -31,10 +32,15 @@ import {
 } from '../database/schema/index.js';
 import type { AppDb } from '../database/types.js';
 
-/** One file the attempt left in its workspace, as collection recorded it (plan 8.5). */
+/**
+ * One file the attempt left, as collection recorded it (plan 8.5): in its
+ * workspace, or in its home's memories/ (Phase 6 P2).
+ */
 export interface ArtifactRecord {
   id: string;
-  /** Relative to the workspace, e.g. `out/summary.csv`. */
+  /** The directory it was collected from. */
+  root: ArtifactRoot;
+  /** Relative to its root, e.g. `out/summary.csv`, or `memories/USER.md` in the home. */
   path: string;
   origin: ArtifactOrigin;
   size: number;
@@ -113,6 +119,7 @@ export async function loadEvidence(
   const artifactRows = await db
     .select({
       id: artifacts.id,
+      root: artifacts.root,
       path: artifacts.path,
       origin: artifacts.origin,
       size: artifacts.size,
@@ -121,7 +128,7 @@ export async function loadEvidence(
     })
     .from(artifacts)
     .where(eq(artifacts.attemptId, target.attemptId))
-    .orderBy(asc(artifacts.path));
+    .orderBy(asc(artifacts.path), asc(artifacts.root));
 
   const files = await db
     .select({ path: taskFiles.path, sha256: taskFiles.sha256, kind: taskFiles.kind })

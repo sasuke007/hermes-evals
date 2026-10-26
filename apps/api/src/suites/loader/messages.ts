@@ -2,7 +2,9 @@
  * The one-line result of reloading a directory, as the suite list shows it
  * under "Last loaded" (UI_FLOWS 8.1): "All 12 self-checks passed",
  * "1 task now invalid: late_fees", "Unchanged since v3", "Reverted to v2",
- * "Could not reload: suite.yaml:4:3 · …", "Missing from disk".
+ * "Could not reload: suite.yaml:4:3 · …", "Missing from disk". And the
+ * wording of the home load issues (Phase 6 P1, P2): a path under `home/`
+ * that is not a seed, and a seed Hermes would read otherwise than written.
  */
 import type { SuiteChanges } from '@hermes-evals/shared';
 import type { LocatedError } from './yaml-source.js';
@@ -96,3 +98,67 @@ export const deferredMessage = (
   `not loaded by this reload: its self-checks may take up to ${seconds} s, and the suites ` +
   `before it already declared ${usedS} of the ${budgetS} s one reload may take; reload ${path} ` +
   'on its own';
+
+// ---------------------------------------------------------------------------
+// Home load issues (Phase 6 P1 and P2)
+// ---------------------------------------------------------------------------
+
+/** Why a path under `home/` or the expected home is refused (home_path_invalid). */
+export function homePathMessage(
+  path: string,
+  why: 'seed' | 'seed_dir' | 'expected',
+  expectedHomeDir?: string,
+): string {
+  switch (why) {
+    case 'seed':
+      return (
+        `${path} is not allowed: a task's home/ may hold only memories/MEMORY.md and ` +
+        "memories/USER.md, which seed the trial's memory"
+      );
+    case 'seed_dir':
+      return `${path} must be a file: it seeds the trial's ${path.slice(path.lastIndexOf('/') + 1)}`;
+    case 'expected':
+      return (
+        `${path} is outside ${expectedHomeDir}/memories/: the expected home mirrors the ` +
+        'trial home, of which only memories/ is collected after a run'
+      );
+  }
+}
+
+/** A home seed that is not UTF-8 text (schema_invalid): Hermes reads it as empty. */
+export const homeSeedNotUtf8Message = (path: string): string =>
+  `${path} is not valid UTF-8 text; Hermes would read it as an empty memory file`;
+
+/**
+ * A home seed over Hermes's character budget (home_seed_format). `oneEntry`:
+ * it reads as a single entry longer than the whole budget, which Hermes
+ * takes for text written without § delimiters and refuses to rewrite.
+ */
+export function homeSeedOverLimitMessage(
+  path: string,
+  chars: number,
+  limit: number,
+  oneEntry: boolean,
+): string {
+  const base =
+    `${path} is ${chars} characters as Hermes counts them (its entries joined by the § ` +
+    `delimiter), over the ${limit} Hermes allows: it still loads the file, but refuses every ` +
+    'memory write until it is back under';
+  return oneEntry
+    ? `${base}; and as one entry longer than the whole budget, it reads as text written without § delimiters`
+    : base;
+}
+
+/** A home seed with nothing Hermes would load (home_seed_format). */
+export const homeSeedEmptyMessage = (path: string): string =>
+  `${path} holds no entries, so it seeds nothing; entries are separated by a line holding only §`;
+
+/** A § that is not a delimiter of its own (home_seed_format). */
+export const homeSeedStraySectionMessage = (path: string, entry: number): string =>
+  `${path}: entry ${entry} has a § that is not on a line of its own, so Hermes reads it as part ` +
+  'of the entry; entries are separated by a line holding only §';
+
+/** A Markdown list with no delimiter (home_seed_format). */
+export const homeSeedListMessage = (path: string, items: number): string =>
+  `${path} looks like a list of ${items} items, but has no § delimiter, so Hermes reads it as one ` +
+  'entry; put each item on its own, separated by a line holding only §';

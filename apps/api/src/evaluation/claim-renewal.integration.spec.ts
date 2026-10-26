@@ -107,6 +107,7 @@ const verifier = (seconds: number, marker?: string) => `import argparse, json, t
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer")
 parser.add_argument("--workspace")
+parser.add_argument("--home")
 parser.parse_args()
 ${marker ? `open(${JSON.stringify(marker)}, "w").write("ran")\n` : ''}time.sleep(${seconds})
 print(json.dumps({"score": 1, "comment": "slow but sure"}))

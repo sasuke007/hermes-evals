@@ -7,6 +7,7 @@ import {
 } from '@hermes-evals/shared';
 import {
   fixtureFileView,
+  homeFileViews,
   suiteTaskRow,
   taskDetail,
   taskDiff,
@@ -145,6 +146,7 @@ describe('taskDetail', () => {
       task,
       introducedInSuiteVersion: 1,
       fixtures: [],
+      homeFiles: [],
       verifier: null,
       failure: null,
       experiments: [],
@@ -172,6 +174,74 @@ describe('taskDetail', () => {
         ],
       },
     });
+  });
+});
+
+describe('homeFileViews', () => {
+  const withExpectedHome = (dir: string) =>
+    taskRow(suiteRow(1), {
+      taskYaml: `${TOTAL_DUE_YAML}self_check:\n  expected_home: ${dir}\n`,
+    });
+
+  it('lists the home seeds, then the expected_home files, each by path, with their text', () => {
+    const task = withExpectedHome('expected_home');
+    const memory = 'Vendor names can carry trailing spaces.\n';
+    const user = 'Reports in EUR.\n';
+    const saved = 'Reports in EUR.\n§\nLargest first.\n';
+    const files = [
+      fileRow(task, 'expected_home/memories/USER.md', saved, 'expected_home'),
+      fileRow(task, 'home/memories/USER.md', user, 'home_seed'),
+      fileRow(task, 'fixtures/invoices.csv', CSV),
+      fileRow(task, 'home/memories/MEMORY.md', memory, 'home_seed'),
+    ];
+    const views = homeFileViews(
+      task,
+      files,
+      new Map([
+        [hash(memory), memory],
+        [hash(saved), saved],
+      ]),
+    );
+    expect(views).toEqual([
+      {
+        kind: 'home_seed',
+        path: 'home/memories/MEMORY.md',
+        homePath: 'memories/MEMORY.md',
+        sizeBytes: memory.length,
+        sha256: hash(memory),
+        text: memory,
+      },
+      {
+        kind: 'home_seed',
+        path: 'home/memories/USER.md',
+        homePath: 'memories/USER.md',
+        sizeBytes: user.length,
+        sha256: hash(user),
+        text: null,
+      },
+      {
+        kind: 'expected_home',
+        path: 'expected_home/memories/USER.md',
+        homePath: 'memories/USER.md',
+        sizeBytes: Buffer.byteLength(saved),
+        sha256: hash(saved),
+        text: saved,
+      },
+    ]);
+  });
+
+  it('strips a nested expected_home folder whole, as task.yaml names it', () => {
+    // The loader accepts any folder of the task's own, written any way it normalises.
+    const task = withExpectedHome('./known_good/home/');
+    const saved = 'Reports in EUR.\n§\nLargest first.\n';
+    const files = [
+      fileRow(task, 'known_good/home/memories/USER.md', saved, 'expected_home'),
+      fileRow(task, 'known_good/home/memories/notes/vendors.md', saved, 'expected_home'),
+    ];
+    expect(homeFileViews(task, files, new Map()).map((v) => [v.path, v.homePath])).toEqual([
+      ['known_good/home/memories/USER.md', 'memories/USER.md'],
+      ['known_good/home/memories/notes/vendors.md', 'memories/notes/vendors.md'],
+    ]);
   });
 });
 

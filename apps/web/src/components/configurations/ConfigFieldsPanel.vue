@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useMediaQuery } from '@vueuse/core';
+import { SKILL_LOADING_LABELS, SKILL_LOADING_OPTIONS } from '@hermes-evals/shared';
 import BasePanel from '@/components/ui/BasePanel.vue';
 import KeyValueList from '@/components/ui/KeyValueList.vue';
 import type { KeyValueItem } from '@/components/ui/types';
@@ -16,7 +17,8 @@ import { hashTag } from './configDisplay';
  * A configuration version's fields, "as written into each run's config.yaml" (ConfigDetail ›
  * Fields): a two-column definition list. A field that differs from the configuration it was
  * duplicated from is tinted and says so ("differs from baseline"); an MCP server row carries
- * what the server exposes to the run.
+ * what the server exposes to the run. Skill loading (Phase 6 P5) follows Skills: the mode and
+ * what it does, or that it has nothing to load.
  */
 const props = withDefaults(
   defineProps<{
@@ -46,6 +48,7 @@ const items = computed<KeyValueItem[]>(() => {
     { key: 'toolsets', label: 'Toolsets', highlight: differ('toolsets') },
     { key: 'memory', label: 'Memory', highlight: differ('memory') },
     { key: 'skills', label: 'Skills', highlight: differ('skills') },
+    { key: 'skill_loading', label: 'Skill loading', highlight: differ('skill_loading') },
     { key: 'documents', label: 'Documents', highlight: differ('documents') },
     { key: 'mcp_servers', label: 'MCP servers', highlight: differ('mcp_servers') },
     { key: 'max_turns', label: 'Max turns', value: v.maxTurns, highlight: differ('max_turns') },
@@ -74,6 +77,11 @@ function serverNote(m: McpServerRef): string {
 }
 
 const library = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: { tab } });
+
+/** "Each skill is loaded into the prompt at start (-s per skill)." for the version's mode. */
+const loadingHelp = computed(
+  () => SKILL_LOADING_OPTIONS.find((o) => o.id === props.version.skillLoading)?.description ?? '',
+);
 </script>
 
 <template>
@@ -119,6 +127,15 @@ const library = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: { ta
             <span class="tag">{{ hashTag(s.contentHash) }}</span>
           </template>
           <span v-if="differ('skills')" class="text-12 text-text-3">{{ differsNote }}</span>
+        </span>
+      </template>
+      <template #value-skill_loading>
+        <span :class="LINE" data-testid="skill-loading">
+          <span>{{ SKILL_LOADING_LABELS[version.skillLoading] }}</span>
+          <span class="text-12 text-text-3">{{
+            version.skills.length ? loadingHelp : '(no added skills to load)'
+          }}</span>
+          <span v-if="differ('skill_loading')" class="text-12 text-text-3">{{ differsNote }}</span>
         </span>
       </template>
       <template #value-documents>

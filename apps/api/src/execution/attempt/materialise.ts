@@ -1,10 +1,17 @@
 /**
  * Builds an attempt's home and workspace (plan 5.4) in the fresh directories
- * prepareTrialDirs made. Only three things from the platform ever enter them:
- * the task's fixtures and the configuration's documents (workspace), and the
- * configuration's skills (home), plus the files Hermes needs (task.txt,
+ * prepareTrialDirs made. Only four things from the platform ever enter them:
+ * the task's fixtures and the configuration's documents (workspace), the
+ * configuration's skills and the task's home seeds (home: skills/ and
+ * memories/, Phase 6 P1), plus the files Hermes needs (task.txt,
  * config.yaml, .no-bundled-skills, .run). Nothing else of the task — the
- * reference answer, verifiers, rubric, expected workspace — is read here.
+ * reference answer, verifiers, rubric, expected workspace or home — is read
+ * here.
+ *
+ * The home seeds are copied in every arm, whatever memoryEnabled says: with
+ * memory off Hermes builds no memory store and puts nothing in the prompt
+ * (agent/agent_init.py _init_memory, agent/system_prompt.py _memory_parts),
+ * so the same seed in both arms isolates the setting.
  *
  * Every copy re-checks the content it wrote against the hash it was promised,
  * opens its source with O_NOFOLLOW, never follows a link, and creates its
@@ -15,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { LaunchRecord } from '@hermes-evals/shared';
+import { HOME_SEED_PATHS, homeSeedTarget, type LaunchRecord } from '@hermes-evals/shared';
 import { SKILL_NAME_PATTERN } from '../../resources/skills/front-matter.js';
 import { skillContentHash } from '../../resources/skills/skill-files.js';
 import { walkTrialTree } from '../../sandbox/trial-files.js';
@@ -29,19 +36,28 @@ export interface MaterialiseDeps {
   skillsDir: string;
 }
 
-/** A file copied into the workspace before the run, for labelling artifacts (plan 8.5). */
+/**
+ * A file copied in before the run, for labelling artifacts (plan 8.5): a
+ * fixture or document in the workspace, or a home seed in the home (Phase 6
+ * P1), whose artifact origins are `<source>_unchanged` and `<source>_modified`.
+ */
 export interface InputFile {
-  source: 'fixture' | 'document';
+  source: 'fixture' | 'document' | 'home_seed';
   sha256: string;
   size: number;
 }
 
 export interface MaterialisedTrial {
-  /** The launch record's `inputs`. */
+  /** The launch record's `inputs`: fixtures and documents, then home seeds. */
   inputs: LaunchRecord['inputs'];
   /** Workspace-relative path to the input copied there. */
   manifest: Map<string, InputFile>;
+  /** Home-relative path (`memories/MEMORY.md`) to the seed copied there. */
+  homeSeeds: Map<string, InputFile>;
 }
+
+/** Where a home seed may land: `memories/MEMORY.md` and `memories/USER.md`. */
+const HOME_SEED_TARGETS: ReadonlySet<string> = new Set(HOME_SEED_PATHS.map(homeSeedTarget));
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const COPY_CHUNK = 1024 * 1024;
@@ -120,19 +136,19 @@ async function copyHashed(
   }
 }
 
-/** Copies a blob to `rel` in the workspace and checks the copy is the content promised. */
+/** Copies a blob to `rel` under `base` (the workspace or the home) and checks the copy is the content promised. */
 async function placeBlob(
   deps: MaterialiseDeps,
-  workspace: string,
+  base: string,
   rel: string,
   expected: { sha256: string; size?: number },
   what: string,
 ): Promise<number> {
   const segments = segmentsOf(rel, what);
-  await ensureParents(workspace, segments);
+  await ensureParents(base, segments);
   let copied;
   try {
-    copied = await copyHashed(deps.blobs.path(expected.sha256), join(workspace, ...segments));
+    copied = await copyHashed(deps.blobs.path(expected.sha256), join(base, ...segments));
   } catch (err) {
     if (err instanceof AttemptSetupError) throw err;
     const code = errorCode(err);
@@ -236,10 +252,21 @@ export async function materialiseTrial(
     await mkdir(skillsHome, { mode: 0o755 });
     for (const skill of plan.configuration.skills) await placeSkill(deps, skillsHome, skill);
   }
+  const homeSeeds = new Map<string, InputFile>();
+  for (const seed of plan.task.homeSeeds) {
+    const what = `home seed ${seed.path}`;
+    // The loader stores only HOME_SEED_PATHS; anything else would write elsewhere in the home.
+    if (!HOME_SEED_TARGETS.has(seed.path)) {
+      throw new AttemptSetupError(`${what} is not one of ${[...HOME_SEED_TARGETS].join(', ')}`);
+    }
+    const size = await placeBlob(deps, home, seed.path, seed, what);
+    inputs.push({ path: seed.path, sha256: seed.sha256, source: 'home_seed' });
+    homeSeeds.set(seed.path, { source: 'home_seed', sha256: seed.sha256, size });
+  }
   // Hermes's own runtime directory and its switch-off for the 58 bundled skills (plan 5.4).
   await mkdir(join(home, '.run'), { mode: 0o700 });
   await writeFile(join(home, '.no-bundled-skills'), '', { flag: 'wx' });
   await writeFile(join(home, 'task.txt'), plan.task.prompt, { flag: 'wx' });
   await writeFile(join(home, 'config.yaml'), configYaml, { flag: 'wx' });
-  return { inputs, manifest };
+  return { inputs, manifest, homeSeeds };
 }

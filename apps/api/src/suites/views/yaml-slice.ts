@@ -1,7 +1,7 @@
 /**
  * Verbatim YAML of each verification entry, cut from task.yaml as the author
  * wrote it (comments, flow maps and quoting kept), for Task detail's "YAML"
- * toggle. The yaml library's node ranges give each sequence item's source
+ * toggle, and the few task.yaml values the views read back. The yaml library's node ranges give each sequence item's source
  * offsets; the slice starts at the item's `- ` and is de-indented so it reads
  * as a top-level list item.
  *
@@ -11,6 +11,7 @@
  */
 import { isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml';
 import type { VerificationEntry } from '@hermes-evals/shared';
+import { normaliseRelative } from '../loader/task-files.js';
 
 /** The YAML of each entry, in the order of `entries`. */
 export function verificationYamlSlices(
@@ -28,6 +29,19 @@ export function answerPathOf(taskYaml: string | null): string | undefined {
   if (doc.errors.length > 0) return undefined;
   const path: unknown = doc.getIn(['answer', 'path']);
   return typeof path === 'string' && path.length > 0 ? path : undefined;
+}
+
+/**
+ * task.yaml's `self_check.expected_home` normalised as the loader normalises
+ * it (`./known_good/home/` is `known_good/home`), so it prefixes the stored
+ * path of every expected_home file (Phase 6 P2); null when there is none.
+ */
+export function expectedHomeDirOf(taskYaml: string | null): string | null {
+  if (taskYaml === null) return null;
+  const doc = parseDocument(taskYaml);
+  if (doc.errors.length > 0) return null;
+  const dir: unknown = doc.getIn(['self_check', 'expected_home']);
+  return typeof dir === 'string' ? normaliseRelative(dir) : null;
 }
 
 function slicesByKey(text: string): Map<string, string> {

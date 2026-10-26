@@ -260,6 +260,7 @@ async function insertArtifacts(
     tx.insert(artifacts).values(
       files.map((file) => ({
         attemptId: lease.attemptId,
+        root: file.root,
         path: file.path,
         origin: file.origin,
         size: file.size,

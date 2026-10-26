@@ -31,6 +31,7 @@ import {
   CONFIG_VERSIONS,
   configDiffFixture,
   configurationsFixture,
+  configVersionIn,
   DUPLICATED_FROM,
   draftFixture,
   findConfigVersion,
@@ -53,7 +54,7 @@ export function listConfigurations(): Promise<ConfigurationListRow[]> {
   if (apiMode === 'live') return apiGet('/configurations', ConfigurationListRowSchema.array());
   return fixture(
     () =>
-      configurationsFixture(noConfigurations()).map((latest) => ({
+      configurationsFixture(noConfigurations(), hasScenario).map((latest) => ({
         id: latest.configurationId,
         name: latest.name,
         createdAt: latest.createdAt,
@@ -77,7 +78,7 @@ export function getConfiguration(id: string, version?: number): Promise<Configur
   const request = `GET /api${path}`;
   return fixture(
     () => {
-      const latest = noConfigurations() ? undefined : findConfigVersion(id);
+      const latest = noConfigurations() ? undefined : findConfigVersion(id, hasScenario);
       if (!latest || (version !== undefined && version !== latest.version)) {
         throw notFound(
           request,
@@ -85,7 +86,7 @@ export function getConfiguration(id: string, version?: number): Promise<Configur
         );
       }
       const sourceName = DUPLICATED_FROM[latest.name as ConfigName];
-      const source = sourceName ? CONFIG_VERSIONS[sourceName] : null;
+      const source = sourceName ? configVersionIn(hasScenario, sourceName) : null;
       return {
         id: latest.configurationId,
         name: latest.name,
@@ -111,7 +112,7 @@ export function diffConfigurations(versionIds: string[]): Promise<ConfigDiff> {
   return fixture(
     () => {
       const versions = versionIds.map((v) => {
-        const found = findConfigVersion(v);
+        const found = findConfigVersion(v, hasScenario);
         if (!found) throw notFound(request, `configuration version ${v}`);
         return found;
       });
@@ -170,7 +171,7 @@ export function getConfigurationDraft(
   return fixture(
     () => {
       if (mode === 'new' || !id) return draftFixture('new', null);
-      const source = noConfigurations() ? undefined : findConfigVersion(id);
+      const source = noConfigurations() ? undefined : findConfigVersion(id, hasScenario);
       if (!source) throw notFound(request, `configuration ${id}`);
       const draft = draftFixture(mode, source);
       if (mode === 'edit') {

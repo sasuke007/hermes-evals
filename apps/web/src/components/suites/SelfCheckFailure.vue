@@ -52,7 +52,10 @@ const seconds = computed(() => `${(props.failure.durationMs / 1000).toFixed(1)} 
     </div>
     <p v-if="isScript" class="text-12 text-text-3">
       Contract: the platform runs
-      <code>python3 verify/{{ script }} --answer &lt;answer.json&gt; --workspace &lt;dir&gt;</code>
+      <code
+        >python3 verify/{{ script }} --answer &lt;answer.json&gt; --workspace &lt;dir&gt; --home
+        &lt;dir&gt;</code
+      >
       in the script's folder. The last line it prints must be JSON
       <code>{"score": 0.0–1.0, "comment": "…"}</code>; only <code>score</code> and
       <code>comment</code> are read. A non-zero exit, a timeout or a missing line is error. The

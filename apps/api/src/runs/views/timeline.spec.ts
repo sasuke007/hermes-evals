@@ -687,6 +687,39 @@ describe('other rows', () => {
     expect(rows.map((e) => e.error)).toEqual([false, true, false, false, true]);
   });
 
+  it("adds the home's memory files to the collected row (Phase 6 P2)", () => {
+    const collected = (payload: Record<string, unknown>): EventRecord => ({
+      seq: 1,
+      ts: START + 10,
+      type: 'platform',
+      payload: {
+        type: 'platform',
+        subtype: 'collected',
+        files: 1,
+        agent_files: 0,
+        ...payload,
+      } as never,
+    });
+    const [kept, failed] = [
+      collected({
+        home_files: 2,
+        home_agent_files: 1,
+        home_not_collected: [{ path: 'home/memories/link', kind: 'symlink' }],
+        home_not_collected_count: 1,
+        deleted_home_seeds: ['home/memories/USER.md'],
+      }),
+      collected({ home_files: 0, home_error: 'EACCES: permission denied' }),
+    ].map((e) => events(buildTimeline([e], CTX))[0]);
+    expect([kept?.summary, kept?.text]).toEqual([
+      '1 file collected · 0 written by the agent · 2 memory files',
+      'Not collected from the home: home/memories/link\nMemory seeds the agent deleted: home/memories/USER.md',
+    ]);
+    expect([failed?.summary, failed?.text]).toEqual([
+      '1 file collected · 0 written by the agent',
+      'The memory files could not be collected: EACCES: permission denied',
+    ]);
+  });
+
   it('marks a result the worker recorded itself', () => {
     const [row] = events(
       buildTimeline(

@@ -153,6 +153,7 @@ describe('create', () => {
         toolsets: ['file', 'terminal'],
         memoryEnabled: false,
         skills: [],
+        skillLoading: 'preload',
         documents: [],
         mcpServers: [],
         maxTurns: 20,

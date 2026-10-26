@@ -9,10 +9,11 @@
  *   answer, against the reference or (text_match) on its own
  *   (scoring/answer.ts). A missing or invalid answer block makes each of
  *   them `ungradable`, never a zero (plan 9.1);
- * - file_check: the end-state workspace rebuilt from artifact blobs;
+ * - file_check: the end-state workspace rebuilt from artifact blobs, or with
+ *   `root: home` the collected home files (Phase 6 P2);
  * - verifier_script: the task's script with the answer (or JSON null) and its
- *   own fresh copy of that workspace, under the Phase 1 runner's minimal
- *   environment;
+ *   own fresh copy of that workspace and of the home files (`--home`), under
+ *   the Phase 1 runner's minimal environment;
  * - trajectory_match: the attempt's tool_use and tool_result events
  *   (scoring/trajectory.ts); events that cannot be read give `error`;
  * - llm_judge: the judge (scoring/llm-judge.ts) on the final text, with the
@@ -72,14 +73,16 @@ export interface ScoredEvaluation {
   scores: ScoreDraft[];
 }
 
-/** The artifact stored at a workspace path, matched the way collection stores paths. */
-function artifactAt(ctx: ScorerContext, path: string) {
+/** The artifact stored at a path of `root`, matched the way collection stores paths. */
+function artifactAt(ctx: ScorerContext, root: FileCheckParams['root'], path: string) {
   const wanted = normaliseRelativePath(path);
-  return wanted === null ? undefined : ctx.artifacts.find((a) => a.path === wanted);
+  return wanted === null
+    ? undefined
+    : ctx.artifacts.find((a) => a.root === root && a.path === wanted);
 }
 
 async function scoreFileCheck(ctx: ScorerContext, params: FileCheckParams): Promise<ScorerResult> {
-  const artifact = artifactAt(ctx, params.path);
+  const artifact = artifactAt(ctx, params.root, params.path);
   const evidence = artifact ? { artifact_ids: [artifact.id] } : {};
   if (artifact && artifact.sha256 === null) {
     // Collection recorded the file without content; the rebuilt workspace lacks
@@ -87,7 +90,7 @@ async function scoreFileCheck(ctx: ScorerContext, params: FileCheckParams): Prom
     // oversized file the same way when it finds one on disk.
     const why =
       artifact.skippedReason === 'over_budget'
-        ? "the attempt's workspace passed the collection budget"
+        ? `the attempt's ${params.root === 'home' ? 'files' : 'workspace'} passed the collection budget`
         : `it is larger than ${MAX_CHECKED_FILE_BYTES} bytes`;
     return binary(
       false,
@@ -98,14 +101,15 @@ async function scoreFileCheck(ctx: ScorerContext, params: FileCheckParams): Prom
       },
     );
   }
-  let workspaceDir: string;
+  const what = params.root === 'home' ? 'the home files' : 'the workspace';
+  let rootDir: string;
   try {
-    workspaceDir = await ctx.workspace();
+    rootDir = params.root === 'home' ? await ctx.home() : await ctx.workspace();
   } catch (err) {
     const { message, detail } = describeThrown(err);
-    return scorerError(`could not rebuild the workspace from stored files: ${message}`, detail);
+    return scorerError(`could not rebuild ${what} from stored files: ${message}`, detail);
   }
-  const result = await checkFile(params, workspaceDir);
+  const result = await checkFile(params, rootDir);
   return { ...result, evidence: { ...result.evidence, ...evidence } };
 }
 
@@ -119,7 +123,7 @@ async function scoreVerifier(
   } catch (err) {
     const { message, detail } = describeThrown(err);
     return scorerError(
-      `could not rebuild the workspace and verify/ folder from stored files: ${message}`,
+      `could not rebuild the workspace, home files and verify/ folder from stored files: ${message}`,
       detail,
     );
   }
@@ -129,6 +133,7 @@ async function scoreVerifier(
       // A verifier may judge the workspace alone, so it runs without an answer too.
       answer: ctx.answer.status === 'found' ? ctx.answer.value : null,
       workspaceDir: dirs.workspaceDir,
+      homeDir: dirs.homeDir,
       scratchDir: dirs.scratchDir,
       python: ctx.python,
     });

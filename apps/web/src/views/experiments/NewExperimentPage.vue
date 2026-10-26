@@ -37,7 +37,8 @@ import { useSystemStore } from '@/stores/system';
  * five numbered sections, and the sticky summary panel that sizes and prices the experiment as
  * it is edited (GET /experiments/estimate) and launches it (POST /experiments, then the
  * Overview). Launch is disabled with the first unmet requirement, or with what blocks the
- * chosen configurations (a provider, the worker, the sandbox) and its fix. A refused launch
+ * chosen configurations (a provider, an MCP variable that is not set, the worker, the sandbox)
+ * and its fix. A refused launch
  * shows the API's reason in the panel and the form keeps its values; a configuration that
  * changed since the form loaded is reloaded, so the comparison shows what launch would freeze.
  *
@@ -106,24 +107,37 @@ const providerSnapshot = computed<ProviderSnapshot>(() => ({
   nousStatus: providers.nousStatus,
   nousConnected: providers.nousConnected,
 }));
+const noWorker = computed(() =>
+  system.loaded ? system.noWorker : store.options?.workerCount === 0,
+);
 const blockers = computed(() =>
   launchBlockers(
     providerSnapshot.value,
-    {
-      noWorker: system.loaded ? system.noWorker : store.options?.workerCount === 0,
-      sandboxProven: system.sandboxProven,
-    },
-    form.ordered.value.map((c) => ({ name: c.name, provider: c.provider })),
+    { noWorker: noWorker.value, sandboxProven: system.sandboxProven },
+    form.ordered.value.map((c) => ({
+      name: c.name,
+      provider: c.provider,
+      missingSecrets: c.missingSecrets,
+    })),
   ),
 );
 
+/**
+ * Check again (unset MCP variables): nothing streams which variables the worker and egress
+ * have, so the configurations are reloaded; the chosen versions stay chosen.
+ */
+async function recheckSecrets(): Promise<void> {
+  await store.loadOptions();
+}
+
 // ── launch ────────────────────────────────────────────────────────────────
-/** A refusal that a provider blocker now says too is not repeated. */
-const shownFailure = computed(() =>
-  failure.value?.kind === 'provider' && blockers.value.some((b) => b.provider === 'nous')
-    ? null
-    : failure.value,
-);
+/** A refusal that a blocker now says too (Nous Portal, unset MCP variables) is not repeated. */
+const shownFailure = computed(() => {
+  const kind = failure.value?.kind;
+  if (kind === 'provider' && blockers.value.some((b) => b.provider === 'nous')) return null;
+  if (kind === 'secrets' && blockers.value.some((b) => b.fix === 'secrets')) return null;
+  return failure.value;
+});
 
 /**
  * From Launch until the Overview shows: the POST has answered before the Overview's page has
@@ -154,6 +168,8 @@ async function launch(): Promise<void> {
       const next = await store.loadOptions();
       if (previous && next) form.remap(previous, next);
     }
+    // The configurations then name the variables, and their blocker replaces the refusal.
+    if (failure.value.kind === 'secrets') await store.loadOptions();
   }
 }
 
@@ -257,7 +273,7 @@ const breadcrumbs = [
             :changed-since="draft ? draft.changes.suiteVersionFrom : null"
             :changed-tasks="draft?.changes.changedTasks ?? []"
           />
-          <ConfigurationsSection :providers="providerSnapshot" />
+          <ConfigurationsSection :providers="providerSnapshot" :no-worker="noWorker" />
           <RepetitionsSection />
           <LimitsSection />
         </fieldset>
@@ -288,6 +304,7 @@ const breadcrumbs = [
           :failure="shownFailure"
           @launch="launch"
           @connect="connect"
+          @recheck="recheckSecrets"
         />
       </div>
     </div>

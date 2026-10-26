@@ -1,18 +1,19 @@
 /**
  * Resolves a claimed attempt into the AttemptPlan the runner works from
- * (execution/contracts.ts, plan 5.4): the task's prompt and fixtures, the
- * frozen configuration version with its skills, documents and MCP
- * definitions, the run budget after the experiment's override, and the
- * Hermes revision the experiment froze. Everything read here is immutable
- * once the experiment launched (suites, tasks, task files, skills,
- * documents, frozen versions), so it is read after the claim commits,
- * without locks.
+ * (execution/contracts.ts, plan 5.4): the task's prompt, fixtures and home
+ * seeds, the frozen configuration version with its skills (and how they
+ * load), documents and MCP definitions, the run budget after the
+ * experiment's override, and the Hermes revision the experiment froze.
+ * Everything read here is immutable once the experiment launched (suites,
+ * tasks, task files, skills, documents, frozen versions), so it is read
+ * after the claim commits, without locks.
  *
  * The MCP refusal check (refusedEnvNames, plan 5.3) runs on the result
  * before any value could enter a trial: see refusalOf.
  */
 import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
+import { homeSeedTarget, isHomeSeedPath, type SkillLoadingMode } from '@hermes-evals/shared';
 import {
   configurations,
   configurationVersions,
@@ -28,7 +29,7 @@ import type { AppDb } from '../../database/types.js';
 import { effectiveBudgetS } from '../budget.js';
 import { definitionOf } from '../../resources/mcp/definition.js';
 import { refusedEnvNames } from '../../worker/handlers/test-mcp-server.js';
-import type { AttemptPlan, PlannedMcpServer } from '../contracts.js';
+import type { AttemptPlan, PlannedHomeSeed, PlannedMcpServer } from '../contracts.js';
 import type { ClaimedAttempt } from './types.js';
 
 /** The plan cannot be built: the attempt ends as execution_error `setup` with this message. */
@@ -52,6 +53,26 @@ export interface PlanInput {
 
 const FIXTURES_PREFIX = 'fixtures/';
 
+/** The Hermes toolset whose tools (skills_list, skill_view) find installed skills. */
+export const SKILLS_TOOLSET = 'skills';
+
+/**
+ * The toolsets a trial runs with: the version's, sorted and de-duplicated,
+ * plus `skills` when its skills load on demand (Phase 6 P5), once even if the
+ * version already enables it. With no `-s`, the skills toolset is how the
+ * agent finds them: Hermes indexes home/skills/ in the prompt only when one
+ * of its tools is on (agent/system_prompt.py _skills_prompt), and opens one
+ * with skill_view. The `-t` list and config.yaml's `toolsets` are both built
+ * from this list, so the two agree.
+ */
+export function plannedToolsets(
+  toolsets: readonly string[],
+  skillLoading: SkillLoadingMode,
+): string[] {
+  const extra = skillLoading === 'on_demand' ? [SKILLS_TOOLSET] : [];
+  return [...new Set([...toolsets, ...extra])].sort();
+}
+
 /** Keeps the order of `ids` (the order the configuration lists them). */
 const inOrderOf = <T extends { id: string }>(ids: readonly string[], rows: T[]): T[] => {
   const byId = new Map(rows.map((row) => [row.id, row]));
@@ -73,11 +94,27 @@ export async function buildAttemptPlan(
   if (!task) throw new PlanError(`task ${claimed.taskId} does not exist`);
   if (!task.prompt) throw new PlanError(`task ${task.key} has no prompt`);
 
-  const fixtures = await db
-    .select({ path: taskFiles.path, sha256: taskFiles.sha256, size: taskFiles.size })
+  const copied = await db
+    .select({
+      kind: taskFiles.kind,
+      path: taskFiles.path,
+      sha256: taskFiles.sha256,
+      size: taskFiles.size,
+    })
     .from(taskFiles)
-    .where(and(eq(taskFiles.taskId, task.id), eq(taskFiles.kind, 'fixture')))
+    .where(and(eq(taskFiles.taskId, task.id), inArray(taskFiles.kind, ['fixture', 'home_seed'])))
     .orderBy(taskFiles.path);
+  const fixtures = copied.filter((file) => file.kind === 'fixture');
+  // The loader stores only HOME_SEED_PATHS as home seeds; any other path is a
+  // fault, and must never be copied somewhere else in the home.
+  const homeSeeds: PlannedHomeSeed[] = copied
+    .filter((file) => file.kind === 'home_seed')
+    .map((file) => {
+      if (!isHomeSeedPath(file.path)) {
+        throw new PlanError(`task ${task.key} has a home seed at ${file.path}`);
+      }
+      return { path: homeSeedTarget(file.path), sha256: file.sha256, size: file.size };
+    });
 
   const [version] = await db
     .select({ version: configurationVersions, name: configurations.name })
@@ -174,6 +211,7 @@ export async function buildAttemptPlan(
         sha256: file.sha256,
         size: file.size,
       })),
+      homeSeeds,
     },
     limits: {
       maxTurns: cv.maxTurns,
@@ -186,9 +224,11 @@ export async function buildAttemptPlan(
       model: cv.model,
       provider: cv.provider,
       baseUrl: cv.baseUrl,
-      toolsets: [...new Set(cv.toolsets)].sort(),
+      toolsets: plannedToolsets(cv.toolsets, cv.skillLoading),
       memoryEnabled: cv.memoryEnabled,
       skills: inOrderOf(cv.skillIds, skillRows),
+      // The CHECKs keep on_demand to versions with skills (migration 0008).
+      skillLoading: cv.skillLoading,
       documents: inOrderOf(cv.documentIds, documentRows),
       mcpServers: mcpServersPlanned,
     },

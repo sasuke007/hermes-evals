@@ -14,7 +14,8 @@
  * paused-ceiling, paused-provider, no-worker, nothing-scored, single-rep,
  * verdict-updated, cancelled, multi-attempt, disk-limit, token-cap,
  * timeout-silent, provider-lapsed, plus the suite states (invalid-task,
- * newer-version).
+ * newer-version); New experiment's options also read secret-not-set and
+ * mcp-test-failed (with-mcp's unset INVOICE_DB_URL) and skills-on-demand.
  */
 import type {
   ExecutionErrorCategory,
@@ -52,6 +53,7 @@ import {
   CONFIG_NAMES,
   CONFIG_VERSIONS,
   configDiffFixture,
+  configVersionIn,
   type ConfigName,
   MODEL,
   PRICE_TABLE,
@@ -1704,6 +1706,9 @@ export function newExperimentOptionsFixture(
   // openrouter-in-use: every configuration runs on OpenRouter, which has no key (the
   // NewExperimentStates "OpenRouter key missing" frame: tagged rows and the .env blocker).
   const onOpenRouter = active('openrouter-in-use');
+  // secret-not-set and mcp-test-failed: INVOICE_DB_URL is missing from the worker, so a
+  // configuration with invoice-db names it and cannot launch (Phase 6 S7).
+  const invoiceDbUrlMissing = active('secret-not-set') || active('mcp-test-failed');
   const suites = active('empty') ? [] : [suiteDetailFixture(state, currentSuiteId(state))];
   return {
     suites: suites.flatMap((s) =>
@@ -1733,7 +1738,7 @@ export function newExperimentOptionsFixture(
         : [],
     ),
     configurations: configs.map((name) => {
-      const c = CONFIG_VERSIONS[name];
+      const c = configVersionIn(active, name);
       const per = noHistory ? BUDGET_ESTIMATE : PER_RUN[name];
       const estimate = {
         seconds: per.seconds,
@@ -1752,7 +1757,12 @@ export function newExperimentOptionsFixture(
         provider: onOpenRouter ? ('openrouter' as const) : c.provider,
         memoryEnabled: c.memoryEnabled,
         skills: c.skills.map((s) => `${s.name}@${s.version}`),
+        skillLoading: c.skillLoading,
         mcpServers: c.mcpServers.map((m) => `${m.name} (${m.transport})`),
+        missingSecrets:
+          invoiceDbUrlMissing && c.mcpServers.some((m) => m.name === 'invoice-db')
+            ? [{ server: 'invoice-db', name: 'INVOICE_DB_URL', transport: 'stdio' as const }]
+            : [],
         estimates: Object.fromEntries(suites.flatMap((s) => (s ? [[s.suiteId, estimate]] : []))),
       };
     }),

@@ -1,19 +1,23 @@
 /**
  * Task detail, a task's version history and the diff between two versions
  * (plan 4.5, UI_FLOWS 8.2), built from tasks and task_files rows. File
- * contents (fixture labels and previews, the verifier source) are read by the
+ * contents (fixture labels and previews, home file texts, the verifier source) are read by the
  * service and passed in, so these stay pure.
  */
-import type {
-  SelfCheckFailureView,
-  SuiteTaskRow,
-  TablePreview,
-  TaskDetail,
-  TaskDiff,
-  TaskExperimentUsage,
-  TaskFixtureFile,
-  TaskVersionEntry,
-  VerificationEntryView,
+import {
+  homeSeedTarget,
+  isHomeSeedPath,
+  TASK_HOME_FILE_KINDS,
+  type SelfCheckFailureView,
+  type SuiteTaskRow,
+  type TablePreview,
+  type TaskDetail,
+  type TaskDiff,
+  type TaskExperimentUsage,
+  type TaskFixtureFile,
+  type TaskHomeFile,
+  type TaskVersionEntry,
+  type VerificationEntryView,
 } from '@hermes-evals/shared';
 import { changedFiles, fileChanges, type FileState, type TaskContent } from './changes.js';
 import { jsonDiff, textDiff } from './diffs.js';
@@ -23,7 +27,7 @@ import { verificationSentence } from './sentences.js';
 import { selfCheckView } from './self-check.js';
 import { suiteRef } from './suite-views.js';
 import { fixtureTypeLabel } from './table.js';
-import { answerPathOf, verificationYamlSlices } from './yaml-slice.js';
+import { answerPathOf, expectedHomeDirOf, verificationYamlSlices } from './yaml-slice.js';
 
 /** One task row of Suite detail. */
 export function suiteTaskRow(
@@ -79,12 +83,54 @@ export function fixtureFileView(
   };
 }
 
+/**
+ * Task detail's home files (Phase 6 P1, P2): the home seeds in path order,
+ * then the expected_home files in path order, each with its path in the
+ * home. `textOf` gives a file's text, or null when it is too large, not
+ * UTF-8 or gone from the blob store.
+ */
+export function homeFileViews(
+  task: Pick<TaskRow, 'taskYaml'>,
+  files: readonly TaskFileRow[],
+  textOf: ReadonlyMap<string, string | null>,
+): TaskHomeFile[] {
+  const expectedHomeDir = expectedHomeDirOf(task.taskYaml);
+  return TASK_HOME_FILE_KINDS.flatMap((kind) =>
+    files
+      .filter((f) => f.kind === kind)
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      .map((f) => ({
+        kind,
+        path: f.path,
+        homePath: homePathOf(f.path, expectedHomeDir),
+        sizeBytes: f.size,
+        sha256: f.sha256,
+        text: textOf.get(f.sha256) ?? null,
+      })),
+  );
+}
+
+/**
+ * A home file's path in the home: a seed's target (`home/memories/USER.md`
+ * → `memories/USER.md`), or an expected_home file's path inside its folder,
+ * which may be nested (`known_good/home/memories/USER.md` →
+ * `memories/USER.md`). The loader stores expected_home files only under that
+ * folder, so the prefix is always there.
+ */
+function homePathOf(path: string, expectedHomeDir: string | null): string {
+  if (isHomeSeedPath(path)) return homeSeedTarget(path);
+  const prefix = expectedHomeDir === null ? null : `${expectedHomeDir}/`;
+  return prefix !== null && path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
 export interface TaskDetailInput {
   suite: SuiteRow;
   task: TaskRow;
   /** Version number of the suite row named by task.introducedInSuiteId. */
   introducedInSuiteVersion: number;
   fixtures: readonly TaskFixtureFile[];
+  /** The home seeds, then the expected_home files (homeFileViews). */
+  homeFiles: readonly TaskHomeFile[];
   verifier: TaskDetail['verifier'];
   failure: SelfCheckFailureView | null;
   experiments: readonly TaskExperimentUsage[];
@@ -102,6 +148,7 @@ export function taskDetail(input: TaskDetailInput): TaskDetail {
     path: taskYamlDisplayPath(suite.sourcePath, task.key),
     prompt: { file: 'prompt.md', markdown: prompt, characters: prompt.length },
     fixtures: [...input.fixtures],
+    homeFiles: [...input.homeFiles],
     verification: verificationViews(task),
     reference: { file: 'reference.json', value: task.reference ?? null },
     verifier: input.verifier,

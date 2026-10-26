@@ -2,7 +2,8 @@
 import { computed, useId } from 'vue';
 import BaseToggle from '@/components/ui/BaseToggle.vue';
 import FormField from '@/components/ui/FormField.vue';
-import type { SelectOption } from '@/components/ui/types';
+import SegmentedControl from '@/components/ui/SegmentedControl.vue';
+import type { SegmentOption, SelectOption } from '@/components/ui/types';
 import type { ConfigurationFormOptions } from '@/api/types/configurations';
 import { ROUTE_NAMES } from '@/router';
 import type { McpExposure } from '@/stores/configurations';
@@ -12,7 +13,7 @@ import McpExposureNote from './McpExposureNote.vue';
 import ResourcePicker from './ResourcePicker.vue';
 import ToolsetPicker from './ToolsetPicker.vue';
 import { mcpDetail, modelHelp } from './configDisplay';
-import type { ConfigFormField, ConfigFormState } from './configForm';
+import type { ConfigFormField, ConfigFormIssueField, ConfigFormState } from './configForm';
 
 /**
  * The configuration form's panel (ConfigForm board): Name, Model and provider (with the
@@ -20,11 +21,15 @@ import type { ConfigFormField, ConfigFormState } from './configForm';
  * exposes to the run) and Limits, one ConfigFormRow each. The page owns the values and the
  * rules; `errors` holds the sentences to show (fields the user has left), `blur` says which
  * field was left.
+ *
+ * Skill loading (Phase 6 P5; no board draws it): once a skill is chosen, the Skills row adds
+ * a two-option SegmentedControl, preload or on demand, from the form options, with one line
+ * of help. It is drawn like the Comparison's and Experiment list's segment rows.
  */
 const props = withDefaults(
   defineProps<{
     options: ConfigurationFormOptions;
-    errors?: Partial<Record<ConfigFormField | 'toolsets' | 'resources', string>>;
+    errors?: Partial<Record<ConfigFormIssueField, string>>;
     /** MCP server version id → its env and header names (the resource library). */
     exposure?: Record<string, McpExposure>;
   }>(),
@@ -62,6 +67,13 @@ const skills = computed(() =>
     return { id, label: s?.name ?? id, detail: s?.version ?? null };
   }),
 );
+const loadingOptions = computed<SegmentOption<ConfigFormState['skillLoading']>[]>(() =>
+  props.options.skillLoading.map((o) => ({ value: o.id, label: o.label })),
+);
+const skillLoading = computed({
+  get: () => state.value.skillLoading,
+  set: (skillLoading: ConfigFormState['skillLoading']) => patch({ skillLoading }),
+});
 const skillOptions = computed<SelectOption<string>[]>(() =>
   props.options.skills
     .filter((s) => !state.value.skillIds.includes(s.skillId))
@@ -265,17 +277,38 @@ const libraryTab = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: {
         <code>hermes-agent</code> skill in every configuration. Skills you add here come on top of
         it.</template
       >
-      <ResourcePicker
-        :items="skills"
-        :options="skillOptions"
-        placeholder="Add skill…"
-        add-label="Add skill"
-        :empty-text="null"
-        :select-width="180"
-        :link="{ label: 'Upload new', to: libraryTab('skills') }"
-        @add="patch({ skillIds: [...state.skillIds, $event] })"
-        @remove="patch({ skillIds: without(state.skillIds, $event) })"
-      />
+      <div class="flex max-w-760 flex-col gap-8">
+        <ResourcePicker
+          :items="skills"
+          :options="skillOptions"
+          placeholder="Add skill…"
+          add-label="Add skill"
+          :empty-text="null"
+          :select-width="180"
+          :link="{ label: 'Upload new', to: libraryTab('skills') }"
+          @add="patch({ skillIds: [...state.skillIds, $event] })"
+          @remove="patch({ skillIds: without(state.skillIds, $event) })"
+        />
+        <div
+          v-if="state.skillIds.length > 0"
+          class="flex flex-wrap items-center gap-x-10 gap-y-6"
+          data-testid="skill-loading"
+        >
+          <span class="text-12 font-medium text-text-2" aria-hidden="true">Skill loading</span>
+          <SegmentedControl
+            v-model="skillLoading"
+            :options="loadingOptions"
+            label="Skill loading"
+          />
+          <p class="basis-full text-12 text-text-3">
+            Preload puts the skills in the prompt; on demand installs them for the agent to find,
+            with the <code>skills</code> toolset.
+          </p>
+        </div>
+        <span v-if="errors.skillLoading" class="text-12 text-fail-text">{{
+          errors.skillLoading
+        }}</span>
+      </div>
     </ConfigFormRow>
 
     <ConfigFormRow label="Documents">

@@ -171,6 +171,7 @@ describe('scorer params', () => {
       }).success,
     ).toBe(true);
     expect(params('file_check', { path: 'out/report.md', contains: ['Total'] }).data).toEqual({
+      root: 'workspace',
       path: 'out/report.md',
       must_exist: true,
       contains: ['Total'],

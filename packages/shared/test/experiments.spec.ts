@@ -480,7 +480,9 @@ describe('New experiment options and drafts', () => {
         provider: 'nous',
         memoryEnabled: false,
         skills: [],
+        skillLoading: 'preload',
         mcpServers: ['invoice-db (stdio)'],
+        missingSecrets: [],
         estimates: {
           [SUITE.suiteId]: {
             seconds: 48,

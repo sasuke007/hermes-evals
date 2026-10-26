@@ -6,9 +6,11 @@
  *
  * - `workspace()`: the end-state workspace rebuilt from artifact blobs, made
  *   once and shared by read-only checks (file_check);
- * - `verifierDirs()`: a fresh workspace, `verify/` folder and scratch folder
- *   for each verifier run, because a verifier may write to what it is given
- *   and the next check must still see the agent's files;
+ * - `home()`: the same for the home's memory files (Phase 6 P2), which a
+ *   file_check with `root: home` reads;
+ * - `verifierDirs()`: a fresh workspace, home, `verify/` folder and scratch
+ *   folder for each verifier run, because a verifier may write to what it is
+ *   given and the next check must still see the agent's files;
  * - `events()`: the attempt's event stream (trajectory_match);
  * - `rubric(path)`: an llm_judge rubric's text, read from its blob.
  *
@@ -31,12 +33,19 @@ import {
   type EvaluationEvidence,
   type EventRecord,
 } from './evidence.js';
-import { materialiseVerifyDir, materialiseWorkspace, normaliseRelativePath } from './workspace.js';
+import {
+  materialiseHome,
+  materialiseVerifyDir,
+  materialiseWorkspace,
+  normaliseRelativePath,
+} from './workspace.js';
 
 /** Folders for one verifier run, all inside one scratch directory. */
 export interface VerifierDirs {
   /** The attempt's end-state workspace; the verifier may change it. */
   workspaceDir: string;
+  /** The attempt's collected home files (`memories/…`), given as `--home`; empty when there are none. */
+  homeDir: string;
   /** The task's `verify/` folder, outside the workspace. */
   verifyDir: string;
   /** Empty: the verifier's answer.json, HOME and TMPDIR. */
@@ -52,6 +61,8 @@ export interface ScorerContext {
   events(): Promise<readonly EventRecord[]>;
   /** The shared end-state workspace for read-only checks. Never hand it to a verifier. */
   workspace(): Promise<string>;
+  /** The shared collected home files for read-only checks (Phase 6 P2). Never hand it to a verifier. */
+  home(): Promise<string>;
   /** Fresh folders for one verifier run; removed by close() or by the returned dispose. */
   verifierDirs(): Promise<VerifierDirs & { dispose(): Promise<void> }>;
   /**
@@ -98,6 +109,7 @@ export function openScorerContext(
 
   let events: Promise<EventRecord[]> | null = null;
   let shared: Promise<string> | null = null;
+  let sharedHome: Promise<string> | null = null;
 
   return {
     task: evidence.task,
@@ -121,14 +133,23 @@ export function openScorerContext(
         await materialiseWorkspace(deps.store, evidence.artifacts, workspaceDir);
         return workspaceDir;
       })()),
+    home: () =>
+      (sharedHome ??= (async () => {
+        const dir = await scratch('eval-home');
+        const homeDir = join(dir.path, 'home');
+        await materialiseHome(deps.store, evidence.artifacts, homeDir);
+        return homeDir;
+      })()),
     verifierDirs: async () => {
       const dir = await scratch('eval-verifier');
       const dirs = {
         workspaceDir: join(dir.path, 'workspace'),
+        homeDir: join(dir.path, 'home'),
         verifyDir: join(dir.path, 'verify'),
         scratchDir: join(dir.path, 'scratch'),
       };
       await materialiseWorkspace(deps.store, evidence.artifacts, dirs.workspaceDir);
+      await materialiseHome(deps.store, evidence.artifacts, dirs.homeDir);
       await materialiseVerifyDir(deps.store, evidence.verifierFiles, dirs.verifyDir);
       await mkdir(dirs.scratchDir);
       return { ...dirs, dispose: () => dir.dispose() };

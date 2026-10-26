@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { missingSecretsConflictMessage, type MissingMcpSecret } from '@hermes-evals/shared';
 import { ApiError } from '@/api/client';
 import type { ProviderInfo } from '@/api/types/system';
 import {
@@ -6,6 +7,8 @@ import {
   launchFailure,
   providerReady,
   providerTag,
+  secretsApplyCommand,
+  unsetSecrets,
   type ProviderSnapshot,
 } from '../launchReadiness';
 
@@ -153,5 +156,74 @@ describe('launchReadiness', () => {
     expect(invalid).toMatchObject({ kind: 'invalid', title: 'Launch failed' });
     expect(invalid.hint).toContain('taskKeys.0: late_fees is invalid and cannot run');
     expect(launchFailure(new Error('boom'))).toMatchObject({ kind: 'other', message: 'boom' });
+  });
+
+  describe('MCP variables that are not set (Phase 6 S7)', () => {
+    const dbUrl: MissingMcpSecret = {
+      server: 'invoice-db',
+      name: 'INVOICE_DB_URL',
+      transport: 'stdio',
+    };
+    const token: MissingMcpSecret = {
+      server: 'vendor-directory',
+      name: 'VENDOR_DIRECTORY_TOKEN',
+      transport: 'http',
+    };
+    const ok = snapshot('connected', 'configured');
+
+    it('blocks each configuration that names one, after the providers, before the worker', () => {
+      const blockers = launchBlockers(snapshot('connected', 'missing'), { ...READY }, [
+        { name: 'baseline', provider: 'nous', missingSecrets: [] },
+        { name: 'or-mcp', provider: 'openrouter', missingSecrets: [token] },
+        { name: 'with-mcp', provider: 'nous', missingSecrets: [dbUrl, token] },
+      ]);
+      expect(blockers.map((b) => [b.fix, b.reason, b.configurations])).toEqual([
+        ['add-key', "Can't launch yet: OpenRouter has no API key.", ['or-mcp']],
+        [
+          'secrets',
+          'or-mcp: VENDOR_DIRECTORY_TOKEN (vendor-directory, added by egress) is not set.',
+          ['or-mcp'],
+        ],
+        [
+          'secrets',
+          'with-mcp: INVOICE_DB_URL (invoice-db, read by the worker) and VENDOR_DIRECTORY_TOKEN (vendor-directory, added by egress) are not set.',
+          ['with-mcp'],
+        ],
+      ]);
+      expect(blockers[2]).toMatchObject({
+        detail:
+          'Set each in .env, then recreate the worker (stdio) or egress (http) so it reads them.',
+        command: 'docker compose up -d egress worker',
+        missing: [dbUrl, token],
+      });
+    });
+
+    it('recreates the service that reads the variable', () => {
+      expect(secretsApplyCommand([dbUrl])).toBe('docker compose up -d worker');
+      expect(secretsApplyCommand([token])).toBe('docker compose up -d egress');
+      expect(secretsApplyCommand([token, dbUrl])).toBe('docker compose up -d egress worker');
+    });
+
+    it('says nothing about variables while no worker is live: nothing vouches for any name', () => {
+      const chosen = [{ name: 'with-mcp', provider: 'nous' as const, missingSecrets: [dbUrl] }];
+      expect(unsetSecrets(chosen[0]!, { noWorker: true })).toEqual([]);
+      expect(unsetSecrets(chosen[0]!, { noWorker: false })).toEqual([dbUrl]);
+      expect(
+        launchBlockers(ok, { noWorker: true, sandboxProven: true }, chosen).map((b) => b.reason),
+      ).toEqual(["Can't launch yet: no worker is connected."]);
+      expect(launchBlockers(ok, READY, [{ name: 'a', provider: 'nous' }])).toEqual([]);
+    });
+
+    it('reads the launch 409 for unset variables as its own refusal', () => {
+      const detail = missingSecretsConflictMessage([
+        { configuration: 'with-mcp', missing: [dbUrl] },
+      ]);
+      expect(launchFailure(new ApiError(409, 'POST /api/experiments', detail))).toMatchObject({
+        kind: 'secrets',
+        title: "Launch refused: an MCP server's variables are not set.",
+        message: `POST /api/experiments → 409 · ${detail}`,
+        action: null,
+      });
+    });
   });
 });

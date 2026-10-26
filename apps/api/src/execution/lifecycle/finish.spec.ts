@@ -148,6 +148,7 @@ describe('the fenced sink and the finish transaction', () => {
       outcomes.executed({
         artifacts: [
           {
+            root: 'workspace',
             path: 'summary.txt',
             origin: 'agent',
             size: content.length,
@@ -155,11 +156,21 @@ describe('the fenced sink and the finish transaction', () => {
             skippedReason: null,
           },
           {
+            root: 'workspace',
             path: 'huge.bin',
             origin: 'agent',
             size: 30_000_000,
             sha256: null,
             skippedReason: 'too_large',
+          },
+          // A memory file (Phase 6 P2): the same content, under the home's root.
+          {
+            root: 'home',
+            path: 'memories/USER.md',
+            origin: 'home_seed_modified',
+            size: content.length,
+            sha256: sha(content),
+            skippedReason: null,
           },
         ],
       }),
@@ -201,9 +212,15 @@ describe('the fenced sink and the finish transaction', () => {
     expect(await workerInFlight(t.db, workerId)).toBe(0);
     expect(
       (await t.db.select().from(artifacts).where(eq(artifacts.attemptId, claimed.attemptId))).map(
-        (a) => a.path,
+        (a) => `${a.root}/${a.path}`,
       ),
-    ).toEqual(expect.arrayContaining(['summary.txt', 'huge.bin']));
+    ).toEqual(
+      expect.arrayContaining([
+        'workspace/summary.txt',
+        'workspace/huge.bin',
+        'home/memories/USER.md',
+      ]),
+    );
   });
 
   it('prices what egress metered when Hermes printed no result, or a result that claims less', async () => {

@@ -241,6 +241,8 @@ export const ORIGIN_LABELS: Record<ArtifactView['origin'], string> = {
   fixture_modified: 'fixture · modified',
   document_unchanged: 'document · unchanged',
   document_modified: 'document · modified',
+  home_seed_unchanged: 'home seed · unchanged',
+  home_seed_modified: 'home seed · modified',
   agent: 'written by agent',
 };
 

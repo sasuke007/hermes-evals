@@ -135,6 +135,7 @@ describe('edit draft', () => {
       toolsets: ['file', 'terminal'],
       memoryEnabled: false,
       skillIds: [],
+      skillLoading: 'preload',
       documentIds: [lib.documentId],
       mcpServerVersionIds: [],
       maxTurns: 20,

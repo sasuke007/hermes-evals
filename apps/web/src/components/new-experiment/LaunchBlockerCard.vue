@@ -11,9 +11,14 @@ import type { LaunchBlocker } from './launchReadiness';
  * Portal, which opens ConnectDialog; for an API-key provider the .env step with Copy and Open
  * System, never a Connect button; for the host proxy or a missing worker, the command to run.
  * Nothing entered is lost: the block clears by itself once the cause is fixed.
+ *
+ * Unset MCP variables (Phase 6 S7; drawn like the worker's block, no board has it): what to
+ * set and the command that makes the worker or egress read it, then Check again, which reloads
+ * the configurations, since nothing streams their variables, and a link to Secrets.
  */
 defineProps<{ blocker: LaunchBlocker }>();
-const emit = defineEmits<{ connect: [] }>();
+const emit = defineEmits<{ connect: []; recheck: [] }>();
+const secretsTab = { name: ROUTE_NAMES.resourcesTab, params: { tab: 'secrets' } };
 </script>
 
 <template>
@@ -49,6 +54,22 @@ const emit = defineEmits<{ connect: [] }>();
         <CopyButton :text="blocker.command ?? ''" variant="button" label="Copy the command" />
       </div>
       <RouterLink :to="{ name: ROUTE_NAMES.system }" class="text-12">Open System</RouterLink>
+    </template>
+
+    <template v-else-if="blocker.fix === 'secrets'">
+      <span class="text-12 leading-18 text-text-2">{{ blocker.detail }}</span>
+      <CopyCommand v-if="blocker.command" :command="blocker.command" />
+      <div class="flex flex-wrap items-center gap-12">
+        <button
+          type="button"
+          class="btn h-28 text-12"
+          data-testid="recheck-secrets"
+          @click="emit('recheck')"
+        >
+          Check again
+        </button>
+        <RouterLink :to="secretsTab" class="text-12">Open Secrets</RouterLink>
+      </div>
     </template>
 
     <template v-else>

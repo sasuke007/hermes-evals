@@ -22,7 +22,10 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/suites/**",
-        "$TURBO_ROOT$/apps/web/src/fixtures/**"
+        "$TURBO_ROOT$/apps/web/src/fixtures/**",
+        "$TURBO_ROOT$/scripts/**",
+        "$TURBO_ROOT$/samples/**",
+        "$TURBO_ROOT$/docker/mcp/**"
       ],
       "env": ["RUN_SANDBOX_TESTS", "DOCKER_SOCKET", "TRIALS_DIR", "TRIAL_IMAGE", "TRIAL_VOLUME"]
     },

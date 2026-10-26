@@ -6,8 +6,9 @@ import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import StatusDot from '@/components/ui/StatusDot.vue';
 import { ROUTE_NAMES } from '@/router';
 import { useExperimentsStore } from '@/stores/experiments';
+import { missingSecretText } from '@hermes-evals/shared';
 import FormSection from './FormSection.vue';
-import { providerTag, type ProviderSnapshot } from './launchReadiness';
+import { providerTag, unsetSecrets, type ProviderSnapshot } from './launchReadiness';
 import { useFormContext } from './useNewExperimentForm';
 
 /**
@@ -17,8 +18,15 @@ import { useFormContext } from './useNewExperimentForm';
  * shared ConfigDiffTable (GET /configurations/diff, baseline first) with the count of fields
  * that differ, which is how the user checks the experiment is controlled. With fewer than two
  * configurations it says how to make a second one (ExperimentStates).
+ *
+ * Phase 6: a row whose MCP servers name a variable that is not set carries one amber tag per
+ * variable, drawn like the provider tag ("INVOICE_DB_URL not set · invoice-db", the full
+ * sentence on hover); while no worker is live there are none, the no-worker block says why.
+ * Skills loaded on demand read "1 · on demand" in the Skills column.
  */
-const props = defineProps<{ providers: ProviderSnapshot }>();
+const props = withDefaults(defineProps<{ providers: ProviderSnapshot; noWorker?: boolean }>(), {
+  noWorker: false,
+});
 const form = useFormContext();
 const store = useExperimentsStore();
 
@@ -33,6 +41,8 @@ const rows = computed(() =>
       role,
       on: role !== 'not included',
       tag: providerTag(props.providers, c.provider),
+      secrets: unsetSecrets(c, { noWorker: props.noWorker }),
+      onDemand: c.skills.length > 0 && c.skillLoading === 'on_demand',
     };
   }),
 );
@@ -109,6 +119,15 @@ const first = computed(() => form.configurations.value[0] ?? null);
                   data-testid="provider-tag"
                   ><StatusDot tone="ung" mode="hollow" />{{ row.tag }}</span
                 >
+                <span
+                  v-for="m in row.secrets"
+                  :key="`${m.server}:${m.name}`"
+                  class="inline-flex h-18 items-center gap-4 rounded-3 bg-ung-soft px-6 text-11 font-medium whitespace-nowrap text-ung-text"
+                  :title="`${missingSecretText(m)} is not set`"
+                  data-testid="secret-tag"
+                  ><StatusDot tone="ung" mode="hollow" /><span class="font-mono">{{ m.name }}</span>
+                  not set · {{ m.server }}</span
+                >
               </span>
             </td>
             <td>
@@ -122,7 +141,12 @@ const first = computed(() => form.configurations.value[0] ?? null);
               />
             </td>
             <td class="font-mono text-12">{{ row.option.model }}</td>
-            <td class="text-right">{{ row.option.skills.length }}</td>
+            <td class="text-right whitespace-nowrap">
+              {{ row.option.skills.length
+              }}<span v-if="row.onDemand" class="text-text-3" data-testid="on-demand">
+                · on demand</span
+              >
+            </td>
             <td class="text-right">{{ row.option.mcpServers.length }}</td>
             <td>{{ row.option.memoryEnabled ? 'on' : 'off' }}</td>
             <td>

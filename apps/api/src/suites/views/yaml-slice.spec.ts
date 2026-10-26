@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VerificationEntry } from '@hermes-evals/shared';
-import { answerPathOf, verificationYamlSlices } from './yaml-slice.js';
+import { answerPathOf, expectedHomeDirOf, verificationYamlSlices } from './yaml-slice.js';
 
 const entry = (key: string, type: VerificationEntry['type'], params = {}): VerificationEntry => ({
   key,
@@ -121,5 +121,18 @@ describe('answerPathOf', () => {
     expect(answerPathOf('answer: { format: fenced_json }\n')).toBeUndefined();
     expect(answerPathOf(null)).toBeUndefined();
     expect(answerPathOf(': :\n  - [')).toBeUndefined();
+  });
+});
+
+describe('expectedHomeDirOf', () => {
+  it('reads self_check.expected_home normalised as the loader stores its files', () => {
+    const at = (dir: string) =>
+      expectedHomeDirOf(`${TASK_YAML}self_check:\n  expected_home: ${dir}\n`);
+    expect(at('expected_home')).toBe('expected_home');
+    expect(at('./known_good//home/')).toBe('known_good/home');
+    expect(at('.')).toBeNull();
+    expect(expectedHomeDirOf(TASK_YAML)).toBeNull();
+    expect(expectedHomeDirOf('self_check: [')).toBeNull();
+    expect(expectedHomeDirOf(null)).toBeNull();
   });
 });

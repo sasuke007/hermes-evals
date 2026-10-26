@@ -1,0 +1,26 @@
+summary: Count the vendors and remember how the user wants totals sorted
+limits:
+  max_turns: 10
+  run_budget_seconds: 120
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  # The note the agent saves (Phase 6 P2): MEMORY.md as collected from the home.
+  - key: saved
+    type: file_check
+    primary: true
+    params:
+      root: home
+      path: memories/MEMORY.md
+      format: text
+      contains: [largest first]
+  # The same file read through --home: the seed entry kept and the new one added.
+  - key: kept
+    type: verifier_script
+    params: { script: check_memory.py, timeout_s: 20 }
+  - key: count
+    type: numeric_tolerance
+    params: { path: vendors, abs: 0.5 }
+self_check:
+  expected_home: expected_home

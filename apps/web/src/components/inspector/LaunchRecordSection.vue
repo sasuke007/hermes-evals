@@ -2,7 +2,14 @@
 import { computed, ref, useId } from 'vue';
 import CodeBlock from '@/components/ui/CodeBlock.vue';
 import type { LaunchRecordView } from '@/api/types/runs';
-import { formatClock, formatCount, shortRevision, formatBytes, formatSha256 } from '@/lib/format';
+import {
+  formatClock,
+  formatCount,
+  shortRevision,
+  formatBytes,
+  formatSha256,
+  plural,
+} from '@/lib/format';
 import RichSentence from './RichSentence.vue';
 import { shortDigest } from './inspectorFormat';
 
@@ -13,6 +20,10 @@ import { shortDigest } from './inspectorFormat';
  * where their secret values live, the exact command and the config.yaml written for the run.
  * Secrets never appear: the run token reads ‹run token, revoked› and an MCP value
  * `<from env NAME>`.
+ *
+ * Phase 6 adds three rows no board draws, set like their neighbours: how the skills were loaded
+ * (preloaded with `-s`, or on demand through the `skills` toolset), the task's home seeds copied
+ * into memories/ with their hashes, and config.yaml's background review intervals.
  */
 const props = defineProps<{
   record: LaunchRecordView | null;
@@ -55,6 +66,42 @@ const skills = computed(() => {
     .map((s) => `\`${s.name}\` ${s.version} · content hash \`${formatSha256(s.contentHash)}\``)
     .join('; ');
   return `${named} · added on top of Hermes' built-in \`hermes-agent\` skill`;
+});
+const skillLoading = computed(() => {
+  const container = c.value;
+  if (!container?.skills.length) return null;
+  return container.skillLoading === 'on_demand'
+    ? 'on demand · installed in the home without `-s`; the agent lists and opens them through the `skills` toolset'
+    : 'preload · each skill loaded into the prompt at start with `-s`';
+});
+/** Where the home is mounted in the trial: home seeds land under its memories/. */
+const homeTarget = computed(
+  () => c.value?.mounts.find((m) => m.name === 'home')?.target ?? '/opt/data',
+);
+const homeSeeds = computed(() =>
+  (props.record?.homeSeeds ?? []).map((seed) => ({
+    path: seed.path,
+    target: `${homeTarget.value}/${seed.path}`,
+    hash: formatSha256(seed.sha256),
+  })),
+);
+/** "10 (every 10 user turns)", "1 (every user turn)" or "0 (off)". */
+const interval = (n: number, unit: string): string =>
+  n === 0 ? '0 (off)' : `${formatCount(n)} (every ${n === 1 ? unit : plural(n, unit)})`;
+const backgroundReview = computed(() => {
+  const r = props.record?.backgroundReview;
+  if (r === undefined) return null;
+  if (r === null) {
+    return [
+      "Not written: Hermes's defaults applied (a record from before background review was pinned)",
+    ];
+  }
+  // Hermes skips the review fork for a finite turn, which `chat --oneshot` is (Phase 6 P3).
+  return [
+    `\`memory.nudge_interval\` ${interval(r.memoryNudgeInterval, 'user turn')}`,
+    `\`skills.creation_nudge_interval\` ${interval(r.skillCreationNudgeInterval, 'tool iteration')}`,
+    'Written the same in every run; a one-shot run is a finite turn, for which Hermes starts no review',
+  ];
 });
 const mcp = computed(() =>
   (c.value?.mcpServers ?? []).map((s) =>
@@ -146,11 +193,45 @@ const mcp = computed(() =>
           <dd class="font-mono">{{ worker }}</dd>
           <dt class="text-text-2">Skills</dt>
           <dd class="text-text-2"><RichSentence :text="skills" /></dd>
+          <template v-if="skillLoading">
+            <dt class="text-text-2">Skill loading</dt>
+            <dd class="text-text-2" data-testid="launch-skill-loading">
+              <RichSentence :text="skillLoading" />
+            </dd>
+          </template>
           <dt class="text-text-2">MCP servers</dt>
           <dd class="flex flex-col gap-4 text-text-2">
             <span v-if="!mcp.length">None in this configuration</span>
             <span v-for="(line, i) in mcp" :key="i"><RichSentence :text="line" /></span>
           </dd>
+          <dt class="text-text-2">Home seeds</dt>
+          <dd class="flex flex-col gap-2" data-testid="launch-home-seeds">
+            <span v-if="!homeSeeds.length" class="text-text-2"
+              >None: the home's <code class="font-mono text-12">memories/</code> started empty</span
+            >
+            <template v-else>
+              <span
+                v-for="seed in homeSeeds"
+                :key="seed.path"
+                class="font-mono text-12 leading-20"
+                :data-seed="seed.path"
+                >{{ seed.path }} <span class="text-text-3">→</span> {{ seed.target }}
+                <span class="text-text-3">· {{ seed.hash }}</span></span
+              >
+              <span class="text-12 text-text-3"
+                >Copied from the task before launch, in every configuration. Hermes reads them only
+                with memory on.</span
+              >
+            </template>
+          </dd>
+          <template v-if="backgroundReview">
+            <dt class="text-text-2">Background review</dt>
+            <dd class="flex flex-col gap-2 text-text-2" data-testid="launch-background-review">
+              <span v-for="(line, i) in backgroundReview" :key="i"
+                ><RichSentence :text="line"
+              /></span>
+            </dd>
+          </template>
         </dl>
       </div>
       <div class="flex flex-col gap-4">

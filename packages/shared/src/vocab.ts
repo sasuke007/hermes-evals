@@ -99,17 +99,31 @@ export const NETWORK_DECISIONS = ['allowed', 'denied'] as const;
 export type NetworkDecision = (typeof NETWORK_DECISIONS)[number];
 
 /**
- * Where a file found in the workspace after a run came from. Inputs are the
- * task's fixtures and the configuration's documents; anything else the agent wrote.
+ * Where a file collected after a run came from. Inputs are the task's
+ * fixtures and the configuration's documents in the workspace, and the
+ * task's home seeds in the home (Phase 6 P2, migration 0008); anything else
+ * the agent wrote. A `home_seed_*` origin belongs to an artifact with root
+ * `home`, a fixture or document one to root `workspace` (artifacts_origin_root_ck).
  */
 export const ARTIFACT_ORIGINS = [
   'fixture_unchanged',
   'fixture_modified',
   'document_unchanged',
   'document_modified',
+  'home_seed_unchanged',
+  'home_seed_modified',
   'agent',
 ] as const;
 export type ArtifactOrigin = (typeof ARTIFACT_ORIGINS)[number];
+
+/**
+ * Which trial directory an artifact was collected from (Phase 6 P2,
+ * migration 0008): the workspace, or the home, of which only `memories/` is
+ * collected (the agent's MEMORY.md and USER.md). An artifact's path is
+ * relative to its root, and a file_check names the root it reads.
+ */
+export const ARTIFACT_ROOTS = ['workspace', 'home'] as const;
+export type ArtifactRoot = (typeof ARTIFACT_ROOTS)[number];
 
 /**
  * Why a file was recorded without storing its content: larger than one
@@ -121,11 +135,32 @@ export type ArtifactSkipReason = (typeof ARTIFACT_SKIP_REASONS)[number];
 
 /**
  * Files the suite loader copies into the blob store for each task. Only
- * fixtures ever reach a trial; `expected` is the hidden known-good workspace
- * that file-checking verifiers are validated against when the suite loads.
+ * fixtures (into the workspace) and home seeds (into the home's `memories/`)
+ * ever reach a trial. `expected` is the hidden known-good workspace that
+ * file-checking verifiers are validated against when the suite loads, and
+ * `expected_home` the same for the home: the memory files a correct agent
+ * leaves, overlaid on the home seeds (Phase 6 P1 and P2, migration 0008).
  */
-export const TASK_FILE_KINDS = ['fixture', 'verifier', 'rubric', 'expected'] as const;
+export const TASK_FILE_KINDS = [
+  'fixture',
+  'verifier',
+  'rubric',
+  'expected',
+  'home_seed',
+  'expected_home',
+] as const;
 export type TaskFileKind = (typeof TASK_FILE_KINDS)[number];
+
+/**
+ * How a configuration's skills reach the agent (Phase 6 P5, migration 0008).
+ * Both copy each skill into home/skills/<name>/. `preload` passes `-s <name>`
+ * per skill, so Hermes loads each into the prompt at start; `on_demand`
+ * passes no `-s` and adds the `skills` toolset, so the agent has to list and
+ * open them itself. `preload` is the default and what every version stored
+ * before Phase 6 ran with.
+ */
+export const SKILL_LOADING_MODES = ['preload', 'on_demand'] as const;
+export type SkillLoadingMode = (typeof SKILL_LOADING_MODES)[number];
 
 /** Result of the last load of one suite directory. */
 export const SUITE_LOAD_OUTCOMES = [

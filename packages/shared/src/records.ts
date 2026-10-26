@@ -25,6 +25,7 @@ import {
   RESERVED_SCORE_KEYS,
   SCORE_KEY_PRIMARY,
   SCORER_TYPES,
+  SKILL_LOADING_MODES,
   TRAJECTORY_MODES,
   type ReservedScoreKey,
 } from './vocab.js';
@@ -109,13 +110,16 @@ export const SelfCheckResultSchema = z.object({
   /**
    * `answer` checks reference.json as if it were the agent's answer; `script`
    * runs a verifier; `workspace` runs file_check or a verifier against the
-   * hidden expected workspace (fixtures overlaid with `expected/`); `none` is
-   * schema-only (trajectory_match, llm_judge).
+   * hidden expected workspace (fixtures overlaid with `expected/`); `home`
+   * runs a home check (file_check with root home, or a verifier reading
+   * `--home`) against the home seeds overlaid with `self_check.expected_home`
+   * (Phase 6 P2); `none` is schema-only (trajectory_match, llm_judge).
    */
-  mode: z.enum(['answer', 'script', 'workspace', 'none']),
+  mode: z.enum(['answer', 'script', 'workspace', 'home', 'none']),
   /**
    * `fail` marks a negative control: the same check run against the untouched
-   * fixtures, which must not pass, or the verifier would pass any agent.
+   * fixtures (or, for `home`, the home seeds alone), which must not pass, or
+   * the check would pass any agent.
    */
   expect: z.enum(['pass', 'fail']).optional(),
   status: z.enum([...SCORE_STATUSES, 'skipped']),
@@ -138,6 +142,11 @@ export const SelfCheckSchema = z.object({
   results: z.array(SelfCheckResultSchema),
   /** Files of the hidden expected workspace the checks ran against, when the task has one. */
   expected_workspace: z.array(z.object({ path: z.string(), sha256: sha256Hex })).optional(),
+  /**
+   * Files of the expected home the home checks ran against, when the task
+   * has one (Phase 6 P2): home-relative paths, e.g. `memories/USER.md`.
+   */
+  expected_home: z.array(z.object({ path: z.string(), sha256: sha256Hex })).optional(),
 });
 export type SelfCheck = z.infer<typeof SelfCheckSchema>;
 
@@ -158,6 +167,13 @@ export const LoadIssueSchema = z.object({
     'unsafe_file',
     /** A check that cannot be self-checked as declared, e.g. file_check without an expected workspace. */
     'self_check_unsupported',
+    /** A file under `home/` other than HOME_SEED_PATHS (Phase 6 P1): an error. */
+    'home_path_invalid',
+    /**
+     * A home seed over Hermes's character budget, or not a list of entries
+     * separated by MEMORY_ENTRY_DELIMITER (Phase 6 P1): a warning.
+     */
+    'home_seed_format',
   ]),
   /** Verification key the issue belongs to, when it belongs to one. */
   key: z.string().optional(),
@@ -400,15 +416,36 @@ export const LaunchRecordSchema = z.object({
       definition_hash: sha256Hex,
     }),
   ),
-  /** Files copied into the workspace before the run, used to label artifacts. */
+  /**
+   * Files copied in before the run, used to label artifacts: fixtures and
+   * documents into the workspace (paths relative to it), and home seeds into
+   * the home (Phase 6 P1; paths relative to the home, e.g.
+   * `memories/MEMORY.md`). A record from before Phase 6 has no home seeds.
+   */
   inputs: z.array(
     z.object({
       path: z.string(),
       sha256: sha256Hex,
-      source: z.enum(['fixture', 'document']),
+      source: z.enum(['fixture', 'document', 'home_seed']),
       document_id: z.string().optional(),
     }),
   ),
+  /**
+   * How the skills reached the agent (Phase 6 P5): `-s` per skill
+   * (`preload`), or the `skills` toolset (`on_demand`). Absent on records
+   * from before Phase 6, which all preloaded.
+   */
+  skill_loading: z.enum(SKILL_LOADING_MODES).optional(),
+  /**
+   * The background review intervals config.yaml set (Phase 6 P3):
+   * `memory.nudge_interval` (user turns) and
+   * `skills.creation_nudge_interval` (tool iterations); 0 turns the review
+   * off. The same in every arm. Absent on records from before Phase 6, whose
+   * config.yaml left Hermes's defaults (10 and 10) implicit.
+   */
+  background_review: z
+    .object({ memory_nudge_interval: count, skill_creation_nudge_interval: count })
+    .optional(),
   limits: z.object({
     max_turns: z.number().int(),
     run_budget_seconds: z.number().int(),

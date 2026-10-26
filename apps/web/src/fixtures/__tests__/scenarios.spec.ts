@@ -38,6 +38,8 @@ const READ_BY_THIS_DATA_LAYER = [
   'nous-unavailable',
   'openrouter-in-use',
   'stream-offline',
+  'memory-files',
+  'skills-on-demand',
 ];
 
 describe('scenario registry', () => {

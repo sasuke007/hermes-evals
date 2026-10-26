@@ -11,6 +11,11 @@
  * isolation self-test ran. Secret values never appear: the run token in the
  * command always shows as ‹run token, revoked›, whatever argv holds, and an
  * MCP value as `<from env NAME>`.
+ *
+ * Phase 6 records add how the skills loaded (P5), the home seeds copied in
+ * (P1, the inputs of source `home_seed`) and the background review intervals
+ * config.yaml set (P3). An older record reads as preload, no seeds, and no
+ * intervals: it left Hermes's defaults implicit.
  */
 import { LaunchRecordSchema, type LaunchRecordView } from '@hermes-evals/shared';
 import { parse, stringify } from 'yaml';
@@ -180,6 +185,8 @@ export function launchRecordView(input: LaunchRecordInput): LaunchRecordView | n
         version: s.version,
         contentHash: s.content_hash,
       })),
+      // Records from before Phase 6 have no mode: every one of them preloaded.
+      skillLoading: record.skill_loading ?? 'preload',
       mcpServers: record.mcp_servers.map((m) => ({
         name: m.name,
         version: Math.max(1, m.version),
@@ -195,5 +202,14 @@ export function launchRecordView(input: LaunchRecordInput): LaunchRecordView | n
       record.mcp_servers.length > 0
         ? "Secret values show as <from env NAME>: a stdio server's values are set in the container environment and are readable by the agent; an http server's header values are added by egress and never enter the run."
         : null,
+    homeSeeds: record.inputs
+      .filter((input) => input.source === 'home_seed')
+      .map(({ path, sha256 }) => ({ path, sha256 })),
+    backgroundReview: record.background_review
+      ? {
+          memoryNudgeInterval: record.background_review.memory_nudge_interval,
+          skillCreationNudgeInterval: record.background_review.skill_creation_nudge_interval,
+        }
+      : null,
   };
 }

@@ -9,12 +9,14 @@
  */
 import type { ReadStream } from 'node:fs';
 import { Inject, Injectable } from '@nestjs/common';
-import type {
-  TablePreview,
-  TaskDetail,
-  TaskDiff,
-  TaskFixtureFile,
-  TaskVersionEntry,
+import {
+  TASK_HOME_FILE_KINDS,
+  TASK_HOME_FILE_TEXT_LIMIT,
+  type TablePreview,
+  type TaskDetail,
+  type TaskDiff,
+  type TaskFixtureFile,
+  type TaskVersionEntry,
 } from '@hermes-evals/shared';
 import { DB } from '../database/db.provider.js';
 import type { AppDb } from '../database/types.js';
@@ -34,7 +36,13 @@ import {
 import { fixtureDisplayPath } from './views/format.js';
 import type { SuiteRow, TaskFileRow, TaskRow } from './views/rows.js';
 import { streamTablePreview, tablePreview, tabularFormatOf } from './views/table.js';
-import { fixtureFileView, taskDetail, taskDiff, taskHistory } from './views/task-views.js';
+import {
+  fixtureFileView,
+  homeFileViews,
+  taskDetail,
+  taskDiff,
+  taskHistory,
+} from './views/task-views.js';
 import { taskUsageView } from './views/usage.js';
 
 /** Fixtures up to this size are read to describe them ("CSV · 48 rows"); larger ones are named only. */
@@ -63,11 +71,12 @@ export class SuiteTasksService {
   async detail(suiteId: string, key: string): Promise<TaskDetail> {
     const { suite, task } = await this.task(suiteId, key);
     const files = await filesOf(this.db, [task.id]);
-    const [introducedIn, failures, usage, fixtures, verifier] = await Promise.all([
+    const [introducedIn, failures, usage, fixtures, homeTexts, verifier] = await Promise.all([
       task.introducedInSuiteId === suite.id ? suite : suiteById(this.db, task.introducedInSuiteId),
       failuresOf(this.db, suite, [task], new Map([[task.id, files]])),
       taskUsage(this.db, suite.sourcePath, task.key, task.versionNumber),
       Promise.all(files.filter((f) => f.kind === 'fixture').map((f) => this.fixtureView(f))),
+      this.homeTexts(files),
       this.verifierOf(task, files),
     ]);
     return taskDetail({
@@ -75,6 +84,7 @@ export class SuiteTasksService {
       task,
       introducedInSuiteVersion: introducedIn?.versionNumber ?? suite.versionNumber,
       fixtures,
+      homeFiles: homeFileViews(task, files, homeTexts),
       verifier,
       failure: failures.get(task.key) ?? null,
       experiments: taskUsageView(usage),
@@ -165,6 +175,24 @@ export class SuiteTasksService {
     return fixtureFileView(file, content, preview);
   }
 
+  /**
+   * The text of each small home file by hash (Phase 6 P1, P2), so a reviewer
+   * reads a memory seed on Task detail; null when it is larger than
+   * TASK_HOME_FILE_TEXT_LIMIT, not UTF-8, or gone from the blob store.
+   */
+  private async homeTexts(files: readonly TaskFileRow[]): Promise<Map<string, string | null>> {
+    const kinds: readonly string[] = TASK_HOME_FILE_KINDS;
+    const home = files.filter((f) => kinds.includes(f.kind));
+    const texts = await Promise.all(
+      home.map(async (f): Promise<[string, string | null]> => {
+        if (f.size > TASK_HOME_FILE_TEXT_LIMIT) return [f.sha256, null];
+        const content = await this.readOrNull(f.sha256);
+        return [f.sha256, content ? utf8OrNull(content) : null];
+      }),
+    );
+    return new Map(texts);
+  }
+
   /** The script of the first verifier_script entry, from its stored file. */
   private async verifierOf(
     task: TaskRow,
@@ -196,5 +224,14 @@ export class SuiteTasksService {
       if ((err as { code?: unknown }).code === 'ENOENT') return null;
       throw err;
     }
+  }
+}
+
+/** Bytes as text when they are valid UTF-8, else null. */
+function utf8OrNull(content: Uint8Array): string | null {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(content);
+  } catch {
+    return null;
   }
 }

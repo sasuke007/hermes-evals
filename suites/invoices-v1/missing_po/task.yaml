@@ -1,0 +1,13 @@
+summary: Invoices with no purchase order, or one the purchase order list does not hold
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: missing_po
+verification:
+  - key: answer
+    type: exact_match
+    primary: true
+    params: { path: missing_po }

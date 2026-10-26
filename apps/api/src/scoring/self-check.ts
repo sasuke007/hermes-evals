@@ -11,7 +11,16 @@
  * - `workspace`: file_check or the verifier against the expected workspace
  *   (fixtures overlaid with `expected/`), which must pass; then, as a negative
  *   control, against the untouched fixtures, which must not pass.
+ * - `home` (Phase 6 P2): a file_check with `root: home`, or a verifier in a
+ *   task whose only known-good folder is the expected home, against the
+ *   expected home (the home seeds overlaid with `self_check.expected_home`),
+ *   which must pass; then, as a negative control, against the seeds alone.
  * - `none`: recorded as skipped (trajectory_match, llm_judge).
+ *
+ * A verifier always gets both folders (`--workspace` and `--home`): the
+ * known-good ones in a positive run, wherever the task declares them, and
+ * the untouched fixtures and seeds in a negative control or an answer-based
+ * run.
  *
  * Verifiers can write to the workspace they are given, so callers that keep
  * using a folder afterwards pass a copy.
@@ -26,7 +35,12 @@ import type { JsonValue, ScorerType, SelfCheck } from '@hermes-evals/shared';
 import type { ScratchDir } from '../storage/blob-store.js';
 import { scoreReferenceAsAnswer } from './answer.js';
 import { checkFile } from './file-check.js';
-import { parseVerificationEntry, selfCheckModeFor, type SelfCheckMode } from './registry.js';
+import {
+  parseVerificationEntry,
+  selfCheckModeFor,
+  type SelfCheckFolders,
+  type SelfCheckMode,
+} from './registry.js';
 import type { ScorerResult } from './result.js';
 import { KEY_SETUP_SECONDS } from './scoring-time.js';
 import { scoreVerifierScript } from './verifier.js';
@@ -50,7 +64,18 @@ export interface SelfCheckInput {
   fixturesDir: string;
   /** fixtures/ overlaid with the expected folder, or null when the task declares none. */
   expectedWorkspaceDir: string | null;
-  /** From task.yaml; the loader defaults it to true when an expected workspace is set. */
+  /**
+   * The task's home seeds alone, at their home-relative paths
+   * (`memories/MEMORY.md`): what a trial's home starts with. An empty folder
+   * when the task has none.
+   */
+  homeDir: string;
+  /** The seeds overlaid with `self_check.expected_home`, or null when the task declares none. */
+  expectedHomeDir: string | null;
+  /**
+   * From task.yaml; the loader defaults it to true when an expected
+   * workspace or an expected home is set.
+   */
   negativeControl: boolean;
   /** The task's verify/ folder (it need not exist when no key uses a verifier). */
   verifyDir: string;
@@ -60,10 +85,8 @@ export interface SelfCheckInput {
 }
 
 /** What selfCheckSeconds reads of a task's plan. */
-export interface TimedSelfCheck {
+export interface TimedSelfCheck extends SelfCheckFolders {
   entries: readonly SelfCheckEntry[];
-  /** Whether the task has an expected workspace (task.ts SelfCheckPlan.expectedDir). */
-  expectedWorkspace: boolean;
   negativeControl: boolean;
 }
 
@@ -72,7 +95,7 @@ export interface TimedSelfCheck {
  * another, and only those that touch files take time worth counting.
  * - verifier_script: its `timeout_s` per run, after which it is killed, plus
  *   KEY_SETUP_SECONDS for writing the folders and starting it; two runs in
- *   workspace mode with a negative control;
+ *   workspace and home mode with a negative control;
  * - file_check: KEY_SETUP_SECONDS per run, the same runs;
  * - answer checks compare values in memory, and trajectory_match and
  *   llm_judge do not run at load: none counts.
@@ -81,11 +104,11 @@ export interface TimedSelfCheck {
 export function selfCheckSeconds(task: TimedSelfCheck): number {
   let total = 0;
   for (const entry of task.entries) {
-    const mode = selfCheckModeFor(entry.type, task.expectedWorkspace);
+    const mode = selfCheckModeFor(entry, task);
     if (mode === 'answer' || mode === 'none') continue;
     const parsed = parseVerificationEntry(entry);
     if (!parsed.success) continue;
-    const runs = mode === 'workspace' && task.negativeControl ? 2 : 1;
+    const runs = mode !== 'script' && task.negativeControl ? 2 : 1;
     const perRun =
       parsed.data.type === 'verifier_script'
         ? parsed.data.params.timeout_s + KEY_SETUP_SECONDS
@@ -110,9 +133,10 @@ function toResult(
   const script = result.evidence?.script;
   let comment = result.comment;
   if (expect === 'fail') {
+    const on = mode === 'home' ? 'the home seeds alone' : 'the untouched fixtures';
     comment =
       result.status === 'passed'
-        ? `the negative control passed on the untouched fixtures, so this check would pass any agent: ${comment}`
+        ? `the negative control passed on ${on}, so this check would pass any agent: ${comment}`
         : `negative control: ${comment}`;
   }
   return {
@@ -142,11 +166,38 @@ async function timed(run: () => Promise<ScorerResult>): Promise<[ScorerResult, n
   return [result, performance.now() - started];
 }
 
+/** The two folders one run of a file-touching check reads. */
+interface CheckDirs {
+  workspace: string;
+  home: string;
+}
+
+/** Why a file-touching mode has no known-good folder to run on, or null. */
+function missingFolder(
+  mode: SelfCheckMode,
+  input: SelfCheckInput,
+  type: ScorerType,
+): string | null {
+  if (mode === 'workspace' && input.expectedWorkspaceDir === null) {
+    return `${type} needs self_check.expected_workspace in task.yaml: there is no known-good workspace to check it against`;
+  }
+  if (mode === 'home' && input.expectedHomeDir === null) {
+    return `${type} with root: home needs self_check.expected_home in task.yaml: there is no known-good home to check it against`;
+  }
+  return null;
+}
+
 /** Runs every self-check of one task, in entry order. Never throws for a task's content. */
 export async function runSelfChecks(input: SelfCheckInput): Promise<SelfCheckResult[]> {
+  const folders: SelfCheckFolders = {
+    expectedWorkspace: input.expectedWorkspaceDir !== null,
+    expectedHome: input.expectedHomeDir !== null,
+  };
+  /** What a trial starts with: the negative control's folders, and an answer-based verifier's. */
+  const untouched: CheckDirs = { workspace: input.fixturesDir, home: input.homeDir };
   const results: SelfCheckResult[] = [];
   for (const entry of input.entries) {
-    const mode = selfCheckModeFor(entry.type, input.expectedWorkspaceDir !== null);
+    const mode = selfCheckModeFor(entry, folders);
     const bare = { key: entry.key, type: entry.type, mode, score: null };
     const parsed = parseVerificationEntry(entry);
     if (!parsed.success) {
@@ -159,8 +210,8 @@ export async function runSelfChecks(input: SelfCheckInput): Promise<SelfCheckRes
     }
     const parsedEntry = parsed.data;
 
-    /** One run of this entry's check against a workspace, for the script and workspace modes. */
-    let check: (workspaceDir: string) => Promise<ScorerResult>;
+    /** One run of this entry's check against a workspace and a home, for the file-touching modes. */
+    let check: (dirs: CheckDirs) => Promise<ScorerResult>;
     switch (parsedEntry.type) {
       case 'trajectory_match':
       case 'llm_judge':
@@ -177,18 +228,19 @@ export async function runSelfChecks(input: SelfCheckInput): Promise<SelfCheckRes
       }
       case 'file_check': {
         const { params } = parsedEntry;
-        check = (workspaceDir) => checkFile(params, workspaceDir);
+        check = (dirs) => checkFile(params, params.root === 'home' ? dirs.home : dirs.workspace);
         break;
       }
       case 'verifier_script': {
         const { params } = parsedEntry;
-        check = async (workspaceDir) => {
+        check = async (dirs) => {
           const scratch = await input.scratch('verifier');
           try {
             return await scoreVerifierScript(params, {
               verifyDir: input.verifyDir,
               answer: input.reference,
-              workspaceDir,
+              workspaceDir: dirs.workspace,
+              homeDir: dirs.home,
               scratchDir: scratch.path,
               python: input.python,
             });
@@ -201,24 +253,24 @@ export async function runSelfChecks(input: SelfCheckInput): Promise<SelfCheckRes
     }
 
     if (mode === 'script') {
-      const [result, ms] = await timed(() => check(input.fixturesDir));
+      const [result, ms] = await timed(() => check(untouched));
       results.push(toResult(entry, mode, result, ms));
       continue;
     }
-    // mode === 'workspace'
-    const expectedDir = input.expectedWorkspaceDir;
-    if (expectedDir === null) {
-      results.push({
-        ...bare,
-        status: 'error',
-        comment: `${entry.type} needs self_check.expected_workspace in task.yaml: there is no known-good workspace to check it against`,
-      });
+    // mode === 'workspace' or 'home': the known-good folders the task declares, then the untouched ones.
+    const missing = missingFolder(mode, input, entry.type);
+    if (missing !== null) {
+      results.push({ ...bare, status: 'error', comment: missing });
       continue;
     }
-    const [positive, ms] = await timed(() => check(expectedDir));
+    const knownGood: CheckDirs = {
+      workspace: input.expectedWorkspaceDir ?? input.fixturesDir,
+      home: input.expectedHomeDir ?? input.homeDir,
+    };
+    const [positive, ms] = await timed(() => check(knownGood));
     results.push(toResult(entry, mode, positive, ms, 'pass'));
     if (input.negativeControl) {
-      const [negative, negativeMs] = await timed(() => check(input.fixturesDir));
+      const [negative, negativeMs] = await timed(() => check(untouched));
       results.push(toResult(entry, mode, negative, negativeMs, 'fail'));
     }
   }

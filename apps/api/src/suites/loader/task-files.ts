@@ -2,8 +2,13 @@
  * Which files of a task folder the loader reads, and what each one is
  * (plan 4.1, 3.1 task_files kinds):
  *
- * - `fixtures/**`: fixture, the only kind ever copied into a trial;
+ * - `fixtures/**`: fixture, copied into the trial's workspace;
+ * - `home/memories/MEMORY.md` and `home/memories/USER.md`: home_seed, copied
+ *   into the trial's home (Phase 6 P1). Nothing else may be under `home/`:
+ *   any other path there is a `home_path_invalid` error;
  * - the expected workspace folder (`self_check.expected_workspace`): expected;
+ * - the expected home folder (`self_check.expected_home`): expected_home,
+ *   whose files mirror the home and so must be under its `memories/`;
  * - files an llm_judge entry names as its rubric: rubric;
  * - `verify/**`: verifier.
  *
@@ -14,7 +19,13 @@
  * invalid); elsewhere it is a warning, since nothing would read it anyway.
  */
 import { posix } from 'node:path';
-import type { LoadIssue, TaskFileKind } from '@hermes-evals/shared';
+import {
+  HOME_MEMORIES_DIR,
+  isHomeSeedPath,
+  TASK_HOME_DIR,
+  type LoadIssue,
+  type TaskFileKind,
+} from '@hermes-evals/shared';
 import {
   FIXTURES_DIR,
   MAX_SUITE_FILE_BYTES,
@@ -23,6 +34,7 @@ import {
   TASK_YAML,
   VERIFY_DIR,
 } from './limits.js';
+import { homePathMessage } from './messages.js';
 import type { SuiteEntry } from './walk.js';
 
 export type ReadResult =
@@ -44,6 +56,8 @@ export interface StoredTaskFile {
 export interface FileLayout {
   /** Normalised expected workspace folder, e.g. `expected`, or null. */
   expectedDir: string | null;
+  /** Normalised expected home folder, e.g. `expected_home`, or null (Phase 6 P2). */
+  expectedHomeDir: string | null;
   /** Normalised rubric paths of the llm_judge entries. */
   rubrics: readonly string[];
 }
@@ -64,24 +78,84 @@ export function normaliseRelative(path: string): string | null {
   return normal;
 }
 
-const under = (path: string, dir: string): boolean => path === dir || path.startsWith(`${dir}/`);
+export const under = (path: string, dir: string): boolean =>
+  path === dir || path.startsWith(`${dir}/`);
 
-/** The kind of the file at `path`, or null when the loader does not read it. */
+/** The seeds' folder in the task, `home/memories`: the only folder `home/` may hold. */
+const HOME_SEED_DIR = `${TASK_HOME_DIR}/${HOME_MEMORIES_DIR}`;
+
+/**
+ * The kind of the file at `path`, or null when the loader does not read it.
+ * Under `home/`, only HOME_SEED_PATHS are read (homePathIssue reports the
+ * rest); under the expected home, only files below its `memories/`.
+ */
 export function classify(path: string, layout: FileLayout): TaskFileKind | null {
   if (under(path, FIXTURES_DIR)) return path === FIXTURES_DIR ? null : 'fixture';
+  if (under(path, TASK_HOME_DIR)) return isHomeSeedPath(path) ? 'home_seed' : null;
   if (layout.expectedDir !== null && under(path, layout.expectedDir)) {
     return path === layout.expectedDir ? null : 'expected';
+  }
+  if (layout.expectedHomeDir !== null && under(path, layout.expectedHomeDir)) {
+    return path.startsWith(`${layout.expectedHomeDir}/${HOME_MEMORIES_DIR}/`)
+      ? 'expected_home'
+      : null;
   }
   if (layout.rubrics.includes(path)) return 'rubric';
   if (under(path, VERIFY_DIR)) return path === VERIFY_DIR ? null : 'verifier';
   return null;
 }
 
+/** The folders whose files the task reads, as the layout places them. */
+const usedDirs = (layout: FileLayout): string[] => [
+  FIXTURES_DIR,
+  VERIFY_DIR,
+  TASK_HOME_DIR,
+  ...(layout.expectedDir ? [layout.expectedDir] : []),
+  ...(layout.expectedHomeDir ? [layout.expectedHomeDir] : []),
+];
+
 /** Whether something at `path` matters to the task: a root file or inside a folder it reads. */
 function isUsedLocation(path: string, layout: FileLayout): boolean {
   if (ROOT_FILES.has(path) || layout.rubrics.includes(path)) return true;
-  const dirs = [FIXTURES_DIR, VERIFY_DIR, ...(layout.expectedDir ? [layout.expectedDir] : [])];
+  const dirs = usedDirs(layout);
   return dirs.some((dir) => under(path, dir)) || dirs.some((dir) => dir.startsWith(`${path}/`));
+}
+
+/**
+ * Why `entry` may not be where it is, or null: under `home/`, anything but
+ * the `memories/` folder and HOME_SEED_PATHS as regular files (Phase 6 P1);
+ * under the expected home, any file outside its `memories/`, which no run
+ * ever collects. Only the shallowest offending path is reported, so a stray
+ * folder is one issue, not one per file in it.
+ */
+export function homePathIssue(
+  entry: SuiteEntry,
+  layout: FileLayout,
+  reported: ReadonlySet<string>,
+): LoadIssue | null {
+  const parentReported = [...reported].some((p) => entry.path.startsWith(`${p}/`));
+  if (parentReported) return null;
+  if (under(entry.path, TASK_HOME_DIR) && entry.path !== TASK_HOME_DIR) {
+    if (entry.path === HOME_SEED_DIR && entry.kind === 'dir') return null;
+    if (isHomeSeedPath(entry.path) && entry.kind !== 'dir') return null;
+    return {
+      severity: 'error',
+      code: 'home_path_invalid',
+      path: entry.path,
+      message: homePathMessage(entry.path, isHomeSeedPath(entry.path) ? 'seed_dir' : 'seed'),
+    };
+  }
+  const home = layout.expectedHomeDir;
+  if (home !== null && entry.kind !== 'dir' && entry.path.startsWith(`${home}/`)) {
+    if (entry.path.startsWith(`${home}/${HOME_MEMORIES_DIR}/`)) return null;
+    return {
+      severity: 'error',
+      code: 'home_path_invalid',
+      path: entry.path,
+      message: homePathMessage(entry.path, 'expected', home),
+    };
+  }
+  return null;
 }
 
 const MIB = 1024 * 1024;
@@ -116,7 +190,15 @@ export async function collectTaskFiles(
   issues: LoadIssue[],
 ): Promise<StoredTaskFile[]> {
   const files: StoredTaskFile[] = [];
+  const misplaced = new Set<string>();
   for (const entry of entries) {
+    const homeIssue = homePathIssue(entry, layout, misplaced);
+    if (homeIssue !== null) {
+      issues.push(homeIssue);
+      misplaced.add(entry.path);
+      continue;
+    }
+    if ([...misplaced].some((p) => entry.path.startsWith(`${p}/`))) continue;
     const used = isUsedLocation(entry.path, layout);
     const reason = unsafeReason(entry);
     if (reason !== null) {

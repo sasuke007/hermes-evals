@@ -39,6 +39,7 @@ describe('collectWorkspace', () => {
     const { artifacts, event } = await collectWorkspace(workspace, manifest, blobs, () => 42);
     expect(artifacts).toEqual([
       {
+        root: 'workspace',
         path: 'a.csv',
         origin: 'fixture_unchanged',
         size: 4,
@@ -46,13 +47,21 @@ describe('collectWorkspace', () => {
         skippedReason: null,
       },
       {
+        root: 'workspace',
         path: 'docs/policy.md',
         origin: 'document_modified',
         size: 6,
         sha256: sha('edited'),
         skippedReason: null,
       },
-      { path: 'new.txt', origin: 'agent', size: 4, sha256: sha('mine'), skippedReason: null },
+      {
+        root: 'workspace',
+        path: 'new.txt',
+        origin: 'agent',
+        size: 4,
+        sha256: sha('mine'),
+        skippedReason: null,
+      },
     ]);
     expect(await blobs.read(sha('mine'))).toEqual(Buffer.from('mine'));
     expect(event).toMatchObject({
@@ -82,6 +91,7 @@ describe('collectWorkspace', () => {
     const { artifacts } = await collectWorkspace(workspace, manifest, blobs);
     expect(artifacts).toEqual([
       {
+        root: 'workspace',
         path: 'big.bin',
         origin: 'fixture_unchanged',
         size: big.length,
@@ -89,6 +99,7 @@ describe('collectWorkspace', () => {
         skippedReason: 'too_large',
       },
       {
+        root: 'workspace',
         path: 'grown.bin',
         origin: 'fixture_modified',
         size: big.length + 1,
@@ -120,6 +131,7 @@ describe('collectWorkspace', () => {
     expect(stored.map((a) => a.path)).toEqual(['f0', 'f1']);
     expect(artifacts.slice(2)).toEqual(
       ['f2', 'f3', 'f4', 'f5'].map((path) => ({
+        root: 'workspace',
         path,
         origin: 'agent',
         size: MAX_ARTIFACT_BYTES,
@@ -156,13 +168,21 @@ describe('collectWorkspace', () => {
     const { artifacts, event } = await collectWorkspace(workspace, manifest, blobs, Date.now, 5);
     expect(artifacts).toEqual([
       {
+        root: 'workspace',
         path: 'a.csv',
         origin: 'fixture_unchanged',
         size: fixture.length,
         sha256: sha(fixture),
         skippedReason: null,
       },
-      { path: 'b.txt', origin: 'agent', size: 11, sha256: null, skippedReason: 'over_budget' },
+      {
+        root: 'workspace',
+        path: 'b.txt',
+        origin: 'agent',
+        size: 11,
+        sha256: null,
+        skippedReason: 'over_budget',
+      },
     ]);
     expect(event.payload).toMatchObject({ stored_bytes: fixture.length, new_bytes: 0 });
   });

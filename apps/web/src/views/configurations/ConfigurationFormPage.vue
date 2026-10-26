@@ -14,6 +14,7 @@ import {
   validateForm,
   type ConfigFormErrors,
   type ConfigFormField,
+  type ConfigFormIssueField,
   type ConfigFormState,
   type SaveState,
 } from '@/components/configurations/configForm';
@@ -58,7 +59,7 @@ const busy = ref(false);
 const saveError = ref<string | null>(null);
 const failed = ref(false);
 /** The API's 400 issues per field, from the last save. */
-const serverIssues = ref<Partial<Record<ConfigFormField | 'toolsets' | 'resources', string>>>({});
+const serverIssues = ref<Partial<Record<ConfigFormIssueField, string>>>({});
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -100,7 +101,7 @@ const options = computed(() => store.formOptions);
 const source = computed(() => draft.value?.source ?? null);
 const errors = computed<ConfigFormErrors>(() => (state.value ? validateForm(state.value) : {}));
 const shownErrors = computed(() => {
-  const shown: Partial<Record<ConfigFormField | 'toolsets' | 'resources', string>> = {
+  const shown: Partial<Record<ConfigFormIssueField, string>> = {
     ...serverIssues.value,
   };
   for (const field of touched.value) {

@@ -5,7 +5,8 @@
  *
  * The loader stores one result per run: an entry checked on the hidden
  * expected workspace has a second result for its negative control (the same
- * check on the untouched fixtures, `expect: 'fail'`), whose status is the
+ * check on the untouched fixtures, `expect: 'fail'`; for a check on the
+ * home, on the home seeds alone), whose status is the
  * check's own verdict. A negative control that passes means the check would
  * pass an agent that did nothing, so it fails the self-check. The view shows
  * one row per verification entry with both runs folded together.
@@ -108,18 +109,30 @@ export function diagnose(check: KeyCheck): Diagnosis {
   return run.status === 'failed' ? { kind: 'check_failed' } : { kind: 'check_error' };
 }
 
-/** `the reference answer` or `the expected workspace`, whichever the check ran on. */
+/**
+ * A check on the agent's home (Phase 6 P2): a file_check with `root: home`,
+ * or a verifier in a task that declares only `expected_home`. Its negative
+ * control runs on the home seeds alone.
+ */
+export const isHomeCheck = (check: KeyCheck): boolean =>
+  check.run ? check.run.mode === 'home' : check.negative?.mode === 'home';
+
+/** `the reference answer`, `the expected workspace` or `the expected home`, whichever the check ran on. */
 export const targetOf = (check: KeyCheck): string =>
-  check.run?.mode === 'workspace' || (!check.run && check.negative)
-    ? 'the expected workspace'
-    : 'the reference answer';
+  isHomeCheck(check)
+    ? 'the expected home'
+    : check.run?.mode === 'workspace' || (!check.run && check.negative)
+      ? 'the expected workspace'
+      : 'the reference answer';
 
 /** The short phrase after the check's name: "printed no result line on the reference answer". */
 export function failurePhrase(check: KeyCheck, d: Diagnosis = diagnose(check)): string {
   const target = targetOf(check);
   switch (d.kind) {
     case 'negative_control_passed':
-      return 'passes on the untouched fixtures too, so it would pass any agent';
+      return isHomeCheck(check)
+        ? 'passes on the home seeds alone too, so it would pass any agent'
+        : 'passes on the untouched fixtures too, so it would pass any agent';
     case 'timed_out':
       return d.timeoutS === null
         ? `timed out on ${target}`
@@ -160,6 +173,11 @@ function noteOf(check: KeyCheck, status: ScoreStatus | 'skipped', loadErrors: bo
     return check.negative
       ? 'passes on the expected workspace; fails on the untouched fixtures, as it should'
       : 'passes on the expected workspace';
+  }
+  if (check.run?.mode === 'home') {
+    return check.negative
+      ? 'passes on the expected home; fails on the home seeds alone, as it should'
+      : 'passes on the expected home';
   }
   return 'scored against the reference answer';
 }

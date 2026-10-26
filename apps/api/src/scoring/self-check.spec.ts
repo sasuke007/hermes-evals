@@ -17,6 +17,7 @@ const PRELUDE = `import argparse, csv, json, os
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer", required=True)
 parser.add_argument("--workspace", required=True)
+parser.add_argument("--home", required=True)
 args = parser.parse_args()
 `;
 
@@ -28,8 +29,10 @@ describe('runSelfChecks', () => {
     const fixtures = join(root, 'fixtures');
     const expected = join(root, 'expected-workspace');
     const verify = join(root, 'verify');
+    const home = join(root, 'home');
     mkdirSync(fixtures);
     mkdirSync(verify);
+    mkdirSync(home);
     writeFileSync(join(fixtures, 'invoices.csv'), 'vendor,amount\nACME,1\nGlobex,2\n');
     cpSync(fixtures, expected, { recursive: true });
     writeFileSync(join(expected, 'summary.csv'), 'vendor,outstanding\nACME,1\nGlobex,2\n');
@@ -48,6 +51,8 @@ describe('runSelfChecks', () => {
       reference: { total: 3, vendors: ['ACME', 'Globex'] },
       fixturesDir: fixtures,
       expectedWorkspaceDir: expected,
+      homeDir: home,
+      expectedHomeDir: null,
       negativeControl: true,
       verifyDir: verify,
       scratch: async (prefix) => {
@@ -188,6 +193,134 @@ describe('runSelfChecks', () => {
   });
 });
 
+describe('runSelfChecks on the home (Phase 6 P2)', () => {
+  let root: string;
+  let base: Omit<SelfCheckInput, 'entries'>;
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'self-check-home-'));
+    const fixtures = join(root, 'fixtures');
+    const verify = join(root, 'verify');
+    const seeds = join(root, 'home');
+    const expectedHome = join(root, 'expected-home');
+    mkdirSync(fixtures);
+    mkdirSync(verify);
+    mkdirSync(join(seeds, 'memories'), { recursive: true });
+    mkdirSync(join(expectedHome, 'memories'), { recursive: true });
+    writeFileSync(join(fixtures, 'invoices.csv'), 'vendor,amount\nACME,1\n');
+    writeFileSync(join(seeds, 'memories', 'USER.md'), 'Works in Lisbon.');
+    writeFileSync(
+      join(expectedHome, 'memories', 'USER.md'),
+      'Works in Lisbon.\n§\nReports in EUR.',
+    );
+    writeFileSync(
+      join(verify, 'remembers.py'),
+      `${PRELUDE}path = os.path.join(args.home, "memories", "USER.md")\n` +
+        'text = open(path).read() if os.path.exists(path) else ""\n' +
+        'seen = sorted(os.listdir(args.workspace))\n' +
+        'print(json.dumps({"score": 1 if "EUR" in text else 0, "comment": f"workspace {seen}"}))\n',
+    );
+    base = {
+      reference: { saved: true },
+      fixturesDir: fixtures,
+      expectedWorkspaceDir: null,
+      homeDir: seeds,
+      expectedHomeDir: expectedHome,
+      negativeControl: true,
+      verifyDir: verify,
+      scratch: async (prefix) => {
+        const path = mkdtempSync(join(root, `${prefix}-`));
+        return { path, dispose: () => rm(path, { recursive: true, force: true }) };
+      },
+    };
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  const shape = (results: SelfCheckResult[]) => {
+    for (const r of results) expect(SelfCheckResultSchema.safeParse(r).success).toBe(true);
+    return results.map((r) => [r.key, r.mode, r.expect ?? null, r.status]);
+  };
+  const memoryCheck = {
+    key: 'memory',
+    type: 'file_check' as const,
+    params: { root: 'home', path: 'memories/USER.md', contains: ['EUR'] },
+  };
+  const verifier = {
+    key: 'saved',
+    type: 'verifier_script' as const,
+    params: { script: 'remembers.py' },
+  };
+
+  it('passes a home check on the expected home and fails it on the seeds alone', async () => {
+    const results = await runSelfChecks({ ...base, entries: [memoryCheck, verifier] });
+    expect(shape(results)).toEqual([
+      ['memory', 'home', 'pass', 'passed'],
+      ['memory', 'home', 'fail', 'failed'],
+      ['saved', 'home', 'pass', 'passed'],
+      ['saved', 'home', 'fail', 'failed'],
+    ]);
+    expect(results[1]!.comment).toBe('negative control: memories/USER.md: does not contain "EUR"');
+    // The verifier's workspace is the untouched fixtures in both runs: the task has no expected workspace.
+    expect(results[2]!.comment).toBe("workspace ['invoices.csv'] (score 1, pass at 1)");
+    expect(results[2]!.argv?.slice(-2)).toEqual(['--home', base.expectedHomeDir]);
+    expect(results[3]!.argv?.slice(-2)).toEqual(['--home', base.homeDir]);
+    expect(selfCheckStatus(results)).toBe('passed');
+  });
+
+  it('fails a home check that already passes on the seeds, naming them', async () => {
+    const results = await runSelfChecks({
+      ...base,
+      entries: [{ ...memoryCheck, params: { ...memoryCheck.params, contains: ['Lisbon'] } }],
+    });
+    expect(shape(results)).toEqual([
+      ['memory', 'home', 'pass', 'passed'],
+      ['memory', 'home', 'fail', 'passed'],
+    ]);
+    expect(results[1]!.comment).toMatch(
+      /^the negative control passed on the home seeds alone, so this check would pass any agent/,
+    );
+    expect(selfCheckStatus(results)).toBe('failed');
+  });
+
+  it('gives a verifier both known-good folders when the task declares both', async () => {
+    const expectedWorkspace = join(root, 'expected-workspace');
+    mkdirSync(expectedWorkspace, { recursive: true });
+    writeFileSync(join(expectedWorkspace, 'summary.csv'), 'vendor\nACME\n');
+    const results = await runSelfChecks({
+      ...base,
+      expectedWorkspaceDir: expectedWorkspace,
+      entries: [verifier],
+    });
+    expect(shape(results)).toEqual([
+      ['saved', 'workspace', 'pass', 'passed'],
+      ['saved', 'workspace', 'fail', 'failed'],
+    ]);
+    expect(results[0]!.argv?.slice(-4)).toEqual([
+      '--workspace',
+      expectedWorkspace,
+      '--home',
+      base.expectedHomeDir,
+    ]);
+    expect(results[1]!.argv?.slice(-4)).toEqual([
+      '--workspace',
+      base.fixturesDir,
+      '--home',
+      base.homeDir,
+    ]);
+  });
+
+  it('gives an answer-based verifier the seeds as its home', async () => {
+    const results = await runSelfChecks({ ...base, expectedHomeDir: null, entries: [verifier] });
+    expect(shape(results)).toEqual([['saved', 'script', null, 'failed']]);
+    expect(results[0]!.argv?.slice(-2)).toEqual(['--home', base.homeDir]);
+  });
+
+  it('errors on a home file check with no expected home', async () => {
+    const results = await runSelfChecks({ ...base, expectedHomeDir: null, entries: [memoryCheck] });
+    expect(shape(results)).toEqual([['memory', 'home', null, 'error']]);
+    expect(results[0]!.comment).toMatch(/needs self_check.expected_home/);
+  });
+});
+
 describe('selfCheckStatus', () => {
   const r = (status: SelfCheckResult['status'], expect?: 'pass' | 'fail'): SelfCheckResult => ({
     key: 'k',
@@ -225,16 +358,36 @@ describe('selfCheckSeconds', () => {
       selfCheckSeconds({
         entries: [answer, judge, verifier('a', 300), verifier('b')],
         expectedWorkspace: false,
+        expectedHome: false,
         negativeControl: false,
       }),
     ).toBe(300 + KEY_SETUP_SECONDS + 30 + KEY_SETUP_SECONDS);
   });
 
   it('counts the workspace checks twice with a negative control, and once without', () => {
-    const task = { entries: [verifier('a', 100), fileCheck], expectedWorkspace: true };
+    const task = {
+      entries: [verifier('a', 100), fileCheck],
+      expectedWorkspace: true,
+      expectedHome: false,
+    };
     const once = 100 + KEY_SETUP_SECONDS + KEY_SETUP_SECONDS;
     expect(selfCheckSeconds({ ...task, negativeControl: true })).toBe(2 * once);
     expect(selfCheckSeconds({ ...task, negativeControl: false })).toBe(once);
+  });
+
+  it('counts the home checks the same way: twice with their negative control', () => {
+    const memory = {
+      key: 'memory',
+      type: 'file_check' as const,
+      params: { root: 'home', path: 'memories/USER.md' },
+    };
+    const task = { entries: [verifier('a', 100), memory], expectedWorkspace: false };
+    const once = 100 + KEY_SETUP_SECONDS + KEY_SETUP_SECONDS;
+    expect(selfCheckSeconds({ ...task, expectedHome: true, negativeControl: true })).toBe(2 * once);
+    // Without an expected home the verifier is answer-based: one run.
+    expect(selfCheckSeconds({ ...task, expectedHome: false, negativeControl: true })).toBe(
+      100 + KEY_SETUP_SECONDS + 2 * KEY_SETUP_SECONDS,
+    );
   });
 
   it('counts nothing for checks that run no file, nor for params that do not parse', () => {
@@ -242,6 +395,7 @@ describe('selfCheckSeconds', () => {
       selfCheckSeconds({
         entries: [answer, judge, { key: 'bad', type: 'verifier_script', params: { timeout_s: 0 } }],
         expectedWorkspace: true,
+        expectedHome: false,
         negativeControl: true,
       }),
     ).toBe(0);

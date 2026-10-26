@@ -311,6 +311,7 @@ export class Phase2World {
       toolsets: ['file', 'terminal'],
       memoryEnabled: false,
       skillIds: [],
+      skillLoading: 'preload',
       documentIds: [],
       mcpServerVersionIds: [],
       maxTurns: 20,

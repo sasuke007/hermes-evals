@@ -10,7 +10,9 @@ import type { LaunchBlocker, LaunchFailure } from './launchReadiness';
 /**
  * The sticky panel beside New experiment (Components 2 › ExperimentSummaryPanel). It shows the
  * multiplication itself, not only the result, so the user sees which factor to reduce, then
- * the estimate from GET /experiments/estimate with its basis stated.
+ * the estimate from GET /experiments/estimate with its basis stated. The blocks are
+ * LaunchBlockerCard's: a provider, unset MCP variables (Check again re-emits `recheck`), the
+ * worker or the sandbox.
  *
  * States: incomplete (Runs —, Launch disabled with the first unmet requirement) · valid ·
  * over ceiling (an amber line; Launch stays enabled and the spend guard pauses at the
@@ -57,7 +59,7 @@ const props = withDefaults(
     failure: null,
   },
 );
-const emit = defineEmits<{ launch: []; connect: [] }>();
+const emit = defineEmits<{ launch: []; connect: []; recheck: [] }>();
 
 const dash = (n: number | null): string => (n === null ? '—' : String(n));
 
@@ -160,6 +162,11 @@ const fix = computed(() => {
       return { label: 'Reconnect', to: null };
     case 'add-key':
       return { label: 'How to add it', to: { name: ROUTE_NAMES.system } };
+    case 'secrets':
+      return {
+        label: 'Open Secrets',
+        to: { name: ROUTE_NAMES.resourcesTab, params: { tab: 'secrets' } },
+      };
     default:
       return { label: 'Open System', to: { name: ROUTE_NAMES.system } };
   }
@@ -207,6 +214,7 @@ const fix = computed(() => {
       :key="i"
       :blocker="blocker"
       @connect="emit('connect')"
+      @recheck="emit('recheck')"
     />
 
     <template v-if="runs !== null">

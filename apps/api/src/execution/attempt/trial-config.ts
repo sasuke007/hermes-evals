@@ -9,7 +9,10 @@
  *   is not in it: Hermes gets that from `--api-key` on the command line.
  * - the toolsets, plus one entry per MCP server name (the `-t` aliases).
  * - memory on or off as the configuration says, for both of Hermes's stores
- *   (MEMORY.md and the user profile), which start empty in a fresh home.
+ *   (MEMORY.md and the user profile), which start empty in a fresh home
+ *   unless the task seeds them (materialise.ts, Phase 6 P1).
+ * - the background review's intervals, written out at Hermes's defaults
+ *   (BACKGROUND_REVIEW: why they are not turned off).
  * - mcp_servers through hermesMcpEntry: stdio env values as `${NAME}`
  *   references Hermes fills from the container environment; http servers at
  *   the egress MCP gateway with an `Authorization: Bearer
@@ -28,7 +31,7 @@
  *   run, and context compression on the main route.
  */
 import { stringify } from 'yaml';
-import type { McpServerInput } from '@hermes-evals/shared';
+import type { LaunchRecord, McpServerInput } from '@hermes-evals/shared';
 import { hermesMcpEntry } from '../../resources/mcp/hermes-config.js';
 import type { AttemptPlan } from '../contracts.js';
 import { hermesModelConfig } from '../providers-map.js';
@@ -44,6 +47,46 @@ export const TRIAL_CONFIG_PATH = '/opt/data/config.yaml';
  * config sets it too, so a probe and a run see the same tool surface.
  */
 export const TOOL_SEARCH_OFF = { enabled: 'off' } as const;
+
+/**
+ * Hermes's background review (Phase 6 P3), pinned so every arm states the
+ * same values and the launch record shows them. After a turn Hermes may fork
+ * the agent to save memory or skills (agent/background_review.py): memory
+ * every `memory.nudge_interval` user turns (agent/turn_context.py:758-767),
+ * skills after `skills.creation_nudge_interval` tool iterations with
+ * skill_manage among the tools (agent/turn_iteration_prep.py:166-167,
+ * agent/turn_finalizer.py:764-792). Both default to 10
+ * (hermes_cli/config_defaults.py:1337, agent/agent_init.py:1304, 1333,
+ * 1388-1390).
+ *
+ * The fork cannot run in a trial, read from the source at 4d04303:
+ * load_background_review_settings returns "disabled" whenever
+ * finite_turn_required() is true (agent/background_review.py:228-251), and
+ * _spawn_background_review returns before spawning or queueing anything
+ * (run_agent.py:757-787). `chat --oneshot --format stream-json` is a finite
+ * run (hermes_cli/gateway_chat.py:169-171, gateway_chat_view.py:306, 498),
+ * whose turn the gateway executes inside finite_turn_scope
+ * (gateway/session_finite.py:71-79, from session_authority.py:1145-1155),
+ * carried to the agent's thread by copy_context (gateway/run.py:4026-4030,
+ * called at gateway/run_turn.py:563) and into managed workers
+ * (gateway/session_managed_worker.py:117-143). A one-shot run also has one
+ * user turn, below the memory interval.
+ *
+ * So, as Phase 6 decided for a fork that cannot run, config.yaml writes
+ * Hermes's own defaults rather than 0: explicit, the same in every arm, and
+ * what an ordinary Hermes user runs with. The live check confirms it by
+ * counting model calls: none beyond the agent's own.
+ */
+export const BACKGROUND_REVIEW = {
+  memoryNudgeInterval: 10,
+  skillCreationNudgeInterval: 10,
+} as const;
+
+/** The launch record's `background_review`: the intervals config.yaml sets. */
+export const backgroundReviewRecord = (): NonNullable<LaunchRecord['background_review']> => ({
+  memory_nudge_interval: BACKGROUND_REVIEW.memoryNudgeInterval,
+  skill_creation_nudge_interval: BACKGROUND_REVIEW.skillCreationNudgeInterval,
+});
 
 export interface HermesConfigInput {
   /** config.yaml's `model` section (hermesModelConfig, or the harness's own route). */
@@ -78,7 +121,13 @@ export function hermesConfig(input: HermesConfigInput): Record<string, unknown> 
   return {
     model: { ...input.model },
     toolsets: [...input.toolsets],
-    memory: { memory_enabled: input.memoryEnabled, user_profile_enabled: input.memoryEnabled },
+    memory: {
+      memory_enabled: input.memoryEnabled,
+      user_profile_enabled: input.memoryEnabled,
+      nudge_interval: BACKGROUND_REVIEW.memoryNudgeInterval,
+    },
+    // The top-level `skills` section, where agent_init.py reads the interval.
+    skills: { creation_nudge_interval: BACKGROUND_REVIEW.skillCreationNudgeInterval },
     mcp_servers: Object.fromEntries(input.mcpServers.map((def) => [def.name, mcpServerEntry(def)])),
     agent: { max_turns: input.maxTurns, run_budget_seconds: input.runBudgetSeconds },
     // Hermes merges this over its defaults (hermes_cli/config.py _deep_merge),

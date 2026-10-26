@@ -10,6 +10,7 @@ import {
   ConfigurationFormOptionsSchema,
   ConfigurationInputSchema,
   HERMES_TOOLSETS,
+  SKILL_LOADING_OPTIONS,
 } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
 import { HERMES_REVISION } from '../../test/support/seed.js';
@@ -113,6 +114,12 @@ describe('form options', () => {
         latest: true,
       }),
     ]);
+    // Preload first, the default; the form offers the choice once a skill is picked.
+    expect(options.skillLoading).toEqual([...SKILL_LOADING_OPTIONS]);
+    expect(options.skillLoading.map((o) => [o.id, o.label])).toEqual([
+      ['preload', 'preload'],
+      ['on_demand', 'on demand'],
+    ]);
     expect(warnings).toEqual([]);
   });
 
@@ -186,6 +193,7 @@ describe('a new configuration’s draft', () => {
         toolsets: ['terminal', 'file'],
         memoryEnabled: false,
         skillIds: [],
+        skillLoading: 'preload',
         documentIds: [],
         mcpServerVersionIds: [],
         maxTurns: 20,

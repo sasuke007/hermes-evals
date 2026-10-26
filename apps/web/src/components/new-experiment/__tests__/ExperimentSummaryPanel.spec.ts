@@ -192,6 +192,7 @@ describe('ExperimentSummaryPanel', () => {
       detail: null,
       envVar: null,
       command: null,
+      missing: [],
     };
     const w = mountPanel({ blockers: [blocker] });
     const block = w.get('[data-testid="launch-blocker"]');
@@ -219,6 +220,7 @@ describe('ExperimentSummaryPanel', () => {
       detail: null,
       envVar: 'OPENROUTER_API_KEY',
       command: 'docker compose up -d egress worker',
+      missing: [],
     };
     const w = mountPanel({ blockers: [blocker] });
     const block = w.get('[data-testid="launch-blocker"]');
@@ -246,6 +248,7 @@ describe('ExperimentSummaryPanel', () => {
       detail: 'Runs start only on a live worker. Start one with:',
       envVar: null,
       command: 'docker compose up -d worker',
+      missing: [],
     };
     const w = mountPanel({ blockers: [blocker], invalidReason: 'Give the experiment a name.' });
     expect(w.get('[data-testid="launch-reason"]').text()).toBe('Give the experiment a name.');

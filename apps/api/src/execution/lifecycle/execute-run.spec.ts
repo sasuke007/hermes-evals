@@ -362,6 +362,7 @@ describe('handleExecuteRunJob', () => {
       outcomes.executed({
         artifacts: [
           {
+            root: 'workspace',
             path: '../outside',
             origin: 'agent',
             size: 1,

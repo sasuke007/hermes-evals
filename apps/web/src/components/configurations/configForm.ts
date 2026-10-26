@@ -5,7 +5,13 @@
  * in the aside, and what Save says and whether it is enabled. Pure functions, so the page
  * stays small and each rule is tested on its own.
  */
-import { HTTP_URL_PATTERN, SLUG_PATTERN, type Provider } from '@hermes-evals/shared';
+import {
+  HTTP_URL_PATTERN,
+  SKILL_LOADING_LABELS,
+  SLUG_PATTERN,
+  type Provider,
+  type SkillLoadingMode,
+} from '@hermes-evals/shared';
 import type {
   ConfigurationDraft,
   ConfigurationFormOptions,
@@ -26,6 +32,11 @@ export interface ConfigFormState {
   toolsets: string[];
   memoryEnabled: boolean;
   skillIds: string[];
+  /**
+   * Phase 6 P5. The form offers the choice only while skills are chosen, and keeps it when the
+   * last skill is removed, so adding one back restores it; without skills it saves `preload`.
+   */
+  skillLoading: SkillLoadingMode;
   documentIds: string[];
   mcpServerVersionIds: string[];
   maxTurns: string;
@@ -36,6 +47,8 @@ export interface ConfigFormState {
 /** Fields with a rule of their own; their error shows under the control. */
 export type ConfigFormField = 'name' | 'model' | 'baseUrl' | 'maxTurns' | 'timeBudgetS';
 export type ConfigFormErrors = Partial<Record<ConfigFormField, string>>;
+/** Where a 400's issue shows: a field, the toolsets, the skill loading choice or the resources. */
+export type ConfigFormIssueField = ConfigFormField | 'toolsets' | 'skillLoading' | 'resources';
 
 export const MAX_TURNS = { min: 1, max: 200 } as const;
 export const TIME_BUDGET_S = { min: 30, max: 3600 } as const;
@@ -49,6 +62,7 @@ export function formStateFrom(values: ConfigurationDraft['values']): ConfigFormS
     toolsets: [...values.toolsets],
     memoryEnabled: values.memoryEnabled,
     skillIds: [...values.skillIds],
+    skillLoading: values.skillLoading,
     documentIds: [...values.documentIds],
     mcpServerVersionIds: [...values.mcpServerVersionIds],
     maxTurns: String(values.maxTurns),
@@ -64,6 +78,14 @@ export function wholeNumberIn(text: string, bounds: { min: number; max: number }
   return n >= bounds.min && n <= bounds.max ? n : null;
 }
 
+/**
+ * The skill loading the configuration saves: the chosen mode with skills, `preload` without,
+ * which is the only mode a configuration without skills can have (a 400 otherwise).
+ */
+export const effectiveSkillLoading = (
+  state: Pick<ConfigFormState, 'skillIds' | 'skillLoading'>,
+): SkillLoadingMode => (state.skillIds.length > 0 ? state.skillLoading : 'preload');
+
 /** The request body. Call it on a state validateForm accepts. */
 export function toInput(state: ConfigFormState): ConfigurationInput {
   return {
@@ -74,6 +96,7 @@ export function toInput(state: ConfigFormState): ConfigurationInput {
     toolsets: [...state.toolsets],
     memoryEnabled: state.memoryEnabled,
     skillIds: [...state.skillIds],
+    skillLoading: effectiveSkillLoading(state),
     documentIds: [...state.documentIds],
     mcpServerVersionIds: [...state.mcpServerVersionIds],
     maxTurns: Number(state.maxTurns.trim()),
@@ -169,6 +192,11 @@ export function formChanges(
   if (!sameSet(before.skillIds, after.skillIds)) {
     add('skills', label.skills(before.skillIds), label.skills(after.skillIds));
   }
+  add(
+    'skill_loading',
+    SKILL_LOADING_LABELS[effectiveSkillLoading(before)],
+    SKILL_LOADING_LABELS[effectiveSkillLoading(after)],
+  );
   if (!sameSet(before.documentIds, after.documentIds)) {
     add('documents', label.documents(before.documentIds), label.documents(after.documentIds));
   }
@@ -297,11 +325,12 @@ export function saveState(input: SaveStateInput): SaveState {
  * The shared request schema's issue paths (ApiError.issues on a 400) mapped onto the form's
  * fields; anything else goes to the aside's error.
  */
-export function fieldOfIssue(path: string): ConfigFormField | 'toolsets' | 'resources' | null {
+export function fieldOfIssue(path: string): ConfigFormIssueField | null {
   const head = path.split('.')[0] ?? '';
   if (head === 'name' || head === 'model' || head === 'baseUrl') return head;
   if (head === 'maxTurns' || head === 'timeBudgetS') return head;
   if (head === 'toolsets') return 'toolsets';
+  if (head === 'skillLoading') return 'skillLoading';
   if (head === 'skillIds' || head === 'documentIds' || head === 'mcpServerVersionIds') {
     return 'resources';
   }

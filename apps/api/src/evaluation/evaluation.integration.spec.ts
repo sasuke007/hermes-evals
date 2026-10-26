@@ -12,7 +12,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { VerificationEntry } from '@hermes-evals/shared';
 import { createTestDatabase, type TestDatabase } from '../../test/support/database.js';
-import { evaluations, experiments, runs, scores } from '../database/schema/index.js';
+import { artifacts, evaluations, experiments, runs, scores } from '../database/schema/index.js';
 import { extractAnswer } from '../scoring/extraction.js';
 import { SCORER_VERSIONS } from '../scoring/registry.js';
 import { BlobStore } from '../storage/blob-store.js';
@@ -43,6 +43,7 @@ from helper import EXPECTED_TOTAL
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer")
 parser.add_argument("--workspace")
+parser.add_argument("--home")
 args = parser.parse_args()
 with open(args.answer) as f:
     answer = json.load(f)
@@ -124,6 +125,12 @@ const scoresOf = async (evaluationId: string) => {
     .where(eq(scores.evaluationId, evaluationId))
     .orderBy(asc(scores.key));
   return Object.fromEntries(rows.map((row) => [row.key, row]));
+};
+
+/** The id of each artifact of an attempt, by `<root>:<path>`. */
+const artifactIdsOf = async (attemptId: string) => {
+  const rows = await t.db.select().from(artifacts).where(eq(artifacts.attemptId, attemptId));
+  return Object.fromEntries(rows.map((a) => [`${a.root}:${a.path}`, a.id]));
 };
 
 const evaluationRow = async (id: string) =>
@@ -294,6 +301,127 @@ describe('scoring through the context', () => {
     expect(byKey.big!.comment).toMatch(/was not stored because it is larger than/);
     expect(byKey.big!.evidence.artifact_ids).toHaveLength(1);
     expect(byKey.gone).toMatchObject({ status: 'failed', comment: 'out/none.txt does not exist' });
+  });
+
+  it('grades the home files with root: home, and gives every verifier --home (Phase 6 P2)', async () => {
+    const remembers = `import argparse, json, os
+parser = argparse.ArgumentParser()
+parser.add_argument("--answer")
+parser.add_argument("--workspace")
+parser.add_argument("--home")
+args = parser.parse_args()
+path = os.path.join(args.home, "memories", "USER.md")
+text = open(path).read() if os.path.exists(path) else ""
+print(json.dumps({"score": 1 if "EUR" in text else 0, "comment": f"home holds {sorted(os.listdir(args.home))}"}))
+`;
+    const task: ScenarioTask = {
+      reference: {},
+      verification: [
+        {
+          key: 'memory',
+          type: 'file_check',
+          primary: true,
+          params: { root: 'home', path: 'memories/USER.md', contains: ['EUR'] },
+        },
+        {
+          key: 'workspace_copy',
+          type: 'file_check',
+          primary: false,
+          params: { path: 'memories/USER.md', contains: ['EUR'] },
+        },
+        {
+          key: 'script',
+          type: 'verifier_script',
+          primary: false,
+          params: { script: 'remembers.py' },
+        },
+      ],
+      files: [{ path: 'verify/remembers.py', kind: 'verifier', content: remembers }],
+    };
+    const scenario = await seedScenario(t.db, store, task);
+    const { attemptId, evaluationId } = await executeRun(
+      t.db,
+      store,
+      scenario,
+      scenario.runIds[0]!,
+      {
+        finalText: 'saved',
+        files: [
+          {
+            root: 'home',
+            path: 'memories/USER.md',
+            content: 'Works in Lisbon.\n§\nReports in EUR.',
+            origin: 'home_seed_modified',
+          },
+          // The same path in the workspace is another file, which the home check never reads.
+          { path: 'memories/USER.md', content: 'a workspace note' },
+        ],
+      },
+    );
+    await handleEvaluateRunJob(
+      { evaluationId },
+      { db: t.db, store, reconcile: recordingReconcile().reconcile },
+      logger(),
+    );
+    const byKey = await scoresOf(evaluationId);
+    const ids = await artifactIdsOf(attemptId);
+    expect(byKey.memory).toMatchObject({ status: 'passed', score: 1 });
+    // Each check names the file of its own root, so the inspector links each score to it.
+    expect(byKey.memory!.evidence.artifact_ids).toEqual([ids['home:memories/USER.md']]);
+    expect(byKey.workspace_copy).toMatchObject({ status: 'failed', score: 0 });
+    expect(byKey.workspace_copy!.evidence.artifact_ids).toEqual([
+      ids['workspace:memories/USER.md'],
+    ]);
+    expect(byKey.script).toMatchObject({
+      status: 'passed',
+      comment: "home holds ['memories'] (score 1, pass at 1)",
+    });
+    expect(byKey.script!.evidence.script?.argv.at(-2)).toBe('--home');
+  });
+
+  it('reads a home file skipped for the budget as not stored, beside a stored workspace file of its path', async () => {
+    const check = (key: string, root: 'home' | 'workspace'): VerificationEntry => ({
+      key,
+      type: 'file_check',
+      primary: root === 'home',
+      params: { root, path: 'memories/USER.md', contains: ['EUR'] },
+    });
+    const task: ScenarioTask = {
+      reference: {},
+      verification: [check('memory', 'home'), check('workspace_copy', 'workspace')],
+      files: [],
+    };
+    const scenario = await seedScenario(t.db, store, task);
+    const { attemptId, evaluationId } = await executeRun(
+      t.db,
+      store,
+      scenario,
+      scenario.runIds[0]!,
+      {
+        finalText: 'saved',
+        files: [{ path: 'memories/USER.md', content: 'Reports in EUR.' }],
+        skipped: [{ root: 'home', path: 'memories/USER.md', size: 4096, reason: 'over_budget' }],
+      },
+    );
+    await handleEvaluateRunJob(
+      { evaluationId },
+      { db: t.db, store, reconcile: recordingReconcile().reconcile },
+      logger(),
+    );
+    const byKey = await scoresOf(evaluationId);
+    const ids = await artifactIdsOf(attemptId);
+    expect(byKey.memory).toMatchObject({
+      status: 'failed',
+      comment: expect.stringMatching(
+        /^memories\/USER\.md was not stored because the attempt's files passed the collection budget/,
+      ),
+    });
+    expect(byKey.memory!.evidence.artifact_ids).toEqual([ids['home:memories/USER.md']]);
+    // The workspace file is stored and holds the text: the skipped home file is not it.
+    expect(byKey.workspace_copy).toMatchObject({ status: 'passed', score: 1 });
+    expect(byKey.workspace_copy!.evidence.artifact_ids).toEqual([
+      ids['workspace:memories/USER.md'],
+    ]);
   });
 
   it('errors the file-based keys when a stored file is missing from the blob store', async () => {

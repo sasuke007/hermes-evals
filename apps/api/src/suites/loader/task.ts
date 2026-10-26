@@ -12,14 +12,17 @@
  */
 import {
   JsonValueSchema,
+  TASK_HOME_DIR,
   TaskLimitsSchema,
   type JsonValue,
   type LoadIssue,
   type TaskLimits,
   type VerificationEntry,
 } from '@hermes-evals/shared';
+import { fileCheckRootOf } from '../../scoring/registry.js';
 import type { SelfCheckEntry } from '../../scoring/self-check.js';
 import { contentHash, type HashedFile } from './hashing.js';
+import { homeSeedIssues } from './home-seeds.js';
 import {
   FIXTURES_DIR,
   MAX_SUITE_FILE_BYTES,
@@ -32,10 +35,12 @@ import {
   collectTaskFiles,
   decodeUtf8,
   normaliseRelative,
+  under,
   type FileLayout,
   type StoredTaskFile,
   type TaskReader,
 } from './task-files.js';
+import { fileLayout } from './task-layout.js';
 import { checkTaskYaml, type TaskYamlCheck } from './task-yaml.js';
 import { comparePaths, type SuiteEntry } from './walk.js';
 import { locatedError, parseYamlSource, type LocatedError } from './yaml-source.js';
@@ -46,6 +51,8 @@ export interface SelfCheckPlan {
   reference: JsonValue;
   /** Normalised folder overlaid on the fixtures, or null. */
   expectedDir: string | null;
+  /** Normalised folder overlaid on the home seeds (`self_check.expected_home`), or null. */
+  expectedHomeDir: string | null;
   negativeControl: boolean;
 }
 
@@ -160,7 +167,8 @@ export async function analyseTask(
 
   const layout = fileLayout(raw, byPath, issues);
   const files = await collectTaskFiles(entries, layout, read, issues);
-  for (const dir of [FIXTURES_DIR, VERIFY_DIR]) {
+  for (const file of files) if (file.kind === 'home_seed') issues.push(...homeSeedIssues(file));
+  for (const dir of [FIXTURES_DIR, VERIFY_DIR, TASK_HOME_DIR]) {
     if (byPath.get(dir)?.kind === 'file') {
       issues.push({
         severity: 'error',
@@ -199,7 +207,10 @@ export async function analyseTask(
             entries: verification.map(({ key: k, type, params }) => ({ key: k, type, params })),
             reference,
             expectedDir: layout.expectedDir,
-            negativeControl: data.self_check?.negative_control ?? layout.expectedDir !== null,
+            expectedHomeDir: layout.expectedHomeDir,
+            negativeControl:
+              data.self_check?.negative_control ??
+              (layout.expectedDir !== null || layout.expectedHomeDir !== null),
           },
     yamlError,
   };
@@ -225,66 +236,6 @@ function dedupe(files: HashedFile[]): HashedFile[] {
   const seen = new Map<string, HashedFile>();
   for (const f of files) seen.set(f.path, f);
   return [...seen.values()];
-}
-
-/**
- * Where the expected workspace and rubrics are, read from the raw task.yaml
- * so the files are found (and hashed) even when another part of it is wrong.
- */
-function fileLayout(
-  raw: Record<string, unknown>,
-  byPath: ReadonlyMap<string, SuiteEntry>,
-  issues: LoadIssue[],
-): FileLayout {
-  const rubrics: string[] = [];
-  for (const entry of Array.isArray(raw.verification) ? raw.verification : []) {
-    if (!isRecord(entry) || entry.type !== 'llm_judge' || !isRecord(entry.params)) continue;
-    const rubric = entry.params.rubric;
-    const normal = typeof rubric === 'string' ? normaliseRelative(rubric) : null;
-    if (normal !== null) rubrics.push(normal);
-  }
-
-  let expectedDir: string | null = null;
-  const written = isRecord(raw.self_check) ? raw.self_check.expected_workspace : undefined;
-  if (typeof written === 'string') {
-    const path = 'task.yaml#self_check.expected_workspace';
-    const normal = normaliseRelative(written);
-    const clashes = (dir: string) =>
-      normal !== null &&
-      (normal === dir || normal.startsWith(`${dir}/`) || dir.startsWith(`${normal}/`));
-    if (normal === null) {
-      // '..' and absolute paths are schema issues already; '.' is not.
-      if (!/(^\/|(^|\/)\.\.(\/|$))/.test(written)) {
-        issues.push({
-          severity: 'error',
-          code: 'schema_invalid',
-          path,
-          message: 'expected_workspace must name a folder inside the task',
-        });
-      }
-    } else if (clashes(FIXTURES_DIR) || clashes(VERIFY_DIR)) {
-      issues.push({
-        severity: 'error',
-        code: 'schema_invalid',
-        path,
-        message: `expected_workspace must be a folder of its own, not inside or around ${FIXTURES_DIR}/ or ${VERIFY_DIR}/`,
-      });
-    } else {
-      const entry = byPath.get(normal);
-      if (!entry) issues.push(fileMissing(path, `expected workspace folder ${normal}/ not found`));
-      else if (entry.kind === 'file') {
-        issues.push({
-          severity: 'error',
-          code: 'schema_invalid',
-          path,
-          message: `expected workspace ${normal} must be a folder`,
-        });
-      }
-      // A link or special file there is reported by collectTaskFiles.
-      expectedDir = normal;
-    }
-  }
-  return { expectedDir, rubrics };
 }
 
 async function readPrompt(
@@ -342,11 +293,13 @@ function readReference(
 
 /**
  * Files the entries name must exist where the task stores them: a verifier
- * script under verify/, a rubric in the folder, never under fixtures/, which
- * the agent reads, nor under the expected workspace, whose files are stored
- * as the known-good workspace (kind `expected`), so its llm_judge key would
- * find no rubric and be `error` on every run (Phase 3 question 12). A
- * file_check needs an expected workspace to be proven on.
+ * script under verify/, a rubric in the folder, never under fixtures/ or
+ * home/, which reach the agent, nor under a known-good folder, whose files
+ * are stored as the expected workspace or home (kinds `expected`,
+ * `expected_home`), so its llm_judge key would find no rubric and be `error`
+ * on every run (Phase 3 question 12). A file_check needs the known-good
+ * folder of its root to be proven on: the expected workspace, or with
+ * `root: home` the expected home (Phase 6 P2).
  */
 function checkReferencedFiles(
   check: TaskYamlCheck,
@@ -370,35 +323,46 @@ function checkReferencedFiles(
     }
     if (entry.type === 'llm_judge' && typeof entry.params.rubric === 'string') {
       const path = normaliseRelative(entry.params.rubric);
-      const inside = (dir: string) => path !== null && (path === dir || path.startsWith(`${dir}/`));
-      if (inside(FIXTURES_DIR)) {
+      const inside = (dir: string) => path !== null && under(path, dir);
+      const reached = [FIXTURES_DIR, TASK_HOME_DIR].find(inside);
+      const knownGood = [
+        { dir: layout.expectedDir, what: 'the expected workspace (self_check.expected_workspace)' },
+        { dir: layout.expectedHomeDir, what: 'the expected home (self_check.expected_home)' },
+      ].find((f) => f.dir !== null && inside(f.dir));
+      if (reached !== undefined) {
         issues.push({
           severity: 'error',
           code: 'schema_invalid',
           key: entry.key,
           path: at('rubric'),
-          message: `${entry.key}: the rubric must not be under ${FIXTURES_DIR}/, which is copied to the agent`,
+          message: `${entry.key}: the rubric must not be under ${reached}/, which is copied to the agent`,
         });
-      } else if (layout.expectedDir !== null && inside(layout.expectedDir)) {
+      } else if (knownGood !== undefined) {
         issues.push({
           severity: 'error',
           code: 'schema_invalid',
           key: entry.key,
           path: at('rubric'),
-          message: `${entry.key}: the rubric must not be under ${layout.expectedDir}/, the expected workspace (self_check.expected_workspace), whose files are the known-good workspace; put it beside task.yaml`,
+          message: `${entry.key}: the rubric must not be under ${knownGood.dir}/, ${knownGood.what}, whose files are the known-good ${knownGood.dir === layout.expectedDir ? 'workspace' : 'home'}; put it beside task.yaml`,
         });
       } else if (path !== null && !exists(path)) {
         issues.push(fileMissing(at('rubric'), `${entry.key}: rubric ${path} not found`, entry.key));
       }
     }
-    if (entry.type === 'file_check' && layout.expectedDir === null) {
-      issues.push({
-        severity: 'error',
-        code: 'self_check_unsupported',
-        key: entry.key,
-        path: `task.yaml#verification[${index}]`,
-        message: `${entry.key}: file_check needs self_check.expected_workspace in task.yaml, the known-good workspace it is proven on before any agent runs`,
-      });
+    if (entry.type === 'file_check') {
+      const home = fileCheckRootOf(entry.params) === 'home';
+      const folder = home ? layout.expectedHomeDir : layout.expectedDir;
+      if (folder === null) {
+        issues.push({
+          severity: 'error',
+          code: 'self_check_unsupported',
+          key: entry.key,
+          path: `task.yaml#verification[${index}]`,
+          message: home
+            ? `${entry.key}: file_check with root: home needs self_check.expected_home in task.yaml, the known-good home it is proven on before any agent runs`
+            : `${entry.key}: file_check needs self_check.expected_workspace in task.yaml, the known-good workspace it is proven on before any agent runs`,
+        });
+      }
     }
   });
 }

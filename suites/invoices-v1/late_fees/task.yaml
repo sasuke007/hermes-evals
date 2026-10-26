@@ -1,0 +1,16 @@
+summary: Late fees owed on open invoices under terms with a grace period and a cap
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: total_late_fees
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: total_late_fees, abs: 0.01 }
+  - key: fees
+    type: verifier_script
+    params: { script: check_fees.py, timeout_s: 30 }

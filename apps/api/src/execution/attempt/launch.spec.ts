@@ -5,6 +5,7 @@ import { LaunchRecordSchema, type McpServerInput } from '@hermes-evals/shared';
 import { trialConfig } from '../../sandbox/hermes-smoke.js';
 import { DEFAULT_LIMITS, trialContainerBody } from '../../sandbox/trial-spec.js';
 import type { AttemptPlan, PlannedMcpServer } from '../contracts.js';
+import { plannedToolsets } from '../lifecycle/plan.js';
 import { buildTrialLaunch, hermesChatCmd, SWEEP_MARGIN_S } from './launch.js';
 import { attemptConfig, configYaml, displayConfigYaml, trialToolsets } from './trial-config.js';
 
@@ -48,7 +49,7 @@ const plan = (configuration: Partial<AttemptPlan['configuration']> = {}): Attemp
     home: `/trials/${ATTEMPT}/home`,
     workspace: `/trials/${ATTEMPT}/workspace`,
   },
-  task: { id: 'T', key: 'total_due', prompt: 'p', fixtures: [] },
+  task: { id: 'T', key: 'total_due', prompt: 'p', fixtures: [], homeSeeds: [] },
   limits: { maxTurns: 12, runBudgetS: 300 },
   configuration: {
     versionId: 'CV',
@@ -60,6 +61,7 @@ const plan = (configuration: Partial<AttemptPlan['configuration']> = {}): Attemp
     toolsets: ['file', 'terminal'],
     memoryEnabled: true,
     skills: [],
+    skillLoading: 'preload',
     documents: [],
     mcpServers: [
       server({ name: 'invoice-db', envNames: ['INVOICE_DB_URL'] }),
@@ -100,7 +102,8 @@ describe('config.yaml', () => {
         context_length: 131072,
       },
       toolsets: ['file', 'terminal', 'invoice-db', 'vendor'],
-      memory: { memory_enabled: true, user_profile_enabled: true },
+      memory: { memory_enabled: true, user_profile_enabled: true, nudge_interval: 10 },
+      skills: { creation_nudge_interval: 10 },
       mcp_servers: {
         'invoice-db': {
           command: 'invoice-db-mcp',
@@ -269,5 +272,67 @@ describe('the launch', () => {
     });
     expect(launch.record.container.env_names).toContain('INVOICE_DB_URL');
     expect(launch.record.network).toBe('hermes-evals-trial-1');
+  });
+});
+
+describe('skill loading (Phase 6 P5)', () => {
+  const skills = [
+    { id: 'S1', name: 'invoice-method', version: '1.0.0', contentHash: HASH },
+    { id: 'S2', name: 'vendor-terms', version: '2.0.0', contentHash: HASH },
+  ];
+  const argOf = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
+  const launchOf = (p: AttemptPlan) =>
+    buildTrialLaunch(
+      p,
+      { configYaml: configYaml(attemptConfig(p)), inputs: [], values: {} },
+      SETTINGS,
+    );
+
+  it('preloads each skill with -s and adds no toolset', () => {
+    const p = plan({ skills, toolsets: plannedToolsets(['terminal', 'file'], 'preload') });
+    const cmd = hermesChatCmd(p);
+    expect(argOf(cmd, '-t')).toBe('file,terminal,invoice-db,vendor');
+    expect(cmd.filter((_, i) => cmd[i - 1] === '-s')).toEqual(['invoice-method', 'vendor-terms']);
+    expect(LaunchRecordSchema.parse(launchOf(p).record).skill_loading).toBe('preload');
+  });
+
+  it('on demand passes no -s and lists the skills toolset once, in -t and config.yaml alike', () => {
+    const toolsets = plannedToolsets(['terminal', 'file'], 'on_demand');
+    expect(toolsets).toEqual(['file', 'skills', 'terminal']);
+    // A version that already enables the toolset gets it once.
+    expect(plannedToolsets(['skills', 'file', 'skills'], 'on_demand')).toEqual(['file', 'skills']);
+
+    const p = plan({ skills, skillLoading: 'on_demand', toolsets });
+    const cmd = hermesChatCmd(p);
+    expect(cmd).not.toContain('-s');
+    expect(argOf(cmd, '-t')).toBe('file,skills,terminal,invoice-db,vendor');
+    const config = attemptConfig(p) as { toolsets: string[] };
+    expect(config.toolsets).toEqual(argOf(cmd, '-t')!.split(','));
+
+    // The skills are still installed and recorded; only how they load differs.
+    const record = LaunchRecordSchema.parse(launchOf(p).record);
+    expect(record.skill_loading).toBe('on_demand');
+    expect(record.skills.map((s) => s.name)).toEqual(['invoice-method', 'vendor-terms']);
+    expect(record.argv).not.toContain('-s');
+  });
+
+  it('records the background review intervals config.yaml sets, in every arm alike', () => {
+    for (const p of [plan(), plan({ skills, skillLoading: 'on_demand', memoryEnabled: false })]) {
+      const record = LaunchRecordSchema.parse(launchOf(p).record);
+      // Hermes's defaults, written out (trial-config.ts BACKGROUND_REVIEW).
+      expect(record.background_review).toEqual({
+        memory_nudge_interval: 10,
+        skill_creation_nudge_interval: 10,
+      });
+      // The same values the recorded config.yaml holds, where Hermes reads them.
+      const config = parse(record.config_yaml, { version: '1.1' }) as {
+        memory: { nudge_interval: number };
+        skills: { creation_nudge_interval: number };
+      };
+      expect([config.memory.nudge_interval, config.skills.creation_nudge_interval]).toEqual([
+        record.background_review!.memory_nudge_interval,
+        record.background_review!.skill_creation_nudge_interval,
+      ]);
+    }
   });
 });

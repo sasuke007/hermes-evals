@@ -28,6 +28,8 @@ export type {
   TaskDiff,
   TaskExperimentUsage,
   TaskFileChange,
+  TaskHomeFile,
+  TaskHomeFileKind,
   TaskFixtureFile,
   TaskSelfCheckResultView,
   TaskSelfCheckView,

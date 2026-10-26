@@ -12,7 +12,11 @@
  */
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, ne } from 'drizzle-orm';
-import type { ConfigurationInput, ConfigurationSaveResult } from '@hermes-evals/shared';
+import {
+  SKILL_LOADING_NEEDS_SKILLS,
+  type ConfigurationInput,
+  type ConfigurationSaveResult,
+} from '@hermes-evals/shared';
 import { DB } from '../database/db.provider.js';
 import { configurations, configurationVersions } from '../database/schema/index.js';
 import type { AppDb, AppTx } from '../database/types.js';
@@ -38,6 +42,7 @@ function settingsColumns(s: ResolvedSettings) {
     toolsets: s.toolsets,
     memoryEnabled: s.memoryEnabled,
     skillIds: s.skills.map((k) => k.skillId),
+    skillLoading: s.skillLoading,
     documentIds: s.documents.map((d) => d.documentId),
     mcpServerVersionIds: s.mcpServers.map((m) => m.versionId),
     maxTurns: s.maxTurns,
@@ -191,6 +196,11 @@ export class ConfigurationWritesService {
    * and checked against the runtime's list, resources resolved and checked.
    */
   private async settingsFrom(tx: AppTx, input: ConfigurationInput): Promise<ResolvedSettings> {
+    // ConfigurationInputSchema refuses this before a request gets here; a
+    // caller inside the API is held to the same rule (and the 0008 CHECK).
+    if (input.skillLoading === 'on_demand' && input.skillIds.length === 0) {
+      throw invalidFields([{ path: 'skillLoading', message: SKILL_LOADING_NEEDS_SKILLS }]);
+    }
     // Sequential, never Promise.all: a transaction is one connection.
     const resources = await resolveForSave(tx, input);
     const toolsets = await availableToolsets(tx);
@@ -212,6 +222,7 @@ export class ConfigurationWritesService {
       toolsets: input.toolsets,
       memoryEnabled: input.memoryEnabled,
       ...resources,
+      skillLoading: input.skillLoading,
       maxTurns: input.maxTurns,
       timeBudgetS: input.timeBudgetS,
     });

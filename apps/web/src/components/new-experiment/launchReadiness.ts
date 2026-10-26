@@ -1,11 +1,17 @@
 /**
  * Whether New experiment can launch beyond the form itself (UI_FLOWS 7 and 11.1): each chosen
- * configuration's provider must be ready, and a worker with a proven sandbox must be live.
- * Also how a refused launch reads in the summary panel (NewExperiment board, stale state;
+ * configuration's provider must be ready, the variables its MCP servers name must be set
+ * (Phase 5 decision #13, Phase 6 S7), and a worker with a proven sandbox must be live. Also
+ * how a refused launch reads in the summary panel (NewExperiment board, stale state;
  * ExperimentStates › launch failed). Pure functions over the providers' and the system's
  * state, so the panel and the configuration rows say the same thing.
  */
-import type { Provider } from '@hermes-evals/shared';
+import {
+  MISSING_SECRETS_HINT,
+  missingSecretsReason,
+  type MissingMcpSecret,
+  type Provider,
+} from '@hermes-evals/shared';
 import { isApiError } from '@/api/client';
 import type { ProviderInfo } from '@/api/types/system';
 
@@ -31,9 +37,10 @@ export interface LaunchBlocker {
   /**
    * connect / reconnect: a Connect Nous Portal button (ConnectDialog) · add-key: the .env step
    * with Copy and Open System · command: a command to copy (the host proxy, a worker) ·
-   * system: a link to System.
+   * system: a link to System · secrets: MCP variables to set in .env, the command that makes
+   * the worker or egress read them, Check again and a link to Secrets.
    */
-  fix: 'connect' | 'reconnect' | 'add-key' | 'command' | 'system';
+  fix: 'connect' | 'reconnect' | 'add-key' | 'command' | 'system' | 'secrets';
   provider: Provider | null;
   /** Display name: Nous Portal, OpenRouter. */
   providerName: string | null;
@@ -43,6 +50,16 @@ export interface LaunchBlocker {
   detail: string | null;
   envVar: string | null;
   command: string | null;
+  /** secrets: the unset variables, in server then name order. */
+  missing: MissingMcpSecret[];
+}
+
+/** A chosen configuration as the blockers read it. */
+export interface ChosenConfiguration {
+  name: string;
+  provider: Provider;
+  /** NewExperimentConfigOption.missingSecrets. */
+  missingSecrets?: readonly MissingMcpSecret[];
 }
 
 const DEFAULT_APPLY = 'docker compose up -d egress worker';
@@ -89,6 +106,7 @@ function nousBlocker(snapshot: ProviderSnapshot, configurations: string[]): Laun
     detail: null,
     envVar: null,
     command: null,
+    missing: [],
   };
   switch (snapshot.nousStatus) {
     case 'relogin_required':
@@ -119,13 +137,37 @@ function nousBlocker(snapshot: ProviderSnapshot, configurations: string[]): Laun
 }
 
 /**
+ * Which service has to be recreated to read the variables once they are in .env: the worker
+ * for stdio servers, egress for http headers.
+ */
+export function secretsApplyCommand(missing: readonly MissingMcpSecret[]): string {
+  const services = [
+    ...(missing.some((m) => m.transport === 'http') ? ['egress'] : []),
+    ...(missing.some((m) => m.transport === 'stdio') ? ['worker'] : []),
+  ];
+  return `docker compose up -d ${services.join(' ')}`;
+}
+
+/**
+ * The MCP variables a configuration's servers name that are not set, or none while no worker
+ * is live: then nothing vouches for any name, and the no-worker blocker says why.
+ */
+export function unsetSecrets(
+  config: Pick<ChosenConfiguration, 'missingSecrets'>,
+  workers: Pick<WorkerSnapshot, 'noWorker'>,
+): readonly MissingMcpSecret[] {
+  return workers.noWorker ? [] : (config.missingSecrets ?? []);
+}
+
+/**
  * Everything that keeps the chosen configurations from launching, provider by provider in the
- * order they are chosen, then the worker and the sandbox.
+ * order they are chosen, then each configuration's unset MCP variables, then the worker and
+ * the sandbox.
  */
 export function launchBlockers(
   snapshot: ProviderSnapshot,
   workers: WorkerSnapshot,
-  chosen: { name: string; provider: Provider }[],
+  chosen: ChosenConfiguration[],
 ): LaunchBlocker[] {
   const byProvider = new Map<Provider, string[]>();
   for (const config of chosen) {
@@ -145,9 +187,31 @@ export function launchBlockers(
       detail: null,
       envVar: info?.envVar ?? null,
       command: info?.applyCommand ?? DEFAULT_APPLY,
+      missing: [],
     };
   });
-  const none = { provider: null, providerName: null, configurations: [], envVar: null };
+  for (const config of chosen) {
+    const missing = [...unsetSecrets(config, workers)];
+    if (!missing.length) continue;
+    blockers.push({
+      reason: `${missingSecretsReason(config.name, missing)}.`,
+      fix: 'secrets',
+      provider: null,
+      providerName: null,
+      configurations: [config.name],
+      detail: MISSING_SECRETS_HINT,
+      envVar: null,
+      command: secretsApplyCommand(missing),
+      missing,
+    });
+  }
+  const none = {
+    provider: null,
+    providerName: null,
+    configurations: [],
+    envVar: null,
+    missing: [],
+  };
   if (workers.noWorker) {
     blockers.push({
       ...none,
@@ -172,10 +236,11 @@ export function launchBlockers(
 export interface LaunchFailure {
   /**
    * conflict: a configuration changed (the form reloads them) · provider: Nous Portal, which
-   * Connect fixes · judge: the LLM judge's model or provider · invalid: a 400 with issues ·
+   * Connect fixes · judge: the LLM judge's model or provider · secrets: MCP variables not set
+   * (the form reloads the configurations, which then name them) · invalid: a 400 with issues ·
    * refused: any other 409 (no worker, the sandbox, a key, Hermes revisions) · other.
    */
-  kind: 'conflict' | 'provider' | 'judge' | 'invalid' | 'refused' | 'other';
+  kind: 'conflict' | 'provider' | 'judge' | 'secrets' | 'invalid' | 'refused' | 'other';
   title: string;
   /** The verbatim line: "POST /api/experiments → 409 · Nous Portal is not connected." */
   message: string;
@@ -217,6 +282,15 @@ export function launchFailure(err: unknown): LaunchFailure {
       message,
       hint: UNCHANGED,
       action: 'reconnect',
+    };
+  }
+  if (err.status === 409 && detail.endsWith(MISSING_SECRETS_HINT)) {
+    return {
+      kind: 'secrets',
+      title: "Launch refused: an MCP server's variables are not set.",
+      message,
+      hint: UNCHANGED,
+      action: null,
     };
   }
   if (err.status === 409 && /judge/i.test(detail)) {

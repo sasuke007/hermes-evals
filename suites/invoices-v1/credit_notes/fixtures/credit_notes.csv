@@ -1,0 +1,6 @@
+credit_note_no,invoice_no,vendor_name,issued_on,amount
+CN-0001,INV-20260138,Borealis Logistics,2026-07-08,301.37
+CN-0002,INV-20260129,Evergreen Catering,2026-08-18,1349.71
+CN-0003,INV-20260126,Cobalt Print Co,2026-08-24,1379.04
+CN-0004,INV-20260130,Acme Supplies,2026-08-28,1517.62
+CN-0005,INV-20260135,Delta Facilities,2026-10-12,1584.93

@@ -1,0 +1,13 @@
+summary: Unpaid invoices whose due date is before the cutoff day
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: overdue
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: overdue, unordered: true }

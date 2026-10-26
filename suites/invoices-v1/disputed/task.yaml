@@ -1,0 +1,16 @@
+summary: Average invoice of a payment run that holds disputed invoices back
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: average_payable
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: average_payable }
+  - key: method
+    type: llm_judge
+    params: { rubric: rubric.md, pass_at: 0.7 }

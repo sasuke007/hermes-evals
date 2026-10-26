@@ -8,6 +8,7 @@ from collections import defaultdict
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer")
 parser.add_argument("--workspace")
+parser.add_argument("--home")
 args = parser.parse_args()
 
 summary = os.path.join(args.workspace, "summary.csv")

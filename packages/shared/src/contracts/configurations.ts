@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import { EXPERIMENT_STATUSES, NOT_COMPUTABLE_REASONS } from '../status.js';
-import { MCP_TRANSPORTS, PROVIDERS } from '../vocab.js';
+import { MCP_TRANSPORTS, PROVIDERS, SKILL_LOADING_MODES, type SkillLoadingMode } from '../vocab.js';
 import {
   countView,
   HTTP_URL_PATTERN,
@@ -14,7 +14,12 @@ import {
   SLUG_PATTERN,
 } from './common.js';
 
-/** The fields ConfigDiffTable compares, in its row order. `name` never counts as a difference. */
+/**
+ * The fields ConfigDiffTable compares, in its row order. `name` never counts
+ * as a difference. `skill_loading` (Phase 6 P5, "Skill loading") follows the
+ * skills it applies to; a version without skills shows `preload`, the only
+ * mode it can have, so it differs from a skilled version only in `skills`.
+ */
 export const CONFIG_FIELDS = [
   'name',
   'model',
@@ -22,6 +27,7 @@ export const CONFIG_FIELDS = [
   'toolsets',
   'memory',
   'skills',
+  'skill_loading',
   'documents',
   'mcp_servers',
   'max_turns',
@@ -31,6 +37,22 @@ export const ConfigFieldSchema = z.enum(CONFIG_FIELDS);
 export type ConfigField = z.infer<typeof ConfigFieldSchema>;
 
 const provider = z.enum(PROVIDERS);
+
+export const SkillLoadingSchema = z.enum(SKILL_LOADING_MODES);
+
+/**
+ * How each mode reads wherever a configuration is shown: the diff table's
+ * values, the detail's field, the form's choice and New experiment's
+ * configuration cards.
+ */
+export const SKILL_LOADING_LABELS = {
+  preload: 'preload',
+  on_demand: 'on demand',
+} as const satisfies Record<SkillLoadingMode, string>;
+
+/** Why a configuration with on_demand loading and no skills is refused at save (400). */
+export const SKILL_LOADING_NEEDS_SKILLS =
+  'Skill loading applies only when the configuration has skills';
 
 export const SkillRefSchema = z.object({
   skillId: z.string(),
@@ -81,6 +103,8 @@ export const ConfigurationVersionSchema = ConfigVersionRefSchema.extend({
   toolsets: z.array(z.string()),
   memoryEnabled: z.boolean(),
   skills: z.array(SkillRefSchema),
+  /** `preload` for every version stored before Phase 6, and for any version without skills. */
+  skillLoading: SkillLoadingSchema,
   documents: z.array(DocumentRefSchema),
   mcpServers: z.array(McpServerRefSchema),
   maxTurns: z.number().int().positive(),
@@ -189,6 +213,31 @@ export const ToolsetOptionSchema = z.object({
 });
 export type ToolsetOption = z.infer<typeof ToolsetOptionSchema>;
 
+/** One skill loading mode as the form offers it (Phase 6 P5). */
+export const SkillLoadingOptionSchema = z.object({
+  id: SkillLoadingSchema,
+  /** SKILL_LOADING_LABELS[id]. */
+  label: z.string(),
+  /** One line under the choice, e.g. "Loaded into the prompt at start (-s per skill)." */
+  description: z.string(),
+});
+export type SkillLoadingOption = z.infer<typeof SkillLoadingOptionSchema>;
+
+/** The form's skill loading choices, `preload` (the default) first. */
+export const SKILL_LOADING_OPTIONS: readonly SkillLoadingOption[] = [
+  {
+    id: 'preload',
+    label: SKILL_LOADING_LABELS.preload,
+    description: 'Each skill is loaded into the prompt at start (-s per skill).',
+  },
+  {
+    id: 'on_demand',
+    label: SKILL_LOADING_LABELS.on_demand,
+    description:
+      'Skills are installed but not loaded; the agent lists and opens them with the skills toolset.',
+  },
+];
+
 /** Everything the configuration form offers. Toolsets come from the runtime, in its order. */
 export const ConfigurationFormOptionsSchema = z.object({
   models: z.array(ModelOptionSchema),
@@ -204,6 +253,8 @@ export const ConfigurationFormOptionsSchema = z.object({
    * available)", and the form swaps a pin per mcpServerId.
    */
   mcpServers: z.array(McpServerRefSchema.extend({ endpoint: z.string(), latest: z.boolean() })),
+  /** SKILL_LOADING_OPTIONS: the choice is offered once the configuration has a skill. */
+  skillLoading: z.array(SkillLoadingOptionSchema),
 });
 export type ConfigurationFormOptions = z.infer<typeof ConfigurationFormOptionsSchema>;
 
@@ -220,6 +271,12 @@ export const ConfigurationFieldsSchema = z.object({
   memoryEnabled: z.boolean(),
   /** Skill version ids (each skill row is one name and version). */
   skillIds: z.array(z.string()),
+  /**
+   * Phase 6 P5. Defaults to `preload` when a body leaves it out, so a client
+   * written before Phase 6 still saves what it always ran; `on_demand` needs
+   * at least one skill.
+   */
+  skillLoading: SkillLoadingSchema.default('preload'),
   documentIds: z.array(z.string()),
   mcpServerVersionIds: z.array(z.string()),
   maxTurns: z.number().int(),
@@ -255,6 +312,10 @@ function checkConfiguration(c: z.infer<typeof ConfigurationFieldsSchema>, ctx: z
     if (c[key].some((v) => v === '')) issue(key, 'entries must not be empty');
     if (!isUnique(c[key])) issue(key, 'entries must not repeat');
   }
+  // The configuration_versions_skill_loading_skills_ck rule (migration 0008).
+  if (c.skillLoading === 'on_demand' && c.skillIds.length === 0) {
+    issue('skillLoading', SKILL_LOADING_NEEDS_SKILLS);
+  }
   if (c.maxTurns < 1 || c.maxTurns > 200) issue('maxTurns', 'max turns must be 1 to 200');
   if (c.timeBudgetS < 30 || c.timeBudgetS > 3600) {
     issue('timeBudgetS', 'the time budget must be 30 to 3600 seconds');
@@ -275,6 +336,7 @@ export const NEW_CONFIGURATION_DEFAULTS = {
   maxTurns: 20,
   timeBudgetS: 300,
   memoryEnabled: false,
+  skillLoading: 'preload',
 } as const;
 
 /** What the form opens with: new, edit or duplicate. */

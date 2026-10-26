@@ -1,9 +1,121 @@
-invoice_no,vendor_name,invoice_date,due_date,amount,currency,po_number,status
-INV-1001,Acme Supplies,2026-09-01,2026-10-01,1250.00,EUR,PO-501,paid
-INV-1002,Acme Supplies,2026-09-15,2026-10-15,980.50,EUR,PO-502,open
-INV-1003,Borealis Logistics,2026-09-03,2026-10-03,4200.00,EUR,PO-503,open
-INV-1004,Borealis Logistics,2026-09-20,2026-10-20,310.75,EUR,,disputed
-INV-1005,Cobalt Software,2026-08-28,2026-09-27,7800.00,USD,PO-505,open
-INV-1006,Cobalt Software,2026-09-28,2026-10-28,7800.00,USD,PO-506,open
-INV-1007,Delta Print,2026-09-10,2026-10-10,145.20,EUR,PO-507,paid
-INV-1008,Delta Print,2026-10-02,2026-11-01,560.00,EUR,PO-999,open
+invoice_no,vendor_name,invoice_date,due_date,amount,currency,po_number,status,notes
+INV-1001,Ember Facilities,2026-01-06,2026-03-07,7434.37,EUR,PO-4388,paid,
+INV-1002,Orchard Media,2026-01-10,2026-01-25,506.43,EUR,PO-6675,paid,
+INV-1003,Acme Supplies,2026-01-11,2026-02-10,4564.89,EUR,PO-7385,paid,
+INV-1004,Kestrel Security,2026-01-15,2026-03-16,1882.65,EUR,PO-5830,open,"Includes a freight surcharge, see the PO."
+INV-1005,Cobalt Software,2026-01-16,2026-02-15,3075.37,USD,PO-6206,paid,
+INV-1006,Granite Office,2026-01-16,2026-02-15,1097.03,GBP,,paid,
+INV-1007,Juniper Catering,2026-01-20,2026-02-19,258.23,EUR,PO-6136,open,
+INV-1008,Granite Office,2026-01-23,2026-02-22,451.03,GBP,PO-8134,disputed,Disputed: quantity short by 3 units.
+INV-1009,Harbor Analytics,2026-01-24,2026-03-10,6551.41,USD,PO-5200,open,Credit note expected for damaged items.
+INV-1010,Kestrel Security,2026-01-31,2026-04-01,977.36,EUR,PO-6169,paid,
+INV-1011,Meridian Legal,2026-02-01,2026-03-18,2205.93,GBP,PO-8087,disputed,Disputed: service not delivered in full.
+INV-1012,Delta Print,2026-02-01,,426.15,EUR,PO-5355,open,Due date not on the invoice; vendor terms apply.
+INV-1013,Acme Supplies,2026-02-02,2026-03-04,174.76,EUR,PO-5512,open,
+INV-1014,Acme Supplies,2026-02-07,2026-03-09,283.55,EUR,PO-5030,paid,Second reminder received.
+INV-1015,Granite Office,2026-02-10,2026-03-12,1656.24,GBP,PO-7383,paid,
+INV-1016,Borealis Logistics,2026-02-14,2026-03-31,265.52,EUR,PO-6612,disputed,Disputed: billed twice for the same week.
+INV-1017,Kestrel Security,2026-02-18,2026-04-19,748.48,EUR,PO-8946,disputed,Disputed: rate differs from the contract.
+INV-1018,Ember Facilities,2026-02-19,2026-04-20,577.81,EUR,PO-7114,paid,
+INV-1019,Acme Supplies,2026-02-20,2026-03-22,4432.02,EUR,PO-8417,disputed,Disputed: quantity short by 3 units.
+INV-1020,Acme Supplies,2026-02-21,2026-03-23,346.79,EUR,PO-7626,paid,
+INV-1021,Borealis Logistics,2026-02-24,2026-04-10,148.01,EUR,PO-4140,paid,
+INV-1022,Lumen Utilities,2026-02-27,2026-03-29,175.28,EUR,PO-4206,paid,
+INV-1023,Lumen Utilities,2026-03-02,2026-04-01,247.10,EUR,PO-7209,paid,
+INV-1024,Kestrel Security,2026-03-10,2026-05-09,1351.48,EUR,PO-6939,paid,
+INV-1025,Fjord Freight,2026-03-10,2026-04-09,128.46,EUR,PO-8678,paid,
+INV-1026,Ember Facilities,2026-03-15,2026-05-14,6342.18,EUR,PO-8347,paid,
+INV-1027,Lumen Utilities,2026-03-18,2026-04-17,2372.18,EUR,,open,
+INV-1028,Lumen Utilities,2026-03-18,2026-04-17,596.93,EUR,PO-6456,paid,
+INV-1029,Juniper Catering,2026-03-23,2026-04-22,8725.16,EUR,,disputed,Disputed: rate differs from the contract.
+INV-1030,Nimbus Hosting,2026-03-29,2026-04-28,2124.54,EUR,PO-6020,paid,Price per PO amendment 2.
+INV-1031,Borealis Logistics,2026-03-30,2026-05-14,180.92,EUR,PO-4827,paid,
+INV-1032,Granite Office,2026-03-30,2026-04-29,384.29,GBP,PO-8962,open,
+INV-1033,Orchard Media,2026-03-30,,1777.77,EUR,PO-8887,open,Due date not on the invoice; vendor terms apply.
+INV-1034,Kestrel Security,2026-04-01,2026-05-31,912.49,EUR,PO-6328,paid,
+INV-1035,Nimbus Hosting,2026-04-01,2026-05-01,6061.50,EUR,PO-7311,open,
+INV-1036,Cobalt Software,2026-04-04,2026-05-04,1774.68,USD,PO-5653,paid,
+INV-1037,Borealis Logistics,2026-04-04,2026-05-19,432.85,EUR,PO-4987,paid,
+INV-1038,Harbor Analytics,2026-04-09,2026-05-24,362.83,USD,PO-5871,paid,Partial delivery; balance invoiced separately.
+INV-1039,Kestrel Security,2026-04-14,2026-06-13,2876.05,EUR,PO-8315,disputed,Disputed: billed twice for the same week.
+INV-1040,Harbor Analytics,2026-04-16,2026-05-31,2111.83,USD,,open,
+INV-1041,Harbor Analytics,2026-04-18,2026-06-02,2187.18,USD,PO-4860,paid,
+INV-1042,Granite Office,2026-04-21,2026-05-21,2124.60,GBP,PO-7738,paid,
+INV-1043,Lumen Utilities,2026-04-23,2026-05-23,6743.51,EUR,PO-4078,paid,
+INV-1044,Delta Print,2026-04-23,2026-05-08,3476.07,EUR,PO-4575,paid,
+INV-1045,Ember Facilities,2026-04-25,2026-06-24,201.44,EUR,,paid,
+INV-1046,Lumen Utilities,2026-04-26,2026-05-26,158.37,EUR,PO-5887,open,
+INV-1047,Acme Supplies,2026-04-27,2026-05-27,1180.20,EUR,PO-7623,open,
+INV-1048,Nimbus Hosting,2026-04-27,2026-05-27,1744.74,EUR,,paid,
+INV-1049,Harbor Analytics,2026-04-30,2026-06-14,589.50,USD,PO-4143,paid,
+INV-1050,Juniper Catering,2026-05-01,2026-05-31,175.55,EUR,,paid,
+INV-1051,Borealis Logistics,2026-05-01,2026-06-15,178.86,EUR,PO-6605,paid,
+INV-1052,Nimbus Hosting,2026-05-03,2026-06-02,2036.82,EUR,PO-7698,paid,
+INV-1053,Lumen Utilities,2026-05-07,,438.48,EUR,PO-6862,open,Due date not on the invoice; vendor terms apply.
+INV-1054,Acme Supplies,2026-05-08,2026-06-07,123.50,EUR,PO-8148,paid,Partial delivery; balance invoiced separately.
+INV-1055,Acme Supplies,2026-05-09,2026-06-08,3177.98,EUR,PO-7427,paid,
+INV-1056,Orchard Media,2026-05-15,2026-05-30,3801.20,EUR,PO-8443,paid,
+INV-1057,Juniper Catering,2026-05-17,2026-06-16,536.03,EUR,PO-6751,paid,
+INV-1058,Borealis Logistics,2026-05-20,2026-07-04,1200.25,EUR,PO-4034,paid,
+INV-1059,Kestrel Security,2026-05-23,2026-07-22,497.78,EUR,PO-8578,paid,
+INV-1060,Granite Office,2026-05-30,2026-06-29,152.90,GBP,PO-5481,disputed,Disputed: quantity short by 3 units.
+INV-1061,Harbor Analytics,2026-06-01,2026-07-16,121.78,USD,PO-4584,open,
+INV-1062,Cobalt Software,2026-06-03,2026-07-03,8263.13,USD,PO-4570,paid,
+INV-1063,Cobalt Software,2026-06-04,2026-07-04,129.31,USD,PO-5746,paid,
+INV-1064,Meridian Legal,2026-06-08,2026-07-23,261.91,GBP,,paid,
+INV-1065,Borealis Logistics,2026-06-10,2026-07-25,6121.92,EUR,PO-6061,paid,Credit note expected for damaged items.
+INV-1066,Delta Print,2026-06-13,2026-06-28,263.94,EUR,PO-5877,open,
+INV-1067,Granite Office,2026-06-13,2026-07-13,4376.51,GBP,PO-6999,open,
+INV-1068,Ion Cleaning,2026-06-13,2026-06-28,245.65,EUR,PO-5431,open,
+INV-1069,Delta Print,2026-06-15,2026-06-30,6361.30,EUR,PO-5829,paid,
+INV-1070,Nimbus Hosting,2026-06-16,2026-07-16,2018.69,EUR,PO-4100,paid,
+INV-1071,Fjord Freight,2026-06-23,2026-07-23,3766.96,EUR,PO-7867,disputed,Disputed: quantity short by 3 units.
+INV-1072,Ion Cleaning,2026-06-24,2026-07-09,134.93,EUR,PO-7345,paid,
+INV-1073,Granite Office,2026-06-24,,185.85,GBP,PO-6189,open,Due date not on the invoice; vendor terms apply.
+INV-1074,Ion Cleaning,2026-06-24,2026-07-09,1167.69,EUR,PO-8154,paid,
+INV-1075,Nimbus Hosting,2026-06-26,2026-07-26,1858.38,EUR,PO-5808,open,
+INV-1076,Borealis Logistics,2026-06-28,2026-08-12,8537.71,EUR,PO-4542,open,
+INV-1077,Ember Facilities,2026-06-28,2026-08-27,991.53,EUR,PO-7953,open,
+INV-1078,Harbor Analytics,2026-06-28,2026-08-12,1758.48,USD,PO-4052,open,
+INV-1079,Borealis Logistics,2026-06-29,2026-08-13,359.22,EUR,PO-7447,paid,
+INV-1080,Harbor Analytics,2026-06-30,2026-08-14,792.43,USD,PO-6410,paid,
+INV-1081,Ion Cleaning,2026-07-03,2026-07-18,2788.23,EUR,PO-5390,paid,
+INV-1082,Ember Facilities,2026-07-10,2026-09-08,6646.41,EUR,PO-6067,open,
+INV-1083,Harbor Analytics,2026-07-10,2026-08-24,127.03,USD,PO-8651,open,
+INV-1084,Cobalt Software,2026-07-11,2026-08-10,196.99,USD,PO-6594,open,
+INV-1085,Meridian Legal,2026-07-11,2026-08-25,131.10,GBP,PO-6832,open,
+INV-1086,Cobalt Software,2026-07-16,2026-08-15,8355.39,USD,PO-8870,open,
+INV-1087,Borealis Logistics,2026-07-20,2026-09-03,5435.67,EUR,PO-6140,open,
+INV-1088,Meridian Legal,2026-07-20,,5252.40,GBP,,open,Due date not on the invoice; vendor terms apply.
+INV-1089,Lumen Utilities,2026-07-21,2026-08-20,407.91,EUR,PO-7537,paid,
+INV-1090,Borealis Logistics,2026-07-22,,742.50,EUR,PO-4192,open,Due date not on the invoice; vendor terms apply.
+INV-1091,Juniper Catering,2026-07-22,2026-08-21,188.17,EUR,PO-8096,open,
+INV-1092,Delta Print,2026-07-23,2026-08-07,5373.29,EUR,PO-7391,paid,
+INV-1093,Granite Office,2026-07-24,2026-08-23,1220.35,GBP,PO-8210,open,
+INV-1094,Lumen Utilities,2026-07-30,2026-08-29,4870.42,EUR,PO-5423,open,
+INV-1095,Delta Print,2026-08-01,2026-08-16,2796.31,EUR,PO-7410,paid,
+INV-1096,Acme Supplies,2026-08-02,2026-09-01,816.43,EUR,,paid,
+INV-1097,Delta Print,2026-08-03,2026-08-18,5541.66,EUR,PO-5096,open,
+INV-1098,Fjord Freight,2026-08-04,2026-09-03,3595.66,EUR,PO-7208,paid,
+INV-1099,Meridian Legal,2026-08-04,2026-09-18,194.56,GBP,PO-6013,open,
+INV-1100,Harbor Analytics,2026-08-09,2026-09-23,187.94,USD,PO-4872,open,Credit note expected for damaged items.
+INV-1101,Meridian Legal,2026-08-12,2026-09-26,356.79,GBP,PO-4532,paid,
+INV-1102,Fjord Freight,2026-08-13,2026-09-12,181.37,EUR,,open,
+INV-1103,Fjord Freight,2026-08-16,2026-09-15,895.35,EUR,PO-6315,open,
+INV-1104,Acme Supplies,2026-08-22,2026-09-21,2929.77,EUR,,open,
+INV-1105,Harbor Analytics,2026-08-23,2026-10-07,6691.75,USD,PO-5003,open,
+INV-1106,Cobalt Software,2026-08-24,2026-09-23,4167.44,USD,PO-8127,disputed,Disputed: quantity short by 3 units.
+INV-1107,Meridian Legal,2026-08-27,2026-10-11,2089.24,GBP,PO-5796,open,
+INV-1108,Acme Supplies,2026-08-29,2026-09-28,137.86,EUR,PO-6237,open,
+INV-1109,Delta Print,2026-08-30,2026-09-14,5721.55,EUR,PO-5550,open,
+INV-1110,Kestrel Security,2026-08-30,2026-10-29,328.64,EUR,,paid,
+INV-1111,Granite Office,2026-09-01,2026-10-01,8810.85,GBP,PO-7899,open,Credit note expected for damaged items.
+INV-1112,Juniper Catering,2026-09-04,,664.80,EUR,PO-6213,open,Due date not on the invoice; vendor terms apply.
+INV-1113,Acme Supplies,2026-09-05,,1618.76,EUR,PO-4640,open,Due date not on the invoice; vendor terms apply.
+INV-1114,Juniper Catering,2026-09-12,2026-10-12,993.07,EUR,PO-4105,open,
+INV-1115,Nimbus Hosting,2026-09-13,2026-10-13,789.51,EUR,PO-4440,paid,
+INV-1116,Meridian Legal,2026-09-22,2026-11-06,179.53,GBP,PO-6154,disputed,Disputed: quantity short by 3 units.
+INV-1117,Acme Supplies,2026-09-25,2026-10-25,146.49,EUR,PO-5614,paid,
+INV-1118,Delta Print,2026-09-25,2026-10-10,362.18,EUR,PO-4786,open,
+INV-1119,Acme Supplies,2026-09-26,2026-10-26,2783.30,EUR,PO-4070,open,Price per PO amendment 2.
+INV-1120,Granite Office,2026-09-27,2026-10-27,4254.58,GBP,PO-5491,open,

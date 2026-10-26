@@ -199,6 +199,39 @@ export const TaskFixtureFileSchema = z.object({
 });
 export type TaskFixtureFile = z.infer<typeof TaskFixtureFileSchema>;
 
+/** The task-file kinds Task detail lists as home files (Phase 6 P1, P2). */
+export const TASK_HOME_FILE_KINDS = ['home_seed', 'expected_home'] as const;
+export type TaskHomeFileKind = (typeof TASK_HOME_FILE_KINDS)[number];
+
+/**
+ * A task file that seeds the agent's home (`home_seed`, copied into the trial
+ * home before every run) or holds what a home check expects there after a run
+ * (`expected_home`, overlaid on the seeds, never copied into a trial).
+ */
+export const TaskHomeFileSchema = z.object({
+  kind: z.enum(TASK_HOME_FILE_KINDS),
+  /**
+   * As in the task folder: `home/memories/MEMORY.md`, or under the
+   * self_check.expected_home folder, which may be nested:
+   * `expected_home/memories/USER.md`, `known_good/home/memories/USER.md`.
+   */
+  path: z.string().min(1),
+  /**
+   * Where the file is in the home, `memories/USER.md`: a seed's target, or an
+   * expected_home file's path inside its folder (the API strips the folder
+   * as task.yaml names it, so a nested one is stripped whole).
+   */
+  homePath: z.string().min(1),
+  sizeBytes: countView,
+  sha256: sha256View,
+  /** The file's text when it is valid UTF-8 of at most TASK_HOME_FILE_TEXT_LIMIT bytes, else null. */
+  text: z.string().nullable(),
+});
+export type TaskHomeFile = z.infer<typeof TaskHomeFileSchema>;
+
+/** Home files up to this size carry their text inside Task detail (memory files are far smaller). */
+export const TASK_HOME_FILE_TEXT_LIMIT = 16 * 1024;
+
 /** One verification entry, with the sentence VerificationSentence renders. */
 export const VerificationEntryViewSchema = z.object({
   key: z.string(),
@@ -259,6 +292,8 @@ export const TaskDetailSchema = z.object({
   path: z.string(),
   prompt: z.object({ file: z.string(), markdown: z.string(), characters: countView }),
   fixtures: z.array(TaskFixtureFileSchema),
+  /** home_seed files in path order, then expected_home files in path order; [] for most tasks. */
+  homeFiles: z.array(TaskHomeFileSchema),
   verification: z.array(VerificationEntryViewSchema),
   reference: z.object({ file: z.string(), value: JsonValueSchema }),
   /** Verifier script source when an entry is a verifier_script; null otherwise. */

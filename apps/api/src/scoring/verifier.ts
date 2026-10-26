@@ -2,9 +2,14 @@
  * The verifier runner (plan 4.3, 9.3, 14). A verifier is the task author's
  * Python script, run by the worker outside any trial:
  *
- *   python3 <script> --answer <scratch>/answer.json --workspace <dir>
+ *   python3 <script> --answer <scratch>/answer.json --workspace <dir> --home <dir>
  *
  * The answer file always exists; it holds JSON null when there is no answer.
+ * `--home` (Phase 6 P2) is always passed: a folder holding the home files
+ * collected after the run (`memories/MEMORY.md`, `memories/USER.md`, at their
+ * home-relative paths), empty when there are none. A script must accept the
+ * option even when it never reads it; argparse refuses an undeclared one,
+ * and the error then says how to fix it (homeOptionHint).
  * The contract: the last non-empty stdout line is a JSON object with `score`
  * from 0 to 1 and an optional string `comment` (other keys are ignored). No
  * such line, bad JSON, a score out of range, a non-zero exit or the deadline
@@ -23,7 +28,7 @@
  * their own `network: none` container (plan 14, Phase 5b).
  */
 import { spawn } from 'node:child_process';
-import { lstat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { JsonValue, ScoreEvidence, VerifierScriptParams } from '@hermes-evals/shared';
@@ -49,6 +54,11 @@ export interface VerifierOptions {
   /** Written to `<scratchDir>/answer.json`; null writes JSON null. */
   answer: JsonValue | null;
   workspaceDir: string;
+  /**
+   * The collected home files, passed as `--home`. Absent: an empty folder
+   * made in the scratch directory, as for an attempt that left no home files.
+   */
+  homeDir?: string;
   timeoutS: number;
   /** An empty writable directory the caller disposes: answer.json, HOME and TMPDIR. */
   scratchDir: string;
@@ -83,6 +93,20 @@ const lastLineOf = (text: string): string | null =>
     .map((l) => l.trim())
     .filter((l) => l !== '')
     .at(-1) ?? null;
+
+/** The folder `--home` names when the caller gives none: empty, in the scratch directory. */
+export const EMPTY_HOME_DIR = 'empty-home';
+
+/**
+ * What to do about a script that refuses `--home`: argparse's
+ * "unrecognized arguments: ... --home ..." on stderr, from a script written
+ * before Phase 6. Null for any other failure.
+ */
+export function homeOptionHint(stderrTail: string): string | null {
+  return /unrecognized arguments:.*--home/.test(stderrTail)
+    ? "the script does not accept --home, which every verifier is given (Phase 6); add parser.add_argument('--home') to it"
+    : null;
+}
 
 /** Reads the result line under the contract above. */
 export function parseVerifierLine(line: string | null): VerifierOutcome {
@@ -121,6 +145,11 @@ export async function runVerifier(options: VerifierOptions): Promise<VerifierRun
   const scriptPath = resolve(options.scriptPath);
   const answerPath = join(scratch, 'answer.json');
   await writeFile(answerPath, `${JSON.stringify(options.answer)}\n`);
+  let homeDir = options.homeDir;
+  if (homeDir === undefined) {
+    homeDir = join(scratch, EMPTY_HOME_DIR);
+    await mkdir(homeDir, { recursive: true });
+  }
   const argv = [
     python,
     scriptPath,
@@ -128,6 +157,8 @@ export async function runVerifier(options: VerifierOptions): Promise<VerifierRun
     answerPath,
     '--workspace',
     resolve(options.workspaceDir),
+    '--home',
+    resolve(homeDir),
   ];
 
   const stdoutTail = new ByteTail(VERIFIER_TAIL_BYTES);
@@ -211,7 +242,12 @@ export async function runVerifier(options: VerifierOptions): Promise<VerifierRun
   } else if (ended.code !== 0) {
     const how =
       ended.code === null ? `was killed by ${ended.signal}` : `exited with code ${ended.code}`;
-    outcome = { ok: false, error: how, detail: stderrLine };
+    const hint = homeOptionHint(evidence.stderr_tail);
+    outcome = {
+      ok: false,
+      error: hint ? `${how}: ${hint}` : how,
+      detail: stderrLine,
+    };
   } else {
     outcome = parseVerifierLine(stdout.lastLine);
     if (!outcome.ok && outcome.detail === null) outcome = { ...outcome, detail: stderrLine };
@@ -239,6 +275,8 @@ export interface VerifierKeyInput {
   verifyDir: string;
   answer: JsonValue | null;
   workspaceDir: string;
+  /** The collected home files, as `--home`; absent gives an empty folder (VerifierOptions.homeDir). */
+  homeDir?: string;
   scratchDir: string;
   python?: string;
 }
@@ -259,6 +297,7 @@ export function scoreVerifierScript(
       scriptPath,
       answer: input.answer,
       workspaceDir: input.workspaceDir,
+      ...(input.homeDir !== undefined ? { homeDir: input.homeDir } : {}),
       timeoutS: params.timeout_s,
       scratchDir: input.scratchDir,
       python: input.python,

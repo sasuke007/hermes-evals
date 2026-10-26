@@ -1,6 +1,21 @@
 name: invoices-v1
-version_label: '0.1'
+version_label: '1.0'
 description: >-
-  Accounts-payable questions over one family of invoice fixtures. Each task
-  has a trap that a careful method avoids. This first task is hand-seeded;
-  the fixture generator in Phase 6 replaces it with the full twelve.
+  Twelve accounts-payable questions over one family of invoice fixtures,
+  generated with a fixed seed by scripts/fixtures/invoices-v1.ts, which also
+  computes every reference. Each task has one trap that the invoice-method
+  skill warns about. The recommended experiment compares a baseline with the
+  same configuration plus the skill, preloaded.
+tasks:
+  - total_due
+  - overdue_list
+  - dup_invoices
+  - vat_split
+  - credit_notes
+  - currency_mix
+  - missing_po
+  - late_fees
+  - per_vendor
+  - disputed
+  - partial_pay
+  - summary_file

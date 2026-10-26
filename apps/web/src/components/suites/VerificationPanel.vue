@@ -9,9 +9,13 @@ import ZoneLabel from './ZoneLabel.vue';
 /**
  * A task's checks, in the order they are scored (TaskDetail board): each entry's key, its
  * tags (primary first, then the type), its sentence and its raw YAML, which starts open on
- * the primary check.
+ * the primary check. A file_check on the agent's home (Phase 6, `root: home`) adds a
+ * `root: home` tag after its type; the workspace, the default, adds none.
  */
 defineProps<{ verification: VerificationEntryView[] }>();
+
+const onHome = (entry: VerificationEntryView): boolean =>
+  entry.type === 'file_check' && entry.params.root === 'home';
 </script>
 
 <template>
@@ -45,6 +49,7 @@ defineProps<{ verification: VerificationEntryView[] }>();
           <span class="font-mono font-semibold">{{ entry.key }}</span>
           <BaseTag v-if="entry.primary">primary</BaseTag>
           <BaseTag>{{ entry.type }}</BaseTag>
+          <BaseTag v-if="onHome(entry)" data-testid="check-root">root: home</BaseTag>
         </div>
         <VerificationSentence :entry="entry" />
         <details :open="entry.primary">

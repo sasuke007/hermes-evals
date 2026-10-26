@@ -246,6 +246,7 @@ import argparse, json, sys
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer", required=True)
 parser.add_argument("--workspace", required=True)
+parser.add_argument("--home")
 args = parser.parse_args()
 
 answer = json.load(open(args.answer))
@@ -263,6 +264,7 @@ import argparse, csv, json
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer", required=True)
 parser.add_argument("--workspace", required=True)
+parser.add_argument("--home")
 args = parser.parse_args()
 
 rows = list(csv.DictReader(open(f"{args.workspace}/summary.csv")))
@@ -622,9 +624,9 @@ const LATE_FEES_FAILURE: SelfCheckFailureView = {
   ranAt: V2_LOADED_AT,
   durationMs: 300,
   previousRun: { at: V1_LAST_LOAD_AT, status: 'passed' },
-  transcript: `$ python3 verify/check_late_fees.py --answer reference.json --workspace fixtures/
+  transcript: `$ python3 verify/check_late_fees.py --answer reference.json --workspace fixtures/ --home home/
 Traceback (most recent call last):
-  File "verify/check_late_fees.py", line 11, in <module>
+  File "verify/check_late_fees.py", line 12, in <module>
     rate = policy["late_fee_rate"]
 KeyError: 'late_fee_rate'
 expected on stdout: one JSON line {"key": "check", "score": …, "comment": "…"}
@@ -1021,12 +1023,12 @@ function fixtureFiles(seed: TaskSeed, version: number): TaskFixtureFile[] {
   }));
 }
 
-/** Task detail without the "In experiments" usage, which the API layer adds. */
+/** Task detail without the "In experiments" usage and the home files, which the API layer adds. */
 export function taskDetailFixture(
   state: SuiteState,
   suiteId: string,
   key: string,
-): Omit<TaskDetail, 'experiments'> | null {
+): Omit<TaskDetail, 'experiments' | 'homeFiles'> | null {
   const suite = seedFor(state, suiteId);
   const seed = TASK_SEEDS.find((t) => t.key === key);
   if (!suite || !seed) return null;

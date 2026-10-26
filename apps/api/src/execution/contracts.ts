@@ -32,6 +32,7 @@
  */
 import type {
   ArtifactOrigin,
+  ArtifactRoot,
   ArtifactSkipReason,
   ExecutionErrorCategory,
   LaunchRecord,
@@ -40,6 +41,7 @@ import type {
   Provider,
   RunEventPayload,
   RunEventType,
+  SkillLoadingMode,
   Tokens,
 } from '@hermes-evals/shared';
 import type { EgressUsage } from '../sandbox/egress-client.js';
@@ -49,6 +51,23 @@ export interface PlannedFixture {
   /**
    * Path relative to the workspace, e.g. `invoices.csv`: the task file's path
    * with its leading `fixtures/` removed. Relative, no `..` segment.
+   */
+  path: string;
+  /** Blob to copy from DATA_DIR/blobs; the runner re-checks the hash after copying. */
+  sha256: string;
+  size: number;
+}
+
+/**
+ * A memory file the task seeds the trial home with (Phase 6 P1): a task file
+ * of kind `home_seed`, copied before launch, hash re-checked, in every arm
+ * whatever memoryEnabled says.
+ */
+export interface PlannedHomeSeed {
+  /**
+   * Path relative to the home, e.g. `memories/MEMORY.md`: the task file's
+   * path with its leading `home/` removed (homeSeedTarget in
+   * @hermes-evals/shared). One of the two HOME_SEED_PATHS targets.
    */
   path: string;
   /** Blob to copy from DATA_DIR/blobs; the runner re-checks the hash after copying. */
@@ -123,6 +142,8 @@ export interface AttemptPlan {
     /** Written to home/task.txt verbatim. */
     prompt: string;
     fixtures: PlannedFixture[];
+    /** Copied into home/memories/ before launch, sorted by path; empty when the task has none. */
+    homeSeeds: PlannedHomeSeed[];
   };
   limits: {
     /** The configuration version's max_turns. */
@@ -150,6 +171,12 @@ export interface AttemptPlan {
     toolsets: string[];
     memoryEnabled: boolean;
     skills: PlannedSkill[];
+    /**
+     * Phase 6 P5: `preload` passes `-s <name>` per skill; `on_demand` passes
+     * no `-s` and appends `skills` to the `-t` list once. Both copy the
+     * skills into home/skills/. Always `preload` when `skills` is empty.
+     */
+    skillLoading: SkillLoadingMode;
     documents: PlannedDocument[];
     mcpServers: PlannedMcpServer[];
   };
@@ -198,9 +225,18 @@ export interface AttemptSink {
   cancelRequested(): Promise<boolean>;
 }
 
-/** A file found in the workspace after the container was removed (plan 8.5). */
+/**
+ * A file found after the container was removed (plan 8.5): in the workspace,
+ * or in the home's `memories/`, collected before the home is deleted
+ * (Phase 6 P2).
+ */
 export interface AttemptArtifact {
-  /** Relative to the workspace, e.g. `summary.csv` or `docs/policy.pdf`. */
+  /** The directory it was collected from; artifacts.root. */
+  root: ArtifactRoot;
+  /**
+   * Relative to its root: `summary.csv` or `docs/policy.pdf` in the
+   * workspace, `memories/MEMORY.md` in the home.
+   */
   path: string;
   origin: ArtifactOrigin;
   size: number;

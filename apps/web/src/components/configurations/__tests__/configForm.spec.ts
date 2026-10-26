@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { ConfigurationInputSchema } from '@hermes-evals/shared';
 import {
+  effectiveSkillLoading,
   fieldOfIssue,
   formChanges,
   formStateFrom,
@@ -196,6 +198,42 @@ describe('configuration form rules', () => {
     expect(fieldOfIssue('maxTurns')).toBe('maxTurns');
     expect(fieldOfIssue('toolsets')).toBe('toolsets');
     expect(fieldOfIssue('mcpServerVersionIds.0')).toBe('resources');
+    expect(fieldOfIssue('skillLoading')).toBe('skillLoading');
     expect(fieldOfIssue('duplicatedFromVersionId')).toBeNull();
+  });
+
+  describe('skill loading (Phase 6 P5)', () => {
+    it('reads the version’s mode and sends it with skills', () => {
+      const state = { ...withSkill(), skillLoading: 'on_demand' as const };
+      expect(withSkill().skillLoading).toBe('preload');
+      expect(effectiveSkillLoading(state)).toBe('on_demand');
+      const body = toInput(state);
+      expect(body.skillLoading).toBe('on_demand');
+      expect(ConfigurationInputSchema.safeParse(body).success).toBe(true);
+    });
+
+    it('saves preload without skills, whatever was picked, so the API never refuses it', () => {
+      const state = { ...withSkill(), skillIds: [], skillLoading: 'on_demand' as const };
+      expect(effectiveSkillLoading(state)).toBe('preload');
+      const body = toInput(state);
+      expect(body.skillLoading).toBe('preload');
+      expect(ConfigurationInputSchema.safeParse(body).success).toBe(true);
+    });
+
+    it('summarises a change of mode as skill_loading, after skills', () => {
+      const before = withSkill();
+      const after = { ...before, skillLoading: 'on_demand' as const };
+      expect(formChanges(before, after, options)).toEqual([
+        { field: 'skill_loading', before: 'preload', after: 'on demand' },
+      ]);
+      // A mode left behind when the last skill goes is not a change of its own.
+      const removed = { ...after, skillIds: [] };
+      expect(formChanges(before, removed, options).map((c) => c.field)).toEqual(['skills']);
+      const added = { ...fresh(), skillIds: before.skillIds, skillLoading: 'on_demand' as const };
+      expect(formChanges(fresh(), added, options).map((c) => c.field)).toEqual([
+        'skills',
+        'skill_loading',
+      ]);
+    });
   });
 });

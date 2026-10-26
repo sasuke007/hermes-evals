@@ -14,6 +14,8 @@ import {
   type DocumentRef,
   type McpServerRef,
   type Provider,
+  SKILL_LOADING_LABELS,
+  type SkillLoadingMode,
   type SkillRef,
 } from '@hermes-evals/shared';
 import { canonicalJson } from '../queue/queues.js';
@@ -36,6 +38,8 @@ export interface ResolvedSettings {
   toolsets: string[];
   memoryEnabled: boolean;
   skills: SkillRef[];
+  /** How the skills reach the agent (Phase 6 P5); always `preload` without skills. */
+  skillLoading: SkillLoadingMode;
   documents: DocumentRef[];
   mcpServers: ResolvedMcpServer[];
   maxTurns: number;
@@ -82,6 +86,11 @@ export function orderSettings(s: ResolvedSettings): ResolvedSettings {
  * configuration with the same fields has the same hash, and estimates built
  * from past attempts still match it (plan 7.2). Ids are left out for the
  * same reason: a re-uploaded identical document is the same input.
+ *
+ * Skill loading (Phase 6 P5) enters the payload only when it is `on_demand`.
+ * Every version stored before it preloaded, so a `preload` version hashes
+ * exactly as it did, its stored hash stays true, and the estimates of the
+ * attempts it ran still match it; HASH_FORMAT stays 1 for the same reason.
  */
 export function configHash(settings: ResolvedSettings): string {
   const s = orderSettings(settings);
@@ -100,6 +109,8 @@ export function configHash(settings: ResolvedSettings): string {
     documents: s.documents.map((d) => ({ filename: d.filename, sha256: d.sha256 })),
     // And the server name, which becomes its `-t` toolset alias.
     mcpServers: s.mcpServers.map((m) => ({ name: m.name, definitionHash: m.definitionHash })),
+    // No -s and the skills toolset: the agent sees a different prompt and tool list.
+    ...(s.skillLoading === 'on_demand' ? { skillLoading: s.skillLoading } : {}),
   };
   return createHash('sha256').update(canonicalJson(payload)).digest('hex');
 }
@@ -117,6 +128,7 @@ export function sameSettings(a: ResolvedSettings, b: ResolvedSettings): boolean 
       maxTurns: o.maxTurns,
       timeBudgetS: o.timeBudgetS,
       skills: o.skills.map((k) => k.skillId),
+      skillLoading: o.skillLoading,
       documents: o.documents.map((d) => d.documentId),
       mcpServers: o.mcpServers.map((m) => m.versionId),
     });
@@ -134,9 +146,9 @@ const skillLabel = (s: SkillRef) => `${s.name}@${s.version}`;
 
 /**
  * Display value of one field, as ConfigDiffTable shows it: "file, terminal",
- * "off", "—", "invoice-method@1.0.0", "invoice-db (stdio)". The provider
- * carries the base URL for `custom`, so two custom providers that differ only
- * in where they point still show as different.
+ * "off", "—", "invoice-method@1.0.0", "on demand", "invoice-db (stdio)". The
+ * provider carries the base URL for `custom`, so two custom providers that
+ * differ only in where they point still show as different.
  */
 export function fieldValue(name: string, s: ResolvedSettings, field: ConfigField): string {
   switch (field) {
@@ -152,6 +164,8 @@ export function fieldValue(name: string, s: ResolvedSettings, field: ConfigField
       return s.memoryEnabled ? 'on' : 'off';
     case 'skills':
       return s.skills.map(skillLabel).join(', ') || NONE;
+    case 'skill_loading':
+      return SKILL_LOADING_LABELS[s.skillLoading];
     case 'documents':
       return s.documents.map((d) => d.filename).join(', ') || NONE;
     case 'mcp_servers':
@@ -297,6 +311,9 @@ export function changeParts(prev: ResolvedSettings, next: ResolvedSettings): str
   const a = orderSettings(prev);
   const b = orderSettings(next);
   parts.push(...resourceChanges(a.skills.map(skill), b.skills.map(skill), NOUNS.skill));
+  if (prev.skillLoading !== next.skillLoading) {
+    parts.push(`set skill loading to ${SKILL_LOADING_LABELS[next.skillLoading]}`);
+  }
   parts.push(...resourceChanges(a.documents.map(doc), b.documents.map(doc), NOUNS.document));
   parts.push(...resourceChanges(a.mcpServers.map(mcp), b.mcpServers.map(mcp), NOUNS.mcp));
 

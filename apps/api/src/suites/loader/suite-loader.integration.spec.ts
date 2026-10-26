@@ -478,19 +478,23 @@ describe('a suite.yaml that does not parse', () => {
 });
 
 describe('the real invoices-v1 suite', () => {
-  it('loads total_due as a valid task', async () => {
+  it('loads every task valid, with every self-check passed', async () => {
     await cp(join(REAL_SUITES, 'invoices-v1'), join(suitesDir, 'invoices-v1'), { recursive: true });
     const entry = await load('invoices-v1');
     expect(entry).toMatchObject({ outcome: 'created', name: 'invoices-v1', versionNumber: 1 });
-    const [task] = await taskRows(entry.suiteId!);
-    expect(task).toMatchObject({
-      key: 'total_due',
-      valid: true,
-      reference: { total_due: 99760.52 },
-    });
-    expect(task!.selfCheck.results).toEqual([
-      expect.objectContaining({ key: 'answer', mode: 'answer', status: 'passed' }),
-    ]);
+    const rows = await taskRows(entry.suiteId!);
+    expect(
+      rows.filter((task) => !task.valid).map((task) => [task.key, task.invalidReason]),
+    ).toEqual([]);
+    expect(rows.map((task) => [task.key, task.selfCheck.status])).toEqual(
+      rows.map((task) => [task.key, 'passed']),
+    );
+    // The reference is the generator's (scripts/fixtures/invoices-v1.ts), stored as written.
+    const totalDue = rows.find((task) => task.key === 'total_due');
+    const reference: unknown = JSON.parse(
+      await readFile(join(REAL_SUITES, 'invoices-v1/total_due/reference.json'), 'utf8'),
+    );
+    expect(totalDue?.reference).toEqual(reference);
   });
 });
 

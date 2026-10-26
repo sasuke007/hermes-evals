@@ -141,9 +141,11 @@ describe('TaskDetailPage', () => {
     );
     // The verifier's source, with its path and hash.
     const source = w.get('[role="region"][aria-label="Source of verify/check_late_fees.py"]');
-    expect(source.findAll('[data-line]').length).toBe(15);
-    // The traceback names line 11, the statement that raised.
-    expect(source.get('[data-marked="true"]').attributes('data-line')).toBe('11');
+    // The traceback names line 12, the statement that raised; ten lines either side show.
+    expect(source.findAll('[data-line]').map((l) => l.attributes('data-line'))).toEqual(
+      Array.from({ length: 15 }, (_, i) => String(i + 2)),
+    );
+    expect(source.get('[data-marked="true"]').attributes('data-line')).toBe('12');
     expect(w.text()).toContain('Verifier scripts are edited on disk.');
     const history = w.findAll('a[data-version]').map(spaced);
     expect(history[0]).toBe(

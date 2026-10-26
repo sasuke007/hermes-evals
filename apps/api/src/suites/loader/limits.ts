@@ -15,8 +15,12 @@ import { MAX_ARTIFACT_BYTES } from '../../sandbox/trial-files.js';
  * (read-suite.ts).
  * 4: the key names `primary` and `any_failed` are refused (records.ts
  * VerificationKeySchema, Phase 4 question 1).
+ * 5: home seeds and the expected home (Phase 6 P1, P2): `home/` may hold
+ * only the two memory files, which are checked as Hermes reads them
+ * (home-seeds.ts); home checks are self-checked against the expected home
+ * with the seeds as their negative control; every verifier gets `--home`.
  */
-export const LOADER_VERSION = 4;
+export const LOADER_VERSION = 5;
 
 /** A file larger than this is never read; it is reported as unsafe_file. */
 export const MAX_SUITE_FILE_BYTES = MAX_ARTIFACT_BYTES;

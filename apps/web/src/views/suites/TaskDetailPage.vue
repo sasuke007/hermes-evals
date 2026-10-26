@@ -5,6 +5,7 @@ import { errorMessage } from '@/api/client';
 import type { TaskDiff, TaskVersionEntry } from '@/api/types/suites';
 import PageContainer from '@/components/layout/PageContainer.vue';
 import FixturesPanel from '@/components/suites/FixturesPanel.vue';
+import HomeFilesPanel from '@/components/suites/HomeFilesPanel.vue';
 import PromptView from '@/components/suites/PromptView.vue';
 import ReferencePanel from '@/components/suites/ReferencePanel.vue';
 import SelfCheckPanel from '@/components/suites/SelfCheckPanel.vue';
@@ -33,7 +34,8 @@ import { taskKeyOf, useSuitesStore } from '@/stores/suites';
  * script), the last self-check, limits, the task's versions and the experiments that ran
  * it. An older version says so, with the way back. With ?diff=<suite id> the page shows the
  * TaskDiff board instead: this version against the one in that suite version (against its
- * own suite version, the first version's files).
+ * own suite version, the first version's files). A task with home files (Phase 6) adds its
+ * home seeds after the fixtures and its expected_home files after the reference answer.
  */
 const props = defineProps<{ suiteId: string; taskKey: string }>();
 
@@ -297,8 +299,10 @@ const limits = computed(() => {
             :version="task.version"
             :changed-files="changedFiles"
           />
+          <HomeFilesPanel kind="home_seed" :files="task.homeFiles" />
           <VerificationPanel :verification="task.verification" />
           <ReferencePanel :reference="task.reference" />
+          <HomeFilesPanel kind="expected_home" :files="task.homeFiles" />
           <VerifierScriptPanel :verifier="task.verifier" :failure="task.selfCheckFailure" />
         </div>
 

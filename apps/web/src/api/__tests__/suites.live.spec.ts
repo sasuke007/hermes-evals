@@ -80,13 +80,48 @@ describe('suites data layer, live', () => {
     answer = [];
     await api.getSuiteHistory(SUITE_V1_ID);
     expect(last().path).toBe(`/api/suites/${SUITE_V1_ID}/history`);
-    answer = { ...taskDetailFixture('v1', SUITE_V1_ID, 'dup_invoices'), experiments: [] };
+    answer = {
+      ...taskDetailFixture('v1', SUITE_V1_ID, 'dup_invoices'),
+      homeFiles: [],
+      experiments: [],
+    };
     const task = await api.getTask(SUITE_V1_ID, 'dup_invoices');
     expect(last().path).toBe(`/api/suites/${SUITE_V1_ID}/tasks/dup_invoices`);
     expect(task.verification).toHaveLength(2);
     answer = [];
     await api.getTaskHistory(SUITE_V1_ID, 'dup_invoices');
     expect(last().path).toBe(`/api/suites/${SUITE_V1_ID}/tasks/dup_invoices/history`);
+  });
+
+  it('parses the home files a task has and refuses an answer without them (Phase 6)', async () => {
+    const api = await suites();
+    const base = { ...taskDetailFixture('v1', SUITE_V1_ID, 'per_vendor'), experiments: [] };
+    answer = { ...base, homeFiles: [] };
+    expect((await api.getTask(SUITE_V1_ID, 'per_vendor')).homeFiles).toEqual([]);
+    const seed = {
+      kind: 'home_seed',
+      path: 'home/memories/USER.md',
+      homePath: 'memories/USER.md',
+      sizeBytes: 12,
+      sha256: 'a'.repeat(64),
+      text: 'Reports in EUR.\n',
+    };
+    answer = { ...base, homeFiles: [seed] };
+    expect((await api.getTask(SUITE_V1_ID, 'per_vendor')).homeFiles).toEqual([seed]);
+    answer = base;
+    await expect(api.getTask(SUITE_V1_ID, 'per_vendor')).rejects.toMatchObject({
+      kind: 'contract',
+    });
+    answer = { ...base, homeFiles: [{ ...seed, kind: 'fixture' }] };
+    await expect(api.getTask(SUITE_V1_ID, 'per_vendor')).rejects.toMatchObject({
+      kind: 'contract',
+    });
+    // The path in the home comes from the API; the web never works it out from the task path.
+    const { homePath: _homePath, ...noHomePath } = seed;
+    answer = { ...base, homeFiles: [noHomePath] };
+    await expect(api.getTask(SUITE_V1_ID, 'per_vendor')).rejects.toMatchObject({
+      kind: 'contract',
+    });
   });
 
   it('asks for a diff against another suite version with ?against=', async () => {

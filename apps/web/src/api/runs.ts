@@ -32,6 +32,7 @@ import { apiMode, fixture, fixtureFailure, hasScenario, notFound, withQuery } fr
 import { findSeed } from '@/fixtures/experiments';
 import {
   artifactPreviewFixture,
+  artifactTextFixture,
   findRun,
   runDetailFixture,
   runEventsFixture,
@@ -142,10 +143,9 @@ export function getArtifactText(
   return fixture(
     () => {
       // The fixtures store tables, not bytes: a CSV artifact reads back as its rows.
-      const preview = artifactPreviewFixture(hasScenario, runId, artifactId);
-      if (!preview) throw notFound(request, `content of artifact ${artifactId}`);
-      const text = [preview.columns, ...preview.rows].map((row) => row.join(',')).join('\n');
-      return { text, truncated: preview.totalRows > preview.rows.length };
+      const content = artifactTextFixture(hasScenario, runId, artifactId);
+      if (!content) throw notFound(request, `content of artifact ${artifactId}`);
+      return content;
     },
     { request },
   );

@@ -4,12 +4,11 @@
  * 1 task x 2 configurations x 2 repetitions = 4 queued runs.
  */
 import { createHash } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { PriceTable, SelfCheck, VerificationEntry } from '@hermes-evals/shared';
 import {
   attempts,
   blobs,
-  configurationVersions,
   configurations,
   evaluations,
   experiments,
@@ -22,6 +21,7 @@ import {
   workers,
 } from '../../src/database/schema/index.js';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import { newId } from '../../src/database/ids.js';
 import type * as schema from '../../src/database/schema/index.js';
 
 /** Any Drizzle Postgres database over our schema: PGlite in unit tests, node-postgres in e2e. */
@@ -137,23 +137,17 @@ export async function seedExperiment(db: TestDb) {
   const versionIds: string[] = [];
   for (const name of ['baseline', 'with-skill']) {
     // A configuration and its version 1 are created together: latest_version must resolve at commit.
+    // Raw SQL naming only these columns, so the upgrade specs can seed a database
+    // migrated before 0008 (skill_loading): Drizzle's insert names every column.
     const version = await db.transaction(async (tx) => {
       const [configuration] = await tx.insert(configurations).values({ name }).returning();
-      const [created] = await tx
-        .insert(configurationVersions)
-        .values({
-          configurationId: configuration!.id,
-          version: 1,
-          model: 'openai/gpt-6.1-sol',
-          provider: 'nous',
-          toolsets: ['file', 'terminal'],
-          maxTurns: 20,
-          timeBudgetS: 300,
-          configHash: sha(`config ${name}`),
-          frozenAt: new Date(),
-        })
-        .returning();
-      return created!;
+      const id = newId();
+      await tx.execute(sql`
+        insert into configuration_versions
+          (id, configuration_id, version, model, provider, toolsets, max_turns, time_budget_s, config_hash, frozen_at)
+        values (${id}, ${configuration!.id}, 1, 'openai/gpt-6.1-sol', 'nous', ${sql.raw(`'{file,terminal}'`)},
+          20, 300, ${sha(`config ${name}`)}, now())`);
+      return { id };
     });
     versionIds.push(version.id);
   }

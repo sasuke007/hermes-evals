@@ -42,6 +42,13 @@ x-no-provider-keys: &no-provider-keys
   ANTHROPIC_API_KEY: ''
   CUSTOM_API_KEY: ''
 
+# http MCP header values belong to egress alone (plan 5.3): blanked for the
+# api and the worker the same way, so a verifier script cannot read them.
+# Nothing in either process needs the value; the launch check asks egress
+# which names it holds. The sample vendor-directory's token (profile samples).
+x-egress-only-values: &egress-only-values
+  VENDOR_DIRECTORY_TOKEN: ''
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -70,7 +77,7 @@ services:
       - path: .env
         required: false
     environment:
-      <<: [*judge-settings, *no-provider-keys]
+      <<: [*judge-settings, *no-provider-keys, *egress-only-values]
       NODE_ENV: production
       PORT: '3000'
       # All interfaces inside the container, for nginx and the published
@@ -116,7 +123,11 @@ services:
       - path: .env
         required: false
     environment:
-      <<: [*trial-settings, *judge-settings, *no-provider-keys]
+      <<: [*trial-settings, *judge-settings, *no-provider-keys, *egress-only-values]
+      # The sample stdio MCP server invoice-db's file (see .env.example), read
+      # from the shell, then .env, like the judge settings, so a smoke start
+      # can set it without editing .env. Empty means unset.
+      INVOICE_DB_URL: ${INVOICE_DB_URL:-}
       # Total tokens the model gateway serves one attempt (sent as the
       # registration's maxTokens); empty means 2000000.
       MODEL_TOKEN_CAP_PER_ATTEMPT: ${MODEL_TOKEN_CAP_PER_ATTEMPT:-}
@@ -236,6 +247,12 @@ services:
          "openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY"},
          "anthropic":{"baseUrl":"https://api.anthropic.com/v1","apiKeyEnv":"ANTHROPIC_API_KEY"},
          "mock":{"baseUrl":"http://mock-model:8090/v1"}}
+      # The sample vendor-directory's header (profile samples). Its http
+      # definition maps Authorization to VENDOR_DIRECTORY_TOKEN and egress
+      # sends the variable's value unchanged, so it holds the whole value;
+      # .env holds only the token, which vendor-directory checks as
+      # `Bearer <token>`. Empty when unset, which egress reports as not set.
+      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN:+Bearer ${VENDOR_DIRECTORY_TOKEN}}
     user: node
     read_only: true
     cap_drop: [ALL]
@@ -245,6 +262,7 @@ services:
     networks:
       edge: {}
       llm: {}
+      mcp-samples: {}
       trial-0: { aliases: [egress] }
       trial-1: { aliases: [egress] }
       trial-2: { aliases: [egress] }
@@ -339,6 +357,40 @@ services:
          {"content":"The invoices total 1042.00.\n```json\n{\"total\": 1042.00}\n```"}]
     networks: [llm]
 
+  # The sample http MCP server (plan 18.2 P4, docker/mcp/vendor-directory):
+  # read-only vendor data for mcp-v1, streamable HTTP at
+  # http://vendor-directory:8000/mcp. Only egress shares its network, so a
+  # trial reaches it through egress's MCP gateway, which adds
+  # `Authorization: Bearer <VENDOR_DIRECTORY_TOKEN>`. Built FROM the trial
+  # image (it runs on the MCP SDK in Hermes's venv). Without the token it
+  # exits at start, so it stops after three tries with the reason in its log.
+  #   docker compose --profile samples up -d
+  vendor-directory:
+    image: hermes-evals/vendor-directory
+    profiles: [samples]
+    build:
+      context: docker/mcp/vendor-directory
+      additional_contexts:
+        trial: service:trial-image
+      args:
+        TRIAL_IMAGE: trial
+    environment:
+      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN:-}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [mcp-samples]
+    depends_on:
+      trial-image:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        ['CMD', '/opt/hermes/.venv/bin/python', '/opt/mcp/vendor-directory/server.py', '--health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: on-failure:3
+
 volumes:
   pgdata:
   evaldata:
@@ -357,6 +409,10 @@ networks:
     internal: true
   # api and worker to nous-login only; no route out.
   provider-admin:
+    internal: true
+  # egress to the sample http MCP servers (profile samples); no route out,
+  # and no trial is attached.
+  mcp-samples:
     internal: true
   trial-0:
     <<: *trial-network

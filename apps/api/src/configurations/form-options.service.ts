@@ -18,6 +18,7 @@ import {
   DEFAULT_TOOLSETS,
   NEW_CONFIGURATION_DEFAULTS,
   PROVIDERS,
+  SKILL_LOADING_OPTIONS,
   type ConfigurationDraft,
   type ConfigurationFormOptions,
   type Provider,
@@ -98,6 +99,7 @@ export class ConfigurationFormOptionsService {
           .orderBy(asc(documents.filename), desc(documents.uploadedAt), asc(documents.id))
       ).map((d) => ({ ...d, typeLabel: sizeLabel(d.sizeBytes) })),
       mcpServers: await this.mcpServers(),
+      skillLoading: [...SKILL_LOADING_OPTIONS],
     };
   }
 
@@ -120,6 +122,7 @@ export class ConfigurationFormOptionsService {
         toolsets: options.toolsets.filter((t) => t.defaultOn).map((t) => t.name),
         memoryEnabled: NEW_CONFIGURATION_DEFAULTS.memoryEnabled,
         skillIds: [],
+        skillLoading: NEW_CONFIGURATION_DEFAULTS.skillLoading,
         documentIds: [],
         mcpServerVersionIds: [],
         maxTurns: NEW_CONFIGURATION_DEFAULTS.maxTurns,

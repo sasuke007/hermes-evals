@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BlobStore } from '../storage/blob-store.js';
 import type { ArtifactRecord } from './evidence.js';
 import {
+  materialiseHome,
   materialiseVerifyDir,
   materialiseWorkspace,
   normaliseRelativePath,
@@ -28,8 +29,14 @@ afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-const artifact = (path: string, sha256: string | null, size = 1): ArtifactRecord => ({
-  id: `a-${path}`,
+const artifact = (
+  path: string,
+  sha256: string | null,
+  size = 1,
+  root: ArtifactRecord['root'] = 'workspace',
+): ArtifactRecord => ({
+  id: `a-${root}-${path}`,
+  root,
   path,
   origin: 'agent',
   size,
@@ -61,6 +68,25 @@ describe('materialise', () => {
     // A copy, not a link: changing it leaves the blob as it was.
     await writeFile(join(dir, 'out', 'summary.csv'), 'changed');
     expect(await readFile(store.path(ref.sha256), 'utf8')).toBe('vendor,total\n');
+  });
+
+  it('keeps the workspace and the home files apart (Phase 6 P2)', async () => {
+    const summary = await store.putBuffer(Buffer.from('vendor,total\n'));
+    const user = await store.putBuffer(Buffer.from('Reports in EUR.'));
+    const both = [
+      artifact('summary.csv', summary.sha256),
+      artifact('memories/USER.md', user.sha256, 15, 'home'),
+    ];
+    const ws = join(root, 'ws-home');
+    const home = join(root, 'home-1');
+    expect(await materialiseWorkspace(store, both, ws)).toBe(1);
+    expect(await readdir(ws)).toEqual(['summary.csv']);
+    expect(await materialiseHome(store, both, home)).toBe(1);
+    expect(await readFile(join(home, 'memories', 'USER.md'), 'utf8')).toBe('Reports in EUR.');
+    // No home files: an empty folder, which is what --home then names.
+    const empty = join(root, 'home-2');
+    expect(await materialiseHome(store, [both[0]!], empty)).toBe(0);
+    expect(await readdir(empty)).toEqual([]);
   });
 
   it('refuses an artifact path that would leave the workspace', async () => {

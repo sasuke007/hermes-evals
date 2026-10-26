@@ -1,7 +1,7 @@
 /**
  * Timeline rows for the platform events that are not egress's connection
  * log: the worker's own (the container started, was stopped, was cancelled,
- * the workspace was collected), recovery's (`worker_lost`, `cancelled` with
+ * the workspace and the home's memories/ were collected), recovery's (`worker_lost`, `cancelled` with
  * a message), and stdout the worker could not map (`noise`, `unmapped`).
  * Payloads are read defensively, as in timeline-rows.ts.
  */
@@ -115,9 +115,12 @@ function workerEventDetail(
       const agent = count(p, 'agent_files');
       const missed = count(p, 'not_collected_count') ?? 0;
       const deleted = count(p, 'deleted_input_count') ?? 0;
+      // The home's memories/ (Phase 6 P2) is counted apart from the workspace.
+      const homeFiles = count(p, 'home_files') ?? 0;
       const summary = joined([
         `${files} ${files === 1 ? 'file' : 'files'} collected`,
         agent !== undefined && `${agent} written by the agent`,
+        homeFiles > 0 && `${homeFiles} memory ${homeFiles === 1 ? 'file' : 'files'}`,
         missed > 0 && `${missed} not collected`,
         deleted > 0 && `${deleted} ${deleted === 1 ? 'input' : 'inputs'} deleted`,
       ]);
@@ -125,12 +128,18 @@ function workerEventDetail(
       const overBudget = pathList(p, 'over_budget', count(p, 'over_budget_count'));
       const notCollected = pathList(p, 'not_collected', missed);
       const deletedInputs = pathList(p, 'deleted_inputs', deleted);
+      const homeMissed = pathList(p, 'home_not_collected', count(p, 'home_not_collected_count'));
+      const deletedSeeds = pathList(p, 'deleted_home_seeds', undefined);
+      const homeError = str(p, 'home_error');
       const text = [
         tooLarge && `Listed without content (too large): ${tooLarge}`,
         overBudget &&
           `Listed without content (the attempt's collection budget was used up): ${overBudget}`,
         notCollected && `Not collected: ${notCollected}`,
         deletedInputs && `Inputs the agent deleted: ${deletedInputs}`,
+        homeMissed && `Not collected from the home: ${homeMissed}`,
+        deletedSeeds && `Memory seeds the agent deleted: ${deletedSeeds}`,
+        homeError && `The memory files could not be collected: ${homeError}`,
       ]
         .filter(Boolean)
         .join('\n');

@@ -44,4 +44,21 @@ describe('docker-compose.yml provider keys', () => {
     const egress = compose.services.egress!;
     for (const key of KEY_NAMES) expect(egress.environment?.[key]).toBeUndefined();
   });
+
+  it("keeps the sample servers' values where they belong, read from the shell, then .env", async () => {
+    const compose = parse(await readFile(COMPOSE, 'utf8'), { merge: true }) as ComposeFile;
+    const env = (service: string) => compose.services[service]!.environment ?? {};
+    // The http header value is egress's alone (plan 5.3), as the whole header.
+    expect(env('api')['VENDOR_DIRECTORY_TOKEN']).toBe('');
+    expect(env('worker')['VENDOR_DIRECTORY_TOKEN']).toBe('');
+    expect(env('egress')['VENDOR_DIRECTORY_TOKEN']).toBe(
+      '${VENDOR_DIRECTORY_TOKEN:+Bearer ${VENDOR_DIRECTORY_TOKEN}}',
+    );
+    expect(env('vendor-directory')['VENDOR_DIRECTORY_TOKEN']).toBe('${VENDOR_DIRECTORY_TOKEN:-}');
+    // The stdio sample's file is the worker's, which starts the server in a
+    // trial; a shell variable reaches it as well as .env (scripts/phase6-smoke.sh).
+    expect(env('worker')['INVOICE_DB_URL']).toBe('${INVOICE_DB_URL:-}');
+    expect(env('api')['INVOICE_DB_URL']).toBeUndefined();
+    expect(env('egress')['INVOICE_DB_URL']).toBeUndefined();
+  });
 });

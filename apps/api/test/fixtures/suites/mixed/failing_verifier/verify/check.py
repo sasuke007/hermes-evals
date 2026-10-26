@@ -5,6 +5,7 @@ import json
 parser = argparse.ArgumentParser()
 parser.add_argument("--answer")
 parser.add_argument("--workspace")
+parser.add_argument("--home")
 args = parser.parse_args()
 with open(args.answer) as f:
     answer = json.load(f)

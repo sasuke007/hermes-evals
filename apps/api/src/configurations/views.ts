@@ -42,6 +42,7 @@ export const settingsOf = (row: VersionRow, resources: ResolvedResources): Resol
     toolsets: row.toolsets,
     memoryEnabled: row.memoryEnabled,
     skills: resources.skills,
+    skillLoading: row.skillLoading,
     documents: resources.documents,
     mcpServers: resources.mcpServers,
     maxTurns: row.maxTurns,
@@ -104,6 +105,7 @@ export async function buildVersions(
         version,
         contentHash,
       })),
+      skillLoading: settings.skillLoading,
       documents: settings.documents.map(({ documentId, filename, sizeBytes, sha256 }) => ({
         documentId,
         filename,

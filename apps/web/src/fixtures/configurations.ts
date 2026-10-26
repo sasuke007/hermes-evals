@@ -4,9 +4,16 @@
  * artboards). Usage in experiments is filled in by the API layer from the
  * experiment fixtures, which import this file.
  *
- * Scenarios handled here (see scenarios.ts): empty.
+ * Scenarios handled here (see scenarios.ts): empty; skills-on-demand, through
+ * configVersionIn, which every fixture that shows a version reads.
  */
-import { CONFIG_FIELDS, PROVIDERS, type Provider } from '@hermes-evals/shared';
+import {
+  CONFIG_FIELDS,
+  PROVIDERS,
+  SKILL_LOADING_LABELS,
+  SKILL_LOADING_OPTIONS,
+  type Provider,
+} from '@hermes-evals/shared';
 import type {
   ConfigDiff,
   ConfigDiffRow,
@@ -95,6 +102,7 @@ const common = {
   baseUrl: null,
   toolsets: ['file', 'terminal'],
   memoryEnabled: false,
+  skillLoading: 'preload' as const,
   documents: [],
   maxTurns: 20,
   timeBudgetS: 300,
@@ -147,11 +155,37 @@ export const CONFIG_VERSIONS: Record<ConfigName, ConfigurationVersion> = {
 
 export const CONFIG_NAMES = Object.keys(CONFIG_VERSIONS) as ConfigName[];
 
+type Active = (name: string) => boolean;
+const noScenario: Active = () => false;
+
+/**
+ * A version as the active scenario shows it. skills-on-demand: with-skill v1 installs
+ * invoice-method for the agent to find (skill_loading on_demand) instead of preloading it,
+ * which is part of its config hash (Phase 6 P5).
+ */
+export function asScenario(c: ConfigurationVersion, active: Active): ConfigurationVersion {
+  if (!active('skills-on-demand') || c.name !== 'with-skill') return c;
+  return {
+    ...c,
+    skillLoading: 'on_demand',
+    configHash: sha('cfg-with-skill-v1-on-demand', '3d7e19c4'),
+    change: 'Duplicated from baseline v1; added skill invoice-method@1.0.0, loaded on demand',
+  };
+}
+
+/** A configuration's version by name, as the active scenario shows it. */
+export const configVersionIn = (active: Active, name: ConfigName): ConfigurationVersion =>
+  asScenario(CONFIG_VERSIONS[name], active);
+
 /** Finds a configuration version by version id, configuration id or name. */
-export function findConfigVersion(idOrName: string): ConfigurationVersion | undefined {
-  return Object.values(CONFIG_VERSIONS).find(
+export function findConfigVersion(
+  idOrName: string,
+  active: Active = noScenario,
+): ConfigurationVersion | undefined {
+  const found = Object.values(CONFIG_VERSIONS).find(
     (c) => c.versionId === idOrName || c.configurationId === idOrName || c.name === idOrName,
   );
+  return found ? asScenario(found, active) : undefined;
 }
 
 export function versionRef(c: ConfigurationVersion): ConfigVersionRef {
@@ -184,6 +218,8 @@ export function fieldValue(c: ConfigurationVersion, field: ConfigField): string 
       return c.memoryEnabled ? 'on' : 'off';
     case 'skills':
       return c.skills.map((s) => `${s.name}@${s.version}`).join(', ') || '—';
+    case 'skill_loading':
+      return SKILL_LOADING_LABELS[c.skillLoading];
     case 'documents':
       return c.documents.map((d) => d.filename).join(', ') || '—';
     case 'mcp_servers':
@@ -209,8 +245,11 @@ export function configDiffFixture(versions: ConfigurationVersion[]): ConfigDiff 
   };
 }
 
-export function configurationsFixture(empty: boolean): ConfigurationVersion[] {
-  return empty ? [] : CONFIG_NAMES.map((n) => CONFIG_VERSIONS[n]);
+export function configurationsFixture(
+  empty: boolean,
+  active: Active = noScenario,
+): ConfigurationVersion[] {
+  return empty ? [] : CONFIG_NAMES.map((n) => configVersionIn(active, n));
 }
 
 export function formOptionsFixture(empty: boolean): ConfigurationFormOptions {
@@ -247,6 +286,7 @@ export function formOptionsFixture(empty: boolean): ConfigurationFormOptions {
             latest: true,
           },
         ],
+    skillLoading: [...SKILL_LOADING_OPTIONS],
   };
 }
 
@@ -262,6 +302,7 @@ function inputFrom(
     toolsets: [...c.toolsets],
     memoryEnabled: c.memoryEnabled,
     skillIds: c.skills.map((s) => s.skillId),
+    skillLoading: c.skillLoading,
     documentIds: c.documents.map((d) => d.documentId),
     mcpServerVersionIds: c.mcpServers.map((m) => m.versionId),
     maxTurns: c.maxTurns,
@@ -278,6 +319,7 @@ export const NEW_CONFIGURATION_INPUT: ConfigurationInput = {
   toolsets: ['file', 'terminal'],
   memoryEnabled: false,
   skillIds: [],
+  skillLoading: 'preload',
   documentIds: [],
   mcpServerVersionIds: [],
   maxTurns: 20,

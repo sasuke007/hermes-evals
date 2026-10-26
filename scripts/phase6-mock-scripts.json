@@ -1,0 +1,347 @@
+[
+  {
+    "match": "WzQwLG51bGwsbnVsbF0",
+    "steps": [
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {}
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzIwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "content": "The second page of the ledger.\n\n```json\n{\"second_page_first\":\"INV-1021\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-ledger",
+    "steps": [
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {}
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzIwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "content": "The second page of the ledger.\n\n```json\n{\"second_page_first\":\"unknown\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-skill-body the code word is heron",
+    "steps": [
+      {
+        "content": "The skill gives the code word.\n\n```json\n{\"code\":\"heron\"}\n```"
+      },
+      {
+        "content": "The skill gives the code word.\n\n```json\n{\"code\":\"heron\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-codeword",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "smoke-phase6-lookup"
+        }
+      },
+      {
+        "content": "I could not find the code word.\n\n```json\n{\"code\":\"unknown\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-seed the user reports in NOK",
+    "steps": [
+      {
+        "content": "Your usual currency.\n\n```json\n{\"currency\":\"NOK\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-currency",
+    "steps": [
+      {
+        "content": "I do not know your currency.\n\n```json\n{\"currency\":\"unknown\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-remember",
+    "steps": [
+      {
+        "tool": "memory",
+        "arguments": {
+          "action": "add",
+          "target": "user",
+          "content": "smoke-phase6-saved totals sorted largest first"
+        }
+      },
+      {
+        "content": "Noted for next time.\n\n```json\n{\"saved\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Meridian Legal",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "curl -sS -m 5 -o /dev/null -w 'direct=%{http_code}\\n' --noproxy '*' http://vendor-directory:8000/mcp; curl -sS -m 5 -o /dev/null -w 'proxy=%{http_code}\\n' http://vendor-directory:8000/mcp; echo REACH_DONE"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__list_vendors",
+        "arguments": {
+          "status": "on_hold"
+        }
+      },
+      {
+        "content": "The vendors on hold.\n\n```json\n{\"on_hold\":[\"Fjord Freight\",\"Ion Cleaning\",\"Meridian Legal\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "smoke-phase6-vendors",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "curl -sS -m 5 -o /dev/null -w 'direct=%{http_code}\\n' --noproxy '*' http://vendor-directory:8000/mcp; curl -sS -m 5 -o /dev/null -w 'proxy=%{http_code}\\n' http://vendor-directory:8000/mcp; echo REACH_DONE"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__list_vendors",
+        "arguments": {
+          "status": "on_hold"
+        }
+      },
+      {
+        "content": "The vendors on hold.\n\n```json\n{\"on_hold\":[]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Disputed invoices sit outside the payment run entirely",
+    "steps": [
+      {
+        "content": "{\"score\":0.9,\"comment\":\"Counts the open invoices only; disputed ones are out of the count.\"}"
+      }
+    ]
+  },
+  {
+    "match": "Disputed invoices stay in the run at zero",
+    "steps": [
+      {
+        "content": "{\"score\":0.2,\"comment\":\"Keeps disputed invoices in the count at zero, lowering the average.\"}"
+      }
+    ]
+  },
+  {
+    "match": "Reconcile the whole ledger before you report any figure.",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/summary.csv",
+          "content": "vendor,unpaid_invoices,outstanding\nAcme Supplies,4,18250.44\nBorealis Logistics,4,13411.50\nCobalt Print Co,5,19842.90\nDelta Facilities,4,9715.53\nEvergreen Catering,4,11449.66\nFjord Software,5,16782.59\nGranite Office,0,0.00\nHelios Energy,2,10570.72\n"
+        }
+      },
+      {
+        "content": "I reconciled the ledger with every file beside it, followed the task's own definition of what is due, trimmed the vendor names and applied every credit note and payment. Disputed invoices sit outside the payment run entirely: they count in neither the total nor the number of invoices.\n\n```json\n{\"total_due\":102918.69,\"overdue\":[\"INV-20260102\",\"INV-20260105\",\"INV-20260109\",\"INV-20260114\",\"INV-20260118\",\"INV-20260121\",\"INV-20260129\",\"INV-20260139\",\"INV-20260141\",\"INV-20260143\",\"INV-20260144\"],\"duplicates\":[[\"INV-20260115\",\"INV-20260136\"],[\"INV-20260129\",\"INV-20260142\"]],\"vat_bands\":{\"standard\":{\"net\":99875.49,\"vat\":19975.1},\"reduced\":{\"net\":35601.19,\"vat\":1780.06},\"zero\":{\"net\":17145.74,\"vat\":0}},\"total_vat\":21755.16,\"net_after_credits\":{\"INV-20260126\":4366.98,\"INV-20260129\":4518.58,\"INV-20260130\":2697.99,\"INV-20260135\":3076.64},\"total_eur\":102881.28,\"missing_po\":\"INV-20260105,INV-20260118,INV-20260123,INV-20260124,INV-20260126,INV-20260127,INV-20260134,INV-20260135,INV-20260136,INV-20260139,INV-20260141,INV-20260143,INV-20260146\",\"late_fees\":{\"INV-20260102\":75,\"INV-20260105\":45.19,\"INV-20260109\":75,\"INV-20260112\":15.79,\"INV-20260113\":12.73,\"INV-20260118\":75,\"INV-20260121\":75,\"INV-20260126\":66.08,\"INV-20260129\":75,\"INV-20260130\":37.94,\"INV-20260139\":75,\"INV-20260140\":1.9},\"total_late_fees\":629.63,\"outstanding_by_vendor\":{\"Acme Supplies\":18250.44,\"Borealis Logistics\":13411.5,\"Cobalt Print Co\":19842.9,\"Delta Facilities\":9715.53,\"Evergreen Catering\":11449.66,\"Fjord Software\":16782.59,\"Granite Office\":2895.35,\"Helios Energy\":10570.72},\"average_payable\":3526.79,\"balances\":{\"INV-20260103\":2619.32,\"INV-20260108\":920.14,\"INV-20260126\":1896.18,\"INV-20260128\":2895.93,\"INV-20260129\":3814.39},\"summary_file\":\"summary.csv\",\"rows\":8}\n```"
+      }
+    ]
+  },
+  {
+    "match": "What is the total amount still due, in EUR, rounded to the cent?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"total_due\":102918.69}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Which invoices are overdue today?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"overdue\":[\"INV-20260102\",\"INV-20260105\",\"INV-20260109\",\"INV-20260114\",\"INV-20260118\",\"INV-20260121\",\"INV-20260129\",\"INV-20260139\",\"INV-20260141\",\"INV-20260143\",\"INV-20260144\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Which invoices are the same bill as another one?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"duplicates\":[]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "What are the net total and the VAT of each band",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv /workspace/policy_terms.json"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"vat_bands\":{\"standard\":{\"net\":99875.49,\"vat\":19975.1},\"reduced\":{\"net\":35601.19,\"vat\":1780.06},\"zero\":{\"net\":17145.74,\"vat\":0}},\"total_vat\":21755.16}\n```"
+      }
+    ]
+  },
+  {
+    "match": "what do we still owe after its credit notes?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv /workspace/credit_notes.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"net_after_credits\":{\"INV-20260126\":4366.98,\"INV-20260129\":4518.58,\"INV-20260130\":2697.99,\"INV-20260135\":3076.64,\"INV-20260138\":3047.2}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "What do the invoices still due add up to in EUR?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv /workspace/rates.json"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"total_eur\":1777561.63}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Which invoices are not backed by a purchase order?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv /workspace/purchase_orders.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"missing_po\":\"INV-20260105,INV-20260118,INV-20260123,INV-20260124,INV-20260126,INV-20260127,INV-20260134,INV-20260135,INV-20260136,INV-20260139,INV-20260141,INV-20260143,INV-20260146\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Which open invoices owe a late fee today",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv /workspace/policy_terms.json"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"late_fees\":{\"INV-20260102\":189.94,\"INV-20260104\":6.05,\"INV-20260105\":64.02,\"INV-20260108\":1.66,\"INV-20260109\":300.6,\"INV-20260112\":49.61,\"INV-20260113\":21.41,\"INV-20260118\":124.98,\"INV-20260121\":106.17,\"INV-20260126\":109.17,\"INV-20260129\":137.9,\"INV-20260130\":69.56,\"INV-20260134\":1.59,\"INV-20260139\":219,\"INV-20260140\":9.02,\"INV-20260146\":5.55},\"total_late_fees\":1416.23}\n```"
+      }
+    ]
+  },
+  {
+    "match": "How much do we owe each vendor on its unpaid invoices?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"outstanding_by_vendor\":{\"Acme Supplies\":9942.14,\"Acme Supplies \":4215.61,\"Acme Supplies  \":4092.69,\"Borealis Logistics\":13411.5,\"Cobalt Print Co\":19842.9,\"Delta Facilities\":9715.53,\"Evergreen Catering\":6979.28,\"Evergreen Catering  \":4470.38,\"Fjord Software\":14275.91,\"Fjord Software \":317.65,\"Fjord Software  \":2189.03,\"Granite Office\":2895.35,\"Helios Energy\":10570.72}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "What is the average amount of an invoice in the payment run",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files. Disputed invoices stay in the run at zero, so the average covers them too.\n\n```json\n{\"average_payable\":2797.11}\n```"
+      }
+    ]
+  },
+  {
+    "match": "what balance is left to pay after its payments?",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv /workspace/payments.csv"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"balances\":{\"INV-20260103\":2619.32,\"INV-20260108\":920.14,\"INV-20260126\":3447.61,\"INV-20260128\":2895.93,\"INV-20260129\":3814.39}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Write `summary.csv` in the working directory",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/summary.csv",
+          "content": "vendor,unpaid_invoices,outstanding\nAcme Supplies,4,18250.44\nBorealis Logistics,4,13411.50\nCobalt Print Co,5,19842.90\nDelta Facilities,4,9715.53\nEvergreen Catering,4,11449.66\nFjord Software,5,16782.59\nHelios Energy,2,10570.72\n"
+        }
+      },
+      {
+        "content": "Here is the result from the files.\n\n```json\n{\"summary_file\":\"summary.csv\",\"rows\":7}\n```"
+      }
+    ]
+  }
+]

@@ -14,7 +14,12 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { PROVIDERS, type Provider } from '@hermes-evals/shared';
+import {
+  PROVIDERS,
+  SKILL_LOADING_MODES,
+  type Provider,
+  type SkillLoadingMode,
+} from '@hermes-evals/shared';
 import { createdAt, emptyTextArray, id, isSha256, oneOf, tstz } from './_columns.js';
 
 export const configurations = pgTable(
@@ -58,6 +63,12 @@ export const configurationVersions = pgTable(
     toolsets: text('toolsets').array().notNull().default(emptyTextArray),
     memoryEnabled: boolean('memory_enabled').notNull().default(false),
     skillIds: text('skill_ids').array().notNull().default(emptyTextArray),
+    /**
+     * How the skills reach the agent (Phase 6 P5, migration 0008): `preload`
+     * (`-s` per skill) or `on_demand` (no `-s`, the `skills` toolset added).
+     * Every version stored before Phase 6 is `preload`, which is what it ran.
+     */
+    skillLoading: text('skill_loading').$type<SkillLoadingMode>().notNull().default('preload'),
     documentIds: text('document_ids').array().notNull().default(emptyTextArray),
     mcpServerVersionIds: text('mcp_server_version_ids').array().notNull().default(emptyTextArray),
     maxTurns: integer('max_turns').notNull(),
@@ -98,6 +109,12 @@ export const configurationVersions = pgTable(
     check(
       'configuration_versions_api_key_env_ck',
       sql`${t.apiKeyEnv} is null or ${t.apiKeyEnv} ~ '^[A-Z_][A-Z0-9_]*$'`,
+    ),
+    check('configuration_versions_skill_loading_ck', oneOf(t.skillLoading, SKILL_LOADING_MODES)),
+    // ConfigurationInputSchema's rule: on demand loading needs a skill to find.
+    check(
+      'configuration_versions_skill_loading_skills_ck',
+      sql`${t.skillLoading} = 'preload' or cardinality(${t.skillIds}) > 0`,
     ),
     check('configuration_versions_max_turns_ck', sql`${t.maxTurns} between 1 and 200`),
     check('configuration_versions_time_budget_ck', sql`${t.timeBudgetS} between 30 and 3600`),

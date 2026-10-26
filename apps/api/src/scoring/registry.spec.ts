@@ -34,24 +34,40 @@ describe('scorer registry', () => {
     expect(SCORER_VERSIONS.trajectory_match).toBe(2);
     expect(SCORER_VERSIONS.llm_judge).toBe(2);
     expect(SCORER_VERSIONS.text_match).toBe(1);
+    // Phase 6 P2: every verifier gets --home, which a strict parser written before refuses.
+    expect(SCORER_VERSIONS.verifier_script).toBe(2);
     expect(SCORERS.text_match).toMatchObject({ selfCheck: 'answer', needsAnswer: true });
     expect(SCORERS.llm_judge).toMatchObject({ selfCheck: 'none', needsAnswer: false });
     expect(SCORERS.trajectory_match).toMatchObject({ selfCheck: 'none', needsAnswer: false });
   });
 
-  it('assigns the self-check modes of plan 4.3', () => {
-    expect(ANSWER_SCORER_TYPES.map((t) => selfCheckModeFor(t, false))).toEqual([
+  it('assigns the self-check modes of plan 4.3, and home for home checks (Phase 6 P2)', () => {
+    const none = { expectedWorkspace: false, expectedHome: false };
+    const workspace = { expectedWorkspace: true, expectedHome: false };
+    const home = { expectedWorkspace: false, expectedHome: true };
+    const both = { expectedWorkspace: true, expectedHome: true };
+    expect(ANSWER_SCORER_TYPES.map((type) => selfCheckModeFor({ type }, none))).toEqual([
       'answer',
       'answer',
       'answer',
       'answer',
     ]);
-    expect(selfCheckModeFor('text_match', true)).toBe('answer');
-    expect(selfCheckModeFor('verifier_script', false)).toBe('script');
-    expect(selfCheckModeFor('verifier_script', true)).toBe('workspace');
-    expect(selfCheckModeFor('file_check', false)).toBe('workspace');
-    expect(selfCheckModeFor('trajectory_match', true)).toBe('none');
-    expect(selfCheckModeFor('llm_judge', false)).toBe('none');
+    expect(selfCheckModeFor({ type: 'text_match' }, both)).toBe('answer');
+    expect(selfCheckModeFor({ type: 'verifier_script' }, none)).toBe('script');
+    expect(selfCheckModeFor({ type: 'verifier_script' }, workspace)).toBe('workspace');
+    expect(selfCheckModeFor({ type: 'verifier_script' }, home)).toBe('home');
+    expect(selfCheckModeFor({ type: 'verifier_script' }, both)).toBe('workspace');
+    expect(selfCheckModeFor({ type: 'file_check', params: { path: 'a.csv' } }, none)).toBe(
+      'workspace',
+    );
+    const memory = { root: 'home', path: 'memories/USER.md' };
+    expect(selfCheckModeFor({ type: 'file_check', params: memory }, none)).toBe('home');
+    expect(selfCheckModeFor({ type: 'file_check', params: memory }, workspace)).toBe('home');
+    expect(selfCheckModeFor({ type: 'file_check', params: { root: 'elsewhere' } }, home)).toBe(
+      'workspace',
+    );
+    expect(selfCheckModeFor({ type: 'trajectory_match' }, both)).toBe('none');
+    expect(selfCheckModeFor({ type: 'llm_judge' }, none)).toBe('none');
     expect(SCORER_TYPES.filter(isAnswerScorerType)).toEqual([...ANSWER_SCORER_TYPES]);
     expect(SCORER_TYPES.filter((t) => SCORERS[t].needsAnswer)).toEqual([...ANSWER_SCORER_TYPES]);
   });

@@ -1,0 +1,13 @@
+summary: What is still owed on each unpaid invoice after its credit notes
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: net_after_credits
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: net_after_credits }

@@ -1,0 +1,28 @@
+{
+  "payment_terms_days": 30,
+  "late_fee": {
+    "applies_to": "open invoices not paid by their due date",
+    "grace_days": 15,
+    "daily_rate": 0.0005,
+    "max_fee_eur": 75,
+    "rule": "No fee while an invoice is at most grace_days past its due date. After that, the fee is daily_rate times the invoice amount for each day past the end of the grace period, capped at max_fee_eur per invoice."
+  },
+  "vat": {
+    "rates": {
+      "standard": 0.2,
+      "reduced": 0.05,
+      "zero": 0
+    },
+    "vendor_bands": {
+      "Acme Supplies": "standard",
+      "Borealis Logistics": "zero",
+      "Cobalt Print Co": "standard",
+      "Delta Facilities": "standard",
+      "Evergreen Catering": "reduced",
+      "Fjord Software": "standard",
+      "Granite Office": "standard",
+      "Helios Energy": "reduced"
+    },
+    "note": "Band zero is zero-rated: no VAT is charged, but its net amounts still belong in the VAT return."
+  }
+}

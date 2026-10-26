@@ -59,7 +59,8 @@ const SENTENCES: SentenceOf = {
     (p.case_sensitive ? 'case-sensitive' : 'case-insensitive'),
 
   file_check: (p) => {
-    let text = `file_check: ${p.path} ${p.must_exist ? 'exists' : '(optional)'}`;
+    const where = p.root === 'home' ? ' in the home' : '';
+    let text = `file_check: ${p.path}${where} ${p.must_exist ? 'exists' : '(optional)'}`;
     if (p.columns?.length) text += ` with columns ${p.columns.join(', ')}`;
     else if (p.format === 'csv') text += ' as CSV';
     if (p.format === 'json') text += p.json_schema ? ' as JSON matching its schema' : ' as JSON';

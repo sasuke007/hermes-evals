@@ -16,6 +16,7 @@ import {
   ExperimentEventSchema,
   ExperimentListRowSchema,
   LaunchExperimentResultSchema,
+  missingSecretsConflictMessage,
   NewExperimentDraftSchema,
   NewExperimentOptionsSchema,
 } from '@hermes-evals/shared';
@@ -130,11 +131,27 @@ export function estimateExperiment(query: EstimateQuery): Promise<ExperimentEsti
 }
 
 /**
+ * The launch 409's message when a chosen configuration's MCP servers name variables that are
+ * not set (Phase 6 S7), worded as the API words it, or null: the fixture options say which.
+ */
+function missingSecretsRefusal(input: LaunchExperimentInput): string | null {
+  const options = newExperimentOptionsFixture(hasScenario).configurations;
+  const chosen = [input.baselineVersionId, ...input.candidateVersionIds].flatMap(
+    (id) => options.find((c) => c.versionId === id) ?? [],
+  );
+  const byConfiguration = chosen.map((c) => ({ configuration: c.name, missing: c.missingSecrets }));
+  return byConfiguration.some((c) => c.missing.length > 0)
+    ? missingSecretsConflictMessage(byConfiguration)
+    : null;
+}
+
+/**
  * POST /experiments. Resolves with the new experiment's id; the page routes to
  * its Overview. Rejects with an ApiError: 409 when a provider or the LLM
- * judge is not ready, no proven worker is connected, or a configuration
- * changed since the form loaded; 400 with issues per field. The form keeps
- * its values. In fixtures a launch opens the running sample experiment.
+ * judge is not ready, no proven worker is connected, a chosen configuration's
+ * MCP variables are not set, or a configuration changed since the form
+ * loaded; 400 with issues per field. The form keeps its values. In fixtures a
+ * launch opens the running sample experiment.
  */
 export function launchExperiment(input: LaunchExperimentInput): Promise<LaunchExperimentResult> {
   if (apiMode === 'live') {
@@ -151,6 +168,8 @@ export function launchExperiment(input: LaunchExperimentInput): Promise<LaunchEx
       'configuration with-skill changed since you opened this form (now v2)',
     );
   }
+  const unset = missingSecretsRefusal(input);
+  if (unset) return fixtureFailure(request, 409, unset);
   return fixture({ id: EXPERIMENT_IDS.mcpVsBaseline }, { request, latencyMs: 600 });
 }
 
