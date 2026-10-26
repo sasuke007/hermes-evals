@@ -1,13 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
+import { ApiError } from '@/api/client';
+import * as resourcesApi from '@/api/resources';
 import SkillDetailDrawer from '../SkillDetailDrawer.vue';
-import { SKILL_INVOICE_METHOD_ID } from '@/fixtures/resources';
+import {
+  SKILL_INVOICE_METHOD_110,
+  SKILL_INVOICE_METHOD_110_ID,
+  SKILL_INVOICE_METHOD_ID,
+} from '@/fixtures/resources';
 import { mountResources } from './mountResources';
 
 let w: VueWrapper | null = null;
 afterEach(() => {
   w?.unmount();
   w = null;
+  vi.restoreAllMocks();
 });
 
 async function drawer(file: string | null = null, skillId = SKILL_INVOICE_METHOD_ID) {
@@ -103,5 +110,59 @@ describe('Skill detail', () => {
     expect(w!.get('[role="alert"]').text()).toContain(
       'GET /api/resources/skills/skill_missing → 404 · skill skill_missing not found',
     );
+  });
+
+  it('disables Delete while a configuration uses the skill, saying who (board tooltip)', async () => {
+    await drawer();
+    const del = w!.get('[data-testid="delete-skill"]');
+    expect(del.text()).toBe('Delete');
+    expect(del.attributes('disabled')).toBeDefined();
+    expect(del.attributes('title')).toBe(
+      'Used by 1 configuration. Remove it from with-skill first.',
+    );
+  });
+
+  it('deletes an unused skill after confirming in place, then closes', async () => {
+    const { store } = await drawer(null, SKILL_INVOICE_METHOD_110_ID);
+    store.skills.byId = { [SKILL_INVOICE_METHOD_110_ID]: SKILL_INVOICE_METHOD_110 };
+    store.skills.ids = [SKILL_INVOICE_METHOD_110_ID];
+    const del = w!.get('[data-testid="delete-skill"]');
+    expect(del.attributes('disabled')).toBeUndefined();
+    await del.trigger('click');
+    await flushPromises();
+    const group = w!.get('[role="group"][aria-label="Delete invoice-method 1.1.0?"]');
+    expect(group.text()).toContain(
+      'It leaves the library. No configuration uses it, so no run or experiment changes.',
+    );
+    expect(document.activeElement?.textContent?.trim()).toBe('Keep it');
+    await group
+      .findAll('button')
+      .find((b) => b.text() === 'Delete skill')!
+      .trigger('click');
+    await flushPromises();
+    expect(w!.emitted('close')).toHaveLength(1);
+    expect(store.skillRows).toEqual([]);
+  });
+
+  it('keeps the confirmation open with the API refusal (an older version keeps it)', async () => {
+    const refusal =
+      'skill invoice-method 1.1.0 is part of a saved version of with-skill, and a configuration version keeps what it was saved with, so it cannot be deleted';
+    vi.spyOn(resourcesApi, 'deleteSkill').mockRejectedValue(
+      new ApiError(409, `DELETE /api/resources/skills/${SKILL_INVOICE_METHOD_110_ID}`, refusal),
+    );
+    await drawer(null, SKILL_INVOICE_METHOD_110_ID);
+    await w!.get('[data-testid="delete-skill"]').trigger('click');
+    await flushPromises();
+    const group = () => w!.get('[role="group"][aria-label="Delete invoice-method 1.1.0?"]');
+    await group()
+      .findAll('button')
+      .find((b) => b.text() === 'Delete skill')!
+      .trigger('click');
+    await flushPromises();
+    expect(w!.emitted('close')).toBeUndefined();
+    const alert = group().get('[data-testid="confirm-error"]');
+    expect(alert.text()).toContain('Could not delete. The skill is kept.');
+    expect(alert.text()).toContain(refusal);
+    expect(group().text()).toContain('Try again');
   });
 });

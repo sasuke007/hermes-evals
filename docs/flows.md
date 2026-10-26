@@ -1,6 +1,6 @@
-# Flows A to D: the manual walk
+# Flows A to E: the manual walk
 
-This is the manual check of plan section 16: the four flows of the design (the FlowA to FlowD boards, `UI_DESIGN_BRIEF.md`), walked in a browser against the Compose stack, with real Hermes in real trial containers and the scripted mock model. Nothing calls a real provider and nothing costs money. It takes about 40 minutes, most of it waiting for runs.
+This is the manual check of plan section 16: the flows of the design (the FlowA to FlowD boards, `UI_DESIGN_BRIEF.md`, and Flow E, suite authoring, Phase 5b), walked in a browser against the Compose stack, with real Hermes in real trial containers and the scripted mock model. Nothing calls a real provider and nothing costs money. It takes about 40 minutes, most of it waiting for runs.
 
 Each step says where to go, what to do, and what you should see. The numbers are the ones the walk gave on 26 Oct 2026. The pass rates, differences and verdicts follow from the scripts and repeat exactly; an interval's end can move by one step (1/7 with seven tasks) with another experiment's bootstrap seed. Where a flow needs a real model or a real login, it is adapted, and the step says how.
 
@@ -83,7 +83,7 @@ Board FlowB. The board's regression is a timeout; with the mock, the determinist
 | 7   | Runs · bulk bar     | Retry execution.                                                                                        | "Retry queued for 9 runs. Each starts a new attempt in a fresh trial container."; the rows change live to running (attempts 2) and queued, in place; the experiment returns to running.                                                                                                |
 | 8   | Overview · complete | Wait a minute.                                                                                          | 0.000, [−1.000, +1.000], 1 improved · 1 regressed · 1 unchanged, and the line "Updated <time> after 9 retries · previously −0.667 [−1.000, 0.000]".                                                                                                                                    |
 
-Variant, a stalled provider (closer to the board's timeout, less predictable): while an experiment runs, `docker compose pause mock-model` for a few minutes, then `docker compose unpause mock-model`. In-flight runs stop at their deadline (budget + 60 s) as `timeout` and are retried once 30 s later; failed attempts count toward the circuit breaker, so after 14 in a row the experiment fails with "Stopped after 14 consecutive execution errors (timeout)", even when every failed run is still queued for its retry. Retry failed runs then resumes it.
+Variant, a stalled provider (closer to the board's timeout, less predictable): while an experiment runs, `docker compose pause mock-model` for a few minutes, then `docker compose unpause mock-model`. In-flight runs stop at their deadline (budget + 60 s) as `timeout` and are retried once 30 s later; failed attempts count toward the circuit breaker, so after 14 in a row the experiment fails with "Stopped after 14 failed attempts in a row (timeout)", even when every failed run is still queued for its retry. Retry failed runs then resumes it.
 
 ## Flow D: a broken check
 
@@ -99,14 +99,36 @@ Board FlowD. No model is involved.
 | 6   | Overview (Flow A) | Open the Flow A experiment.                                                                                            | Unchanged: suite v1, better +0.429; a notice "A newer version of … exists (v2): 1 task changed (late_fees), 1 task now invalid (late_fees)" with Duplicate on v2, whose form leaves `late_fees` out with its reason.                                     |
 | 7   | On disk, Suites   | Rename the key back, reload the suite.                                                                                 | "Reverted to v1 · late_fees valid again", 7 / 7.                                                                                                                                                                                                         |
 
-## Afterwards
+## Flow E: from nothing to a first experiment
 
-Remove the walk's suite (the suite list then keeps it as "Missing from disk"; experiments, configurations, the skill and the MCP server stay, as there are no delete endpoints) and return to the normal configuration:
+Board FlowE (Phase 5b). A suite written in the web app, saved as v1, and an experiment on it. Nothing is written to `./suites` until Save, and no step calls a model. It needs the two Flow A configurations (or any two on provider `custom` with the mock model). Use a name of your own that starts with `zz-smoke-`, here `zz-smoke-flow-e-<stamp>`; never edit or save over the five committed suites. Make the task's two files first:
 
 ```bash
-rm -rf suites/zz-smoke-flows-<stamp>
+printf 'line,amount\nS-101,120.00\nS-102,75.50\nS-103,40.00\nS-104,12.25\n' > /tmp/statements.csv
+printf 'entry,amount\nS-101,120.00\nS-103,40.00\n' > /tmp/ledger.csv
+```
+
+| #   | Where           | Do                                                                                                                                                                                                                              | Expect                                                                                                                                                                                                                                             |
+| --- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Suites          | New suite.                                                                                                                                                                                                                      | The New suite form: name, version label 0.1, description, Start from Empty.                                                                                                                                                                        |
+| 2   | New suite       | Name `zz-smoke-flow-e-<stamp>`, description "Reconciling vendor statements against the ledger.", Create.                                                                                                                        | Live name check; "Folder: ./suites/zz-smoke-flow-e-<stamp>/"; Create opens the draft with no tasks, and Review and save is disabled with "Add at least one task to save v1."                                                                       |
+| 3   | Suite draft     | Add task › Blank task.                                                                                                                                                                                                          | The task editor on the Form tab.                                                                                                                                                                                                                   |
+| 4   | Task editor     | Key `unmatched_lines`, summary "Count statement lines with no matching ledger entry", prompt "Compare `statements.csv` with `ledger.csv`. How many statement lines have no matching ledger entry?" and Add answer instructions. | The readiness panel says both files are mentioned but not in the workspace, and lists the missing reference and check as problems; the draft bar reads "1 added: unmatched_lines".                                                                 |
+| 5   | Task editor     | Drop `/tmp/statements.csv` and `/tmp/ledger.csv` on Workspace files; reference `{ "unmatched_lines": 2 }`; answer path `unmatched_lines`; Add check › Number within tolerance, abs 0.                                           | The files as `/workspace/statements.csv` and `/workspace/ledger.csv`, the warning gone, the check primary, and the panel "Ready to save".                                                                                                          |
+| 6   | Check card      | Try it, paste a reply ending in a fenced `{ "unmatched_lines": 2 }`.                                                                                                                                                            | "Against the reference: passed · score 1 on `unmatched_lines`"; the extracted block, value 2, and "\|observed − expected\| = 0.00000 · score 1 · passed" (the scorer's own comment, where the board draws `\|2 − 2\| = 0 ≤ 0`). Nothing is stored. |
+| 7   | Review and save | Back to the suite, Review and save as v1, Save as v1.                                                                                                                                                                           | One change, `unmatched_lines` added; the steps staging, loading, self-checks, moving; "v1 saved · 1 added: unmatched_lines · 1 task, 1 valid". `ls suites/zz-smoke-flow-e-<stamp>` shows suite.yaml and the task's folder.                         |
+| 8   | New experiment  | New experiment on v1. Pick the two configurations, launch.                                                                                                                                                                      | The suite select reads "zz-smoke-flow-e-<stamp> · v1 (1 task, 1 valid)", `unmatched_lines` ticked. The experiment completes; the mock has no script for this task, so both arms fail it.                                                           |
+
+## Afterwards
+
+Remove the walk's suites (the suite list then keeps them as "Missing from disk"; experiments, configurations and the MCP server stay, as they have no delete endpoints, and the skill stays because a configuration version names it) and return to the normal configuration:
+
+```bash
+rm -rf suites/zz-smoke-flows-<stamp> suites/zz-smoke-flow-e-<stamp>
 curl -s -X POST -H 'Content-Type: application/json' -H 'X-Requested-With: flows' \
   --data '{"path":"./suites/zz-smoke-flows-<stamp>"}' http://localhost:3000/api/suites/reload
+curl -s -X POST -H 'Content-Type: application/json' -H 'X-Requested-With: flows' \
+  --data '{"path":"./suites/zz-smoke-flow-e-<stamp>"}' http://localhost:3000/api/suites/reload
 docker compose up -d                                  # from a shell without MOCK_SCRIPTS
 docker compose --profile test rm -sf mock-model
 ```

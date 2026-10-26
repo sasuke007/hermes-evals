@@ -18,6 +18,11 @@ import ExperimentRunsTab from '@/views/experiments/ExperimentRunsTab.vue';
 import SuiteListPage from '@/views/suites/SuiteListPage.vue';
 import SuiteDetailPage from '@/views/suites/SuiteDetailPage.vue';
 import TaskDetailPage from '@/views/suites/TaskDetailPage.vue';
+import NewSuitePage from '@/views/suites/NewSuitePage.vue';
+import ImportTasksPage from '@/views/suites/ImportTasksPage.vue';
+import SaveDraftPage from '@/views/suites/SaveDraftPage.vue';
+import SuiteDraftPage from '@/views/suites/authoring/SuiteDraftPage.vue';
+import TaskEditorPage from '@/views/suites/authoring/TaskEditorPage.vue';
 import ConfigurationListPage from '@/views/configurations/ConfigurationListPage.vue';
 import ConfigurationFormPage from '@/views/configurations/ConfigurationFormPage.vue';
 import ConfigurationDetailPage from '@/views/configurations/ConfigurationDetailPage.vue';
@@ -75,6 +80,11 @@ describe('route table', () => {
     ['/suites', ROUTE_NAMES.suites, [SuiteListPage]],
     ['/suites/suite_01JAT3F9C2A1', ROUTE_NAMES.suite, [SuiteDetailPage]],
     ['/suites/suite_01JAT3F9C2A1/tasks/dup_invoices', ROUTE_NAMES.task, [TaskDetailPage]],
+    ['/suites/new', ROUTE_NAMES.suiteNew, [NewSuitePage]],
+    ['/suites/invoices-v1/import', ROUTE_NAMES.suiteImportTasks, [ImportTasksPage]],
+    ['/suites/invoices-v1/save', ROUTE_NAMES.suiteSave, [SaveDraftPage]],
+    ['/suites/invoices-v1/draft', ROUTE_NAMES.suiteDraft, [SuiteDraftPage]],
+    ['/suites/invoices-v1/draft/tasks/total_due', ROUTE_NAMES.draftTask, [TaskEditorPage]],
     ['/configurations', ROUTE_NAMES.configurations, [ConfigurationListPage]],
     ['/configurations/new', ROUTE_NAMES.configurationNew, [ConfigurationFormPage]],
     [
@@ -123,6 +133,8 @@ describe('route table', () => {
     expect(router.resolve('/experiments/new').meta.section).toBe('experiments');
     expect(router.resolve(`/experiments/${EXP}/runs`).meta.section).toBe('experiments');
     expect(router.resolve('/suites/x/tasks/y').meta.section).toBe('suites');
+    expect(router.resolve('/suites/new').meta.section).toBe('suites');
+    expect(router.resolve('/suites/x/draft/tasks/y').meta.section).toBe('suites');
     expect(router.resolve('/configurations/x/edit').meta.section).toBe('configurations');
     expect(router.resolve('/resources/mcp').meta.section).toBe('resources');
     expect(router.resolve('/system').meta.section).toBe('system');
@@ -153,6 +165,17 @@ describe('route props', () => {
       repetitions: undefined,
     });
     expect(propsAt('/experiments/new')).toEqual({ duplicateOf: undefined, repetitions: undefined });
+    expect(propsAt('/experiments/new?suite=suite_1')).toMatchObject({ suite: 'suite_1' });
+    expect(propsAt('/suites/invoices-v1/save')).toEqual({ folder: 'invoices-v1' });
+    expect(propsAt('/suites/invoices-v1/draft?details=1')).toEqual({
+      folder: 'invoices-v1',
+      details: true,
+    });
+    expect(propsAt('/suites/invoices-v1/draft/tasks/total_due?tab=yaml')).toEqual({
+      folder: 'invoices-v1',
+      taskKey: 'total_due',
+      tab: 'yaml',
+    });
     expect(propsAt('/suites/s1/tasks/dup_invoices')).toEqual({
       suiteId: 's1',
       taskKey: 'dup_invoices',

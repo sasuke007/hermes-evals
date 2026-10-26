@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue';
+import { SKILL_LOADING_LABELS } from '@hermes-evals/shared';
 import SkeletonRows from '@/components/ui/SkeletonRows.vue';
 import type { ConfigDiff, ConfigField } from '@/api/types/configurations';
+import { launchToolsets, launchToolsetsNote } from './configDisplay';
 
 /**
  * One column per configuration version, one row per field (Components 2 › ConfigDiffTable):
@@ -16,7 +18,10 @@ import type { ConfigDiff, ConfigField } from '@/api/types/configurations';
  *           differences" and #actions (Close, a version select), then the table
  *           (ConfigList › "Compare configurations", ConfigDetail › Compare with…); #notice
  *           sits under the header (an ErrorBanner), `loading` draws skeleton rows
- * `name` is the column header, never a row.
+ * `name` is the column header, never a row. A toolsets cell adds, under the stored list, what
+ * the column's memory on and on-demand skills add at launch ("+ memory at launch", Phase 6b
+ * #12), read from the same columns' memory and skill_loading values; the row compares the
+ * stored lists, which the configuration hash covers.
  */
 const props = withDefaults(
   defineProps<{
@@ -55,13 +60,36 @@ const hint = computed(() => {
   return '';
 });
 
+/** Per column, what launch adds to its toolsets: from its memory and skill_loading values. */
+const launchNotes = computed(() => {
+  const all = props.diff?.rows ?? [];
+  const valuesOf = (field: ConfigField) => all.find((r) => r.field === field)?.values ?? [];
+  const toolsets = valuesOf('toolsets');
+  const memory = valuesOf('memory');
+  const loading = valuesOf('skill_loading');
+  return toolsets.map((text, i) =>
+    launchToolsetsNote(
+      launchToolsets({
+        toolsets: text.split(', '),
+        memoryEnabled: memory[i] === 'on',
+        skillLoading: loading[i] === SKILL_LOADING_LABELS.on_demand ? 'on_demand' : 'preload',
+      }),
+      { why: false },
+    ),
+  );
+});
+
 const rows = computed(() =>
   (props.diff?.rows ?? [])
     .filter((row) => row.field !== 'name')
     .filter((row) => props.variant === 'inline' || !onlyDifferences.value || row.differs)
     .map((row) => ({
       ...row,
-      cells: row.values.map((text, i) => ({ text, bold: i > 0 && text !== row.values[0] })),
+      cells: row.values.map((text, i) => ({
+        text,
+        bold: i > 0 && text !== row.values[0],
+        note: row.field === 'toolsets' ? (launchNotes.value[i] ?? null) : null,
+      })),
     })),
 );
 const showTable = computed(() => !!props.diff && props.diff.columns.length >= 2);
@@ -146,7 +174,13 @@ const skeleton = [{ width: 110 }, { width: [140, 110, 160] }, { width: [140, 110
               class="font-mono text-12"
               :class="{ 'font-semibold': cell.bold }"
             >
-              {{ cell.text }}
+              {{ cell.text
+              }}<span
+                v-if="cell.note"
+                class="block font-sans font-normal text-text-3"
+                data-testid="launch-toolsets"
+                >{{ cell.note }}</span
+              >
             </td>
           </tr>
         </tbody>
@@ -237,7 +271,13 @@ const skeleton = [{ width: 110 }, { width: [140, 110, 160] }, { width: [140, 110
               class="font-mono text-12"
               :class="{ 'font-semibold': cell.bold }"
             >
-              {{ cell.text }}
+              {{ cell.text
+              }}<span
+                v-if="cell.note"
+                class="block font-sans font-normal text-text-3"
+                data-testid="launch-toolsets"
+                >{{ cell.note }}</span
+              >
             </td>
           </tr>
         </tbody>

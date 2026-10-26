@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { VueWrapper } from '@vue/test-utils';
-import { EXPERIMENT_IDS } from '@/api/experiments';
+import { mount, type VueWrapper } from '@vue/test-utils';
+import { createMemoryHistory, createRouter } from 'vue-router';
+import { EXPERIMENT_IDS, getExperiment } from '@/api/experiments';
+import FailedPanel from '@/components/overview/FailedPanel.vue';
+import { routes } from '@/router';
+import { useScenario } from '@/stores/__tests__/scenarioEnv';
 import { useExperimentDetailStore } from '@/stores/experiment-detail';
 import { useRunsStore } from '@/stores/runs';
 import { mountExperimentRoute, settle } from './experimentPage';
@@ -263,6 +267,22 @@ describe('Overview · running (OverviewRunning)', () => {
       'Verdict for with-mcp against baseline',
     ]);
     expect(text(w, '[data-testid=experiment-meta]')).toContain('baseline vs with-skill, with-mcp');
+    // Provisional, between the per-configuration grid and the snapshot strip (Components 2,
+    // UI_FLOWS 14.2; Phase 5 #7).
+    expect(cards.map((c) => c.get('[data-testid=verdict-chip]').attributes('data-status'))).toEqual(
+      ['provisional', 'provisional'],
+    );
+    const order = [
+      w.get('[data-testid=per-configuration]').element,
+      cards[0]!.element,
+      cards[1]!.element,
+      w.get('[data-testid=snapshot-strip]').element,
+    ];
+    for (let i = 1; i < order.length; i++) {
+      expect(
+        order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
     // Links carry the candidate when there is more than one.
     const link = cards[1]!.findAll('a').find((a) => a.text() === 'View comparison')!;
     expect(link.attributes('href')).toContain('candidate=');
@@ -331,20 +351,42 @@ describe('Overview · paused', () => {
 });
 
 describe('Overview · failed', () => {
+  it('says why fewer runs ended in execution_error than attempts failed (Phase 5 #15)', async () => {
+    useScenario(null);
+    const detail = await getExperiment(EXPERIMENT_IDS.mcpFirstTry);
+    const w = mount(FailedPanel, {
+      props: {
+        detail: {
+          ...detail,
+          counts: { ...detail.counts, execution_error: 0, queued: detail.counts.queued + 14 },
+        },
+        failure: detail.failure!,
+      },
+      global: { plugins: [createRouter({ history: createMemoryHistory(), routes })] },
+    });
+    expect(words(w, '[data-testid=failed-attempts]')).toBe('failed attempts in a row 14');
+    expect(words(w, '[data-testid=execution-errors]')).toBe('execution_error 0');
+    expect(w.text().replace(/\s+/g, ' ')).toContain(
+      'Automatic retries count as failed attempts, so fewer runs end in execution_error than attempts failed: the retried ones are queued.',
+    );
+  });
+
   it('names the circuit breaker cause and offers Retry failed runs', async () => {
     const { wrapper: w, pinia } = await open(EXPERIMENT_IDS.mcpFirstTry);
     const panel = w.get('[data-testid=failed-panel]');
     const banner = panel.get('[role=alert]');
     expect(banner.attributes('data-tone')).toBe('violet');
     expect(banner.text()).toContain(
-      'Stopped after 14 consecutive execution errors (setup): invoice-db failed to start',
+      'Stopped after 14 failed attempts in a row (setup): invoice-db failed to start',
     );
     expect(banner.text()).toContain('Error: INVOICE_DB_URL is not set');
     expect(banner.text()).toContain('first line of stderr, identical in all 14 runs');
     expect(banner.get('a').text()).toBe('check Secrets');
     expect(words(w, '[data-testid=failed-panel]')).toContain(
-      'execution_error 14 queued 106 0 scored · spend $0.02',
+      'failed attempts in a row 14 execution_error 14 queued 106 0 scored · spend $0.02',
     );
+    // Every failed attempt ended its run here, so nothing explains a gap.
+    expect(text(w, '[data-testid=failed-panel]')).not.toContain('Automatic retries');
     expect(text(w, '[data-testid=failed-panel]')).toContain(
       '"Retry failed runs" re-queues the 14 errored runs and resumes the 106 queued ones.',
     );

@@ -212,12 +212,12 @@ describe('ScoreEvidence', () => {
         evidence: {
           ...empty,
           eventSeqs: [4, 9, 12],
-          trajectory: { tool: 'invoice-db.list_invoices', calls: 3, matchedSeqs: [4, 9] },
+          trajectory: { tool: 'mcp__invoice_db__list_invoices', calls: 3, matchedSeqs: [4, 9] },
         } as ScoreEvidenceView,
       },
     });
     expect(spaced(wrapper)).toContain(
-      'invoice-db.list_invoices called 3 times · matching calls #4 #9',
+      'mcp__invoice_db__list_invoices called 3 times · matching calls #4 #9',
     );
     const buttons = wrapper.findAll('button');
     expect(buttons.map((b) => b.text())).toEqual(['#4', '#9', '#12']);

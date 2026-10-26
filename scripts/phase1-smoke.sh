@@ -281,9 +281,10 @@ PY
   V2_ID="$(jv 'd["suites"][0]["suiteId"]' 2>/dev/null)"
 
   if need "GET task diff v1 -> v2" "$V1_ID" "$V2_ID"; then
+    # Its files list the root files too (task.yaml, prompt.md, reference.json; Phase 5b).
     request GET "/suites/$V2_ID/tasks/$SOURCE_TASK/diff?against=$V1_ID"
     check 'GET task diff v1 -> v2' 200 \
-      'd["from"]["suiteVersion"] == 1 and d["to"]["suiteVersion"] == 2 and any(l["kind"] == "added" and "Smoke edit" in l["text"] for l in d["prompt"]) and not any(l["kind"] == "removed" for l in d["prompt"]) and all(l["kind"] == "same" for l in d["taskYaml"]) and d["reference"] == [] and all(f["change"] == "unchanged" for f in d["files"])' \
+      'd["from"]["suiteVersion"] == 1 and d["to"]["suiteVersion"] == 2 and any(l["kind"] == "added" and "Smoke edit" in l["text"] for l in d["prompt"]) and not any(l["kind"] == "removed" for l in d["prompt"]) and all(l["kind"] == "same" for l in d["taskYaml"]) and d["reference"] == [] and all(f["change"] == ("changed" if f["path"] == "prompt.md" else "unchanged") for f in d["files"])' \
       '"task v{} -> v{} · prompt +{}/-{} lines · task.yaml and reference unchanged · files: {}".format(d["from"]["taskVersion"], d["to"]["taskVersion"], sum(l["kind"] == "added" for l in d["prompt"]), sum(l["kind"] == "removed" for l in d["prompt"]), ", ".join("{path} {change}".format_map(f) for f in d["files"]))'
 
     request GET "/suites/$V2_ID/tasks/$SOURCE_TASK/history"

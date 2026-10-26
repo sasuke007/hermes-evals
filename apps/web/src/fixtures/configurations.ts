@@ -93,6 +93,8 @@ const mcpRef = {
   name: MCP_INVOICE_DB.name,
   version: MCP_INVOICE_DB.version,
   transport: MCP_INVOICE_DB.transport,
+  envNames: MCP_INVOICE_DB.envNames,
+  headers: MCP_INVOICE_DB.headers,
 };
 
 const common = {
@@ -282,6 +284,8 @@ export function formOptionsFixture(empty: boolean): ConfigurationFormOptions {
             name: MCP_VENDOR_API.name,
             version: MCP_VENDOR_API.version,
             transport: MCP_VENDOR_API.transport,
+            envNames: MCP_VENDOR_API.envNames,
+            headers: MCP_VENDOR_API.headers,
             endpoint: MCP_VENDOR_API.url ?? '',
             latest: true,
           },

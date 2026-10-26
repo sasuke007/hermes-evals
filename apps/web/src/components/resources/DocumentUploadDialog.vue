@@ -13,8 +13,10 @@ import UploadProblem from './UploadProblem.vue';
 /**
  * Upload document, the same two steps as a skill (Library states › Upload document): choose
  * or drop a file, review it, and store it on Confirm. The API has no dry run for documents,
- * so the review is the browser's own: the 50 MB cap, no zip archives, and the content hash
- * of the bytes it will send. The API sets the type label ("PDF · 6 pages") when it stores
+ * so the review is the browser's own: the 50 MB cap and the content hash of the bytes it will
+ * send. Any type is accepted, as the API accepts it (Phase 5 question 9): the hint names PDF,
+ * Markdown, text and CSV as the recommended types, and a zip archive is reviewed with a note
+ * (the board's refusal is gone). The API sets the type label ("PDF · 6 pages") when it stores
  * the file. A new document is attached to no configuration.
  */
 const props = withDefaults(defineProps<{ initialFile?: File | null }>(), { initialFile: null });
@@ -60,14 +62,14 @@ const problem = computed<Problem | null>(() => {
       detail: 'Split the file, or keep only the columns the agent needs.',
     };
   }
-  if (isZip(f)) {
-    return {
-      title: 'ZIP archives are not accepted as documents.',
-      detail: 'Upload PDF, Markdown, text or CSV. Skills are uploaded as .zip on the Skills tab.',
-    };
-  }
   return null;
 });
+/** A zip is stored as it is: one file in workspace/docs/, never unpacked. */
+const zipNote = computed(() =>
+  file.value && isZip(file.value)
+    ? 'A ZIP archive is stored as one file: the agent gets the archive, not what is in it. Skills are uploaded as .zip on the Skills tab.'
+    : null,
+);
 
 /** sha256 of the file, where the browser offers SubtleCrypto (a secure context). */
 async function digest(f: File): Promise<string | null> {
@@ -146,7 +148,7 @@ const details = computed(() => {
 
     <UploadDropZone
       v-if="!file"
-      caption="PDF, Markdown, text or CSV · up to 50 MB"
+      caption="PDF, Markdown, text or CSV recommended · any file up to 50 MB"
       padding="sm"
       @file="choose"
       ><b>Drop a file here, or <span class="text-accent">choose one</span></b></UploadDropZone
@@ -179,6 +181,9 @@ const details = computed(() => {
           <dt class="text-text-2">attached to</dt>
           <dd class="text-text-3">none yet · add it from a configuration's Documents field</dd>
         </dl>
+        <p v-if="zipNote" class="text-12 text-text-2" data-testid="document-note">
+          {{ zipNote }}
+        </p>
       </template>
       <ErrorBanner
         v-if="confirmError"

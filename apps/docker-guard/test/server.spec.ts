@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createGuardServer } from '../src/server.js';
-import { trialBody } from './fixtures.js';
+import { trialBody, VERIFIER_NAME, verifierBody } from './fixtures.js';
 
 interface Seen {
   method: string;
@@ -127,6 +127,22 @@ describe('guard server', () => {
     const create = seen.find((s) => s.url.startsWith('/containers/create'));
     expect(JSON.parse(create!.body).Image).toBe('sha256:pinned');
     expect(create!.headers['x-registry-auth']).toBeUndefined();
+  });
+
+  it('checks a verifier container against the verifier shape and forwards it pinned', async () => {
+    const asTrial = await call('POST', `/containers/create?name=${TRIAL_NAME}`, verifierBody());
+    expect(asTrial.status).toBe(403);
+    const wrongShape = await call('POST', `/containers/create?name=${VERIFIER_NAME}`, trialBody());
+    expect(wrongShape.status).toBe(403);
+    expect(seen).toEqual([]);
+    const res = await call('POST', `/containers/create?name=${VERIFIER_NAME}`, verifierBody());
+    expect(res.status).toBe(201);
+    const create = seen.find((s) => s.url.startsWith('/containers/create'));
+    expect(create!.url).toBe(`/containers/create?name=${VERIFIER_NAME}`);
+    expect(JSON.parse(create!.body)).toMatchObject({
+      Image: 'sha256:pinned',
+      HostConfig: { NetworkMode: 'none' },
+    });
   });
 
   it('refuses operations on containers that are not trials', async () => {

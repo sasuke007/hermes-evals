@@ -6,18 +6,29 @@ import BasePanel from '@/components/ui/BasePanel.vue';
 import StatusChip from '@/components/ui/StatusChip.vue';
 import { formatRate, MISSING } from '@/lib/format';
 import { ROUTE_NAMES } from '@/router';
+import { comparabilityNote } from './usageNotes';
 
 /**
- * The experiments that ran this task version (TaskDetail board, "In experiments"): the
- * task's pass rate per configuration, with "scored / total" while an experiment is still
- * running. Experiments on other versions of the task are listed on those versions.
+ * "In experiments" on Task detail (TaskDetail board): every experiment that ran any version
+ * of the task. A task with one version draws the task's pass rate per configuration, with
+ * "scored / total" while an experiment is still running. A task with several versions draws
+ * which task version and suite version each experiment ran instead, and says why results on
+ * different versions do not compare (Phase 5 section 6.1).
  */
-const props = defineProps<{
-  experiments: TaskExperimentUsage[];
-  version: number;
-  /** The task has had more than one version. */
-  versioned: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    experiments: TaskExperimentUsage[];
+    /** The task version on screen. */
+    version: number;
+    /** The task has had more than one version. */
+    versioned: boolean;
+    /** The version on screen failed its self-check. */
+    valid?: boolean;
+    /** What changed in the newest version the experiments ran, from the task's History. */
+    changedFiles?: string[];
+  }>(),
+  { valid: true, changedFiles: () => [] },
+);
 
 const rows = computed(() =>
   props.experiments.flatMap((e) =>
@@ -25,18 +36,62 @@ const rows = computed(() =>
   ),
 );
 const note = computed(() => {
+  if (props.versioned) {
+    return comparabilityNote({
+      experiments: props.experiments,
+      version: props.version,
+      valid: props.valid,
+      changedFiles: props.changedFiles,
+    });
+  }
   if (props.experiments.length === 0) return `No experiment has run task v${props.version} yet.`;
-  return props.versioned
-    ? `Only experiments on task v${props.version} are listed. Results on other versions are not comparable.`
-    : `Every experiment so far ran on task v${props.version}.`;
+  return `Every experiment so far ran on task v${props.version}.`;
 });
 const experimentTo = (id: string) => ({ name: ROUTE_NAMES.experimentOverview, params: { id } });
 </script>
 
 <template>
-  <BasePanel title="In experiments" meta="pass rate on this task" clip>
+  <BasePanel
+    title="In experiments"
+    :meta="versioned ? 'which task version each one ran' : 'pass rate on this task'"
+    clip
+  >
     <table
-      v-if="rows.length"
+      v-if="versioned && experiments.length"
+      class="dt th30 inset14 static"
+      aria-label="Experiments that ran this task"
+      data-testid="usage-versioned"
+    >
+      <thead>
+        <tr>
+          <th scope="col">Experiment</th>
+          <th scope="col">Task version</th>
+          <th scope="col" class="text-right">Suite</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          v-for="e in experiments"
+          :key="e.experimentId"
+          :data-experiment="e.experimentId"
+          :data-task-version="e.taskVersion"
+        >
+          <td class="whitespace-normal">
+            <RouterLink :to="experimentTo(e.experimentId)">{{ e.experimentName }}</RouterLink>
+            <template v-if="e.status !== 'completed'">
+              {{ ' ' }}
+              <StatusChip kind="experiment" :status="e.status" size="sm" :dot="false" />
+            </template>
+          </td>
+          <td class="font-mono text-12" :class="{ 'font-semibold': e.taskVersion === version }">
+            v{{ e.taskVersion }}
+          </td>
+          <td class="text-right">v{{ e.suiteVersion }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <table
+      v-else-if="rows.length"
       class="dt th30 inset14 static"
       aria-label="Experiments that ran this task"
     >
@@ -89,7 +144,11 @@ const experimentTo = (id: string) => ({ name: ROUTE_NAMES.experimentOverview, pa
         </tr>
       </tbody>
     </table>
-    <p class="px-16 py-8 text-12 text-text-3" :class="{ 'border-t border-border': rows.length }">
+    <p
+      class="px-16 py-8 text-12 text-text-3"
+      :class="{ 'border-t border-border': experiments.length }"
+      data-testid="usage-note"
+    >
       {{ note }}
     </p>
   </BasePanel>

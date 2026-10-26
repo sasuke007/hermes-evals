@@ -108,6 +108,35 @@ export function getSkillFile(id: string, path: string): Promise<SkillFileContent
   );
 }
 
+/**
+ * Names joined as the API joins them in a refusal: `a`, `a and b`, `a, b and c`
+ * (resources/skills/configuration-links.ts).
+ */
+const listed = (names: readonly string[]): string =>
+  names.length <= 1
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/** The API's 409 sentence for a skill or document a configuration version names. */
+const inUseDetail = (what: string, names: readonly string[]): string =>
+  `${what} is part of a saved version of ${listed(names)}, and a configuration version keeps what it was saved with, so it cannot be deleted`;
+
+/**
+ * DELETE /resources/skills/:id (Phase 5 section 6.1): only a skill no configuration version
+ * names; 409 naming the configurations otherwise (ResourceInUseBody, whose message the
+ * ApiError carries). The fixtures refuse a skill a configuration uses.
+ */
+export function deleteSkill(id: string): Promise<void> {
+  if (apiMode === 'live') return apiSend('DELETE', `/resources/skills/${id}`);
+  const request = `DELETE /api/resources/skills/${id}`;
+  const row = skillsFixture(false).find((s) => s.id === id);
+  if (row && row.usedBy.length > 0) {
+    const names = row.usedBy.map((c) => c.name);
+    return fixtureFailure(request, 409, inUseDetail(`skill ${row.name} ${row.version}`, names));
+  }
+  return fixture(undefined, { request });
+}
+
 /** URL to download a skill as a zip (a plain link, not a fetch). */
 export function skillZipUrl(id: string): string {
   return `${API_BASE}/resources/skills/${id}/zip`;
@@ -172,6 +201,18 @@ export function uploadDocument(file: File): Promise<DocumentRow> {
   });
 }
 
+/** DELETE /resources/documents/:id: as deleteSkill, for a document. */
+export function deleteDocument(id: string): Promise<void> {
+  if (apiMode === 'live') return apiSend('DELETE', `/resources/documents/${id}`);
+  const request = `DELETE /api/resources/documents/${id}`;
+  const row = documentsFixture(false).find((d) => d.id === id);
+  if (row && row.attachedTo.length > 0) {
+    const names = row.attachedTo.map((c) => c.name);
+    return fixtureFailure(request, 409, inUseDetail(`document ${row.filename}`, names));
+  }
+  return fixture(undefined, { request });
+}
+
 /** URL to download a document (a plain link, not a fetch). */
 export function documentContentUrl(id: string): string {
   return `${API_BASE}/resources/documents/${id}/content`;
@@ -196,8 +237,22 @@ export function listMcpServers(): Promise<McpServerRow[]> {
 }
 
 /**
+ * Fixtures mode's stand-in for the API's memory of passing unsaved tests (Phase 5 question
+ * 14): by the definition as sent, so a save of the same definition keeps the result.
+ */
+const passedUnsaved = new Map<string, Extract<McpTestView, { status: 'passed' }>>();
+const definitionKey = (input: McpServerInput): string => JSON.stringify(input);
+/** A stand-in definition hash for fixtures: 64 hex digits from the definition's text. */
+function fixtureDefinitionHash(input: McpServerInput): string {
+  let h = 0x811c9dc5;
+  for (const ch of definitionKey(input)) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0').repeat(8);
+}
+
+/**
  * POST /resources/mcp-servers (new) or PUT /resources/mcp-servers/:id (edit).
- * Editing a definition a configuration uses creates the next version.
+ * Editing a definition a configuration uses creates the next version. A save whose
+ * definition passed Test start unsaved keeps that result as the row's last test.
  */
 export function saveMcpServer(input: McpServerInput, id?: string): Promise<McpServerRow> {
   if (apiMode === 'live') {
@@ -210,7 +265,16 @@ export function saveMcpServer(input: McpServerInput, id?: string): Promise<McpSe
   if (!id && taken) {
     return fixtureFailure(request, 409, `an MCP server named ${taken.name} already exists`);
   }
-  return fixture(() => mcpSaveFixture(input, id), { request });
+  const kept = passedUnsaved.get(definitionKey(input));
+  return fixture(
+    () => {
+      const row = mcpSaveFixture(input, id);
+      if (!kept) return row;
+      const { definitionHash: _hash, ...lastTest } = kept;
+      return { ...row, lastTest };
+    },
+    { request },
+  );
 }
 
 /**
@@ -232,10 +296,17 @@ export function testMcpServer(target: { id: string } | McpServerInput): Promise<
     ? (mcpServersFixture(false).find((s) => s.id === target.id) ?? MCP_INVOICE_DB)
     : target;
   const needsSecret = definition.envNames.includes('INVOICE_DB_URL');
-  return fixture(() => mcpTestFixture(definition, needsSecret && secretMissing()), {
-    request,
-    latencyMs: 1200,
-  });
+  return fixture(
+    (): McpTestView => {
+      const result = mcpTestFixture(definition, needsSecret && secretMissing());
+      if (saved || result.status === 'untested') return result;
+      // An unsaved test names the definition's hash; a passing one is kept for its save.
+      const named = { ...result, definitionHash: fixtureDefinitionHash(target) };
+      if (named.status === 'passed') passedUnsaved.set(definitionKey(target), named);
+      return named;
+    },
+    { request, latencyMs: 1200 },
+  );
 }
 
 // ---------------------------------------------------------------------------

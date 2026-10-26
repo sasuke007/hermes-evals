@@ -19,6 +19,7 @@ import {
   selfCheckStatus,
   type SelfCheckResult,
 } from '../../scoring/self-check.js';
+import { VerifierUnavailable } from '../../scoring/verifier.js';
 import type { ScratchDir } from '../../storage/blob-store.js';
 import { FIXTURES_DIR, VERIFY_DIR } from './limits.js';
 import type { AnalysedTask, SelfCheckPlan } from './task.js';
@@ -185,7 +186,11 @@ async function materialise(
   return { fixturesDir, expectedWorkspaceDir, homeDir, expectedHomeDir, verifyDir };
 }
 
-/** Runs every check of the plan in entry order. Never throws for the task's content. */
+/**
+ * Runs every check of the plan in entry order. Never throws for the task's
+ * content; throws VerifierUnavailable when a verifier could not be run at
+ * all, which says nothing about the task (the load fails instead).
+ */
 export async function selfCheckTask(task: AnalysedTask, deps: SelfCheckDeps): Promise<SelfCheck> {
   const plan = task.plan;
   if (plan === null) return SKIPPED_SELF_CHECK;
@@ -223,6 +228,7 @@ export async function selfCheckTask(task: AnalysedTask, deps: SelfCheckDeps): Pr
       const dirs = await materialise(scratch.path, task, plan);
       results.push(...(await runSelfChecks({ ...input, ...dirs })));
     } catch (err) {
+      if (err instanceof VerifierUnavailable) throw err;
       results.push({
         key: entry.key,
         type: entry.type,

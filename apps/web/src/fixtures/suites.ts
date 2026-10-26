@@ -470,8 +470,8 @@ End your answer with a fenced JSON block of the form \`{"per_vendor": {"<vendor>
       {
         key: 'uses_db',
         type: 'trajectory_match',
-        params: { tool: 'invoice-db.list_invoices', min_calls: 1 },
-        sentence: 'trajectory_match: calls invoice-db.list_invoices at least once',
+        params: { tool: 'mcp__invoice_db__list_invoices', min_calls: 1 },
+        sentence: 'trajectory_match: calls mcp__invoice_db__list_invoices at least once',
       },
     ],
     reference: {
@@ -894,6 +894,10 @@ const VERIFICATION_TYPES_BY_USE: ScorerType[] = [
 
 function listRow(state: SuiteState, seed: SuiteVersionSeed): SuiteListRow {
   const load = lastLoad(state);
+  // The History row that created this version: the current one first, as a
+  // reverted v1 has two rows.
+  const history = suiteHistoryFixture(state).filter((e) => e.suiteId === seed.id);
+  const created = history.find((e) => e.current) ?? history[0];
   return {
     ...refFor(seed),
     path: SUITE_PATH,
@@ -903,6 +907,7 @@ function listRow(state: SuiteState, seed: SuiteVersionSeed): SuiteListRow {
     verificationTypes: VERIFICATION_TYPES_BY_USE,
     loadedAt: load.outcome === 'error' ? V1_LAST_LOAD_AT : load.at,
     lastLoad: load,
+    currentChanges: created?.changes ?? emptyChanges(),
   };
 }
 
@@ -1130,13 +1135,33 @@ export function taskDiffFixture(
     before: { sizeBytes: f.sizeBytes, sha256: f.sha256 },
     after: { sizeBytes: f.sizeBytes, sha256: f.sha256 },
   }));
+  // The root files with the sizes and hashes the loader records (Phase 5b).
+  const root = (path: string, sizeBytes: number, changedTo: number | null = null) => {
+    const before = { sizeBytes, sha256: sha(`${key}/${path}-v1`) };
+    return {
+      path,
+      change: changedTo === null ? ('unchanged' as const) : ('changed' as const),
+      before,
+      after:
+        changedTo === null ? before : { sizeBytes: changedTo, sha256: sha(`${key}/${path}-v2`) },
+    };
+  };
+  const promptBytes = new TextEncoder().encode(seed.prompt).length;
+  const yamlBytes = new TextEncoder().encode(yaml).length;
+  const referenceBytes = JSON.stringify(seed.reference).length + 1;
   if (fromVersion === toVersion) {
     return {
       ...base,
       prompt: same(seed.prompt),
       taskYaml: same(yaml),
       reference: [],
-      files: unchangedFiles,
+      files: [
+        root('task.yaml', yamlBytes),
+        root('prompt.md', promptBytes),
+        root('reference.json', referenceBytes),
+        ...unchangedFiles,
+      ],
+      textFiles: [],
     };
   }
   if (key === 'total_due') {
@@ -1161,6 +1186,9 @@ export function taskDiffFixture(
       taskYaml: same(yaml),
       reference: [{ path: 'total_due', kind: 'changed', before: 48213.65, after: 48526.05 }],
       files: [
+        root('task.yaml', yamlBytes),
+        root('prompt.md', promptBytes, promptBytes + 32),
+        root('reference.json', referenceBytes, referenceBytes),
         {
           path: 'fixtures/invoices.csv',
           change: 'changed',
@@ -1168,6 +1196,8 @@ export function taskDiffFixture(
           after: { sizeBytes: 4276, sha256: sha('invoices.csv-v2') },
         },
       ],
+      // The API would also diff invoices.csv line by line; the fixture leaves it out.
+      textFiles: [],
     };
   }
   return {
@@ -1175,15 +1205,34 @@ export function taskDiffFixture(
     prompt: same(seed.prompt),
     taskYaml: same(yaml),
     reference: [],
-    files: unchangedFiles.map((f) =>
-      f.path === 'fixtures/policy_terms.json'
-        ? {
-            ...f,
-            change: 'changed' as const,
-            after: { sizeBytes: 203, sha256: sha('policy_terms.json-v2') },
-          }
-        : f,
+    files: [
+      root('task.yaml', yamlBytes),
+      root('prompt.md', promptBytes),
+      root('reference.json', referenceBytes),
+    ].concat(
+      unchangedFiles.map((f) =>
+        f.path === 'fixtures/policy_terms.json'
+          ? {
+              ...f,
+              change: 'changed' as const,
+              after: { sizeBytes: 203, sha256: sha('policy_terms.json-v2') },
+            }
+          : f,
+      ),
     ),
+    textFiles: [
+      {
+        path: 'fixtures/policy_terms.json',
+        lines: [
+          { kind: 'same', text: '{', oldLine: 1, newLine: 1 },
+          { kind: 'removed', text: '  "late_fee_rate": 0.015,', oldLine: 2, newLine: null },
+          { kind: 'added', text: '  "fee_rate_monthly": 0.015,', oldLine: null, newLine: 2 },
+          { kind: 'same', text: '  "late_fee_cap": 50.00,', oldLine: 3, newLine: 3 },
+          { kind: 'same', text: '  "grace_days": 10,', oldLine: 4, newLine: 4 },
+          { kind: 'same', text: '}', oldLine: 5, newLine: 5 },
+        ],
+      },
+    ],
   };
 }
 

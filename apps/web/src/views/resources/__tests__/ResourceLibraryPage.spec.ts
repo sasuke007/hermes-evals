@@ -4,9 +4,11 @@
  * empty, and the library scenarios (upload outcomes are in SkillUploadDialog.spec, the MCP
  * form's in McpServerForm.spec).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
 import type { Router } from 'vue-router';
+import { ApiError } from '@/api/client';
+import * as resourcesApi from '@/api/resources';
 import type { ResourceTab } from '@/api/types/resources';
 import { MCP_INVOICE_DB_ID, SKILL_INVOICE_METHOD_ID } from '@/fixtures/resources';
 import ResourceLibraryPage from '@/views/resources/ResourceLibraryPage.vue';
@@ -17,6 +19,7 @@ let router: Router;
 afterEach(() => {
   w?.unmount();
   w = null;
+  vi.restoreAllMocks();
 });
 
 async function page(tab: ResourceTab, scenario: string | null = null, query = '') {
@@ -175,7 +178,7 @@ describe('Documents tab', () => {
       'Hash',
       'Uploaded',
       'Attached to',
-      'Download',
+      'Download and delete',
     ]);
     expect(cells(0)).toEqual([
       'vendor-policy-v3.pdf',
@@ -184,7 +187,7 @@ describe('Documents tab', () => {
       'sha256:3be7d1f0…91ac',
       '22 Oct 09:30',
       'None not attached to any configuration',
-      'Download',
+      'Download Delete',
     ]);
     expect(w!.get('tbody a.btn').attributes('href')).toMatch(
       /^\/api\/resources\/documents\/.+\/content$/,
@@ -213,6 +216,75 @@ describe('Documents tab', () => {
     // A long list can put the new row below the fold: it is brought into view.
     expect(scrolledIntoView).toEqual([rows[0]!.element]);
     expect(store.counts?.documents).toBe(1);
+  });
+
+  it('deletes a document no configuration uses, after confirming in a row under it', async () => {
+    const { store } = await page('documents');
+    const del = w!.get('button[aria-label="Delete vendor-policy-v3.pdf"]');
+    expect(del.attributes('disabled')).toBeUndefined();
+    await del.trigger('click');
+    await flushPromises();
+    const row = w!.get('[data-testid="document-delete-row"]');
+    expect(flat('[data-testid="document-delete-row"]')).toBe(
+      'Delete vendor-policy-v3.pdf? It leaves the library. No configuration uses it, so no run or experiment changes. Delete documentKeep it',
+    );
+    expect(document.activeElement?.textContent?.trim()).toBe('Keep it');
+    await row
+      .findAll('button')
+      .find((b) => b.text() === 'Delete document')!
+      .trigger('click');
+    await flushPromises();
+    expect(w!.findAll('[data-testid="document-row"]')).toHaveLength(0);
+    expect(store.documentRows).toEqual([]);
+  });
+
+  it('backs out with Keep it, focus back on Delete', async () => {
+    await page('documents');
+    await w!.get('button[aria-label="Delete vendor-policy-v3.pdf"]').trigger('click');
+    await flushPromises();
+    await w!
+      .get('[data-testid="document-delete-row"]')
+      .findAll('button')
+      .find((b) => b.text() === 'Keep it')!
+      .trigger('click');
+    await flushPromises();
+    expect(w!.find('[data-testid="document-delete-row"]').exists()).toBe(false);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Delete vendor-policy-v3.pdf');
+  });
+
+  it('disables Delete while a configuration has the document, and quotes a 409', async () => {
+    const { store } = await page('documents');
+    const [doc] = store.documentRows;
+    store.documents.byId = {
+      [doc!.id]: { ...doc!, attachedTo: [{ configurationId: 'cfg_1', name: 'with-docs' }] },
+    };
+    await flushPromises();
+    const del = w!.get('button[aria-label="Delete vendor-policy-v3.pdf"]');
+    expect(del.attributes('disabled')).toBeDefined();
+    expect(del.attributes('title')).toBe(
+      'Attached to 1 configuration. Remove it from with-docs first.',
+    );
+
+    // Dropped from the latest version but kept by an older one: the API refuses.
+    store.documents.byId = { [doc!.id]: doc! };
+    const refusal =
+      'document vendor-policy-v3.pdf is part of a saved version of with-docs, and a configuration version keeps what it was saved with, so it cannot be deleted';
+    vi.spyOn(resourcesApi, 'deleteDocument').mockRejectedValue(
+      new ApiError(409, `DELETE /api/resources/documents/${doc!.id}`, refusal),
+    );
+    await flushPromises();
+    await w!.get('button[aria-label="Delete vendor-policy-v3.pdf"]').trigger('click');
+    await flushPromises();
+    await w!
+      .get('[data-testid="document-delete-row"]')
+      .findAll('button')
+      .find((b) => b.text() === 'Delete document')!
+      .trigger('click');
+    await flushPromises();
+    const alert = w!.get('[data-testid="document-delete-row"] [data-testid="confirm-error"]');
+    expect(alert.text()).toContain('Could not delete. The document is kept.');
+    expect(alert.text()).toContain(refusal);
+    expect(w!.findAll('[data-testid="document-row"]')).toHaveLength(1);
   });
 
   it('is one drop target when empty', async () => {

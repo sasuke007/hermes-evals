@@ -33,6 +33,11 @@ export class ApiError extends Error {
   /** One per field for a request that failed validation: { path: 'headers.0.env', message }. */
   readonly issues: ApiIssue[];
   readonly kind: ApiErrorKind;
+  /**
+   * The whole JSON error body, for refusals that carry more than a sentence (an import's 422
+   * keeps its preview); null when the answer was not JSON. Parse it with its shared schema.
+   */
+  readonly body: unknown;
 
   constructor(
     /** HTTP status; 0 when nothing answered. */
@@ -41,6 +46,7 @@ export class ApiError extends Error {
     detail: string,
     issues: ApiIssue[] = [],
     kind: ApiErrorKind = 'http',
+    body: unknown = null,
   ) {
     super(`${request} → ${status} · ${detail}`);
     this.name = 'ApiError';
@@ -48,6 +54,7 @@ export class ApiError extends Error {
     this.detail = detail;
     this.issues = issues;
     this.kind = kind;
+    this.body = body;
   }
 
   /** The request ("GET /api/x"); kept under its old name for existing callers. */
@@ -87,7 +94,14 @@ async function errorFrom(res: Response, request: string): Promise<ApiError> {
   }
   const parsed = ApiErrorBodySchema.safeParse(body);
   if (parsed.success) {
-    return new ApiError(res.status, request, parsed.data.message, parsed.data.issues ?? []);
+    return new ApiError(
+      res.status,
+      request,
+      parsed.data.message,
+      parsed.data.issues ?? [],
+      'http',
+      body,
+    );
   }
   const raw = text.trim().slice(0, 300);
   return new ApiError(res.status, request, raw || res.statusText || 'no response body');

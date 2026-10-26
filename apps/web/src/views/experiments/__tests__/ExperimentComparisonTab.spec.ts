@@ -171,6 +171,8 @@ describe('Comparison tab', () => {
     const loading = w.get('[data-testid=comparison-loading]');
     expect(loading.attributes('aria-busy')).toBe('true');
     expect(loading.attributes('aria-label')).toBe('Loading the comparison');
+    // The skeleton has no caption: ExperimentStates' captions are designer notes (Phase 5 #8).
+    expect(loading.text()).toBe('');
   });
 
   it('says what failed and retries with the same selection', async () => {

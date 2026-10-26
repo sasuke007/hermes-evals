@@ -5,6 +5,7 @@
  */
 export * from './blobs.js';
 export * from './suites.js';
+export * from './drafts.js';
 export * from './resources.js';
 export * from './configurations.js';
 export * from './workers.js';

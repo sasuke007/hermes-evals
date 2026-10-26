@@ -88,13 +88,11 @@ watch(() => [props.mode, props.configurationId], load, { immediate: true });
 
 onMounted(() => {
   if (!providers.loaded) void providers.load();
-  void store.loadMcpExposure();
 });
 // "Upload new" and "Define new" open the library in a new tab: pick up what was added there.
 useEventListener(window, 'focus', () => {
   if (!draft.value) return;
   store.loadFormOptions().catch(() => {});
-  void store.loadMcpExposure();
 });
 
 const options = computed(() => store.formOptions);
@@ -286,13 +284,7 @@ const loadErrorTitle = computed(() =>
       </div>
 
       <div class="flex flex-wrap items-start gap-20">
-        <ConfigFormFields
-          v-model="state"
-          :options="options"
-          :errors="shownErrors"
-          :exposure="store.mcpExposure"
-          @blur="onBlur"
-        />
+        <ConfigFormFields v-model="state" :options="options" :errors="shownErrors" @blur="onBlur" />
         <ConfigSaveAside
           :title="asideTitle"
           :intro="

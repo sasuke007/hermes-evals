@@ -4,7 +4,14 @@
  * to the agent" (outlined, eye) on the prompt and fixtures, "Hidden from the agent"
  * (inverse, eye struck through) on the checks, the reference answer and the verifier.
  */
-defineProps<{ zone: 'visible' | 'hidden' }>();
+withDefaults(
+  defineProps<{
+    zone: 'visible' | 'hidden';
+    /** Replaces the words, for a narrower use: "Agent sees · prompt.md", "Hidden · checks only". */
+    label?: string | null;
+  }>(),
+  { label: null },
+);
 </script>
 
 <template>
@@ -41,6 +48,6 @@ defineProps<{ zone: 'visible' | 'hidden' }>();
         <path d="m2 2 20 20" />
       </template>
     </svg>
-    {{ zone === 'visible' ? 'Visible to the agent' : 'Hidden from the agent' }}
+    {{ label ?? (zone === 'visible' ? 'Visible to the agent' : 'Hidden from the agent') }}
   </span>
 </template>

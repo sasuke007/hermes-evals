@@ -8,17 +8,19 @@ import KeyValueList from '@/components/ui/KeyValueList.vue';
 import type { KeyValueItem } from '@/components/ui/types';
 import type { ConfigField, ConfigurationVersion, McpServerRef } from '@/api/types/configurations';
 import { ROUTE_NAMES } from '@/router';
-import type { McpExposure } from '@/stores/configurations';
 import { formatBytes, formatSha256 } from '@/lib/format';
 import McpExposureNote from './McpExposureNote.vue';
-import { hashTag } from './configDisplay';
+import { hashTag, launchToolsets, launchToolsetsNote } from './configDisplay';
 
 /**
  * A configuration version's fields, "as written into each run's config.yaml" (ConfigDetail ›
  * Fields): a two-column definition list. A field that differs from the configuration it was
  * duplicated from is tinted and says so ("differs from baseline"); an MCP server row carries
- * what the server exposes to the run. Skill loading (Phase 6 P5) follows Skills: the mode and
- * what it does, or that it has nothing to load.
+ * what the server exposes to the run, named from that very definition version (McpServerRef's
+ * envNames and headers), so a version pinned to an older definition names its own. Skill
+ * loading (Phase 6 P5) follows Skills: the mode and what it does, or that it has nothing to
+ * load. Toolsets and Memory say what memory on and on-demand skills add at launch (Phase 6b
+ * #12): the stored list is what the hash covers, the run gets those on top.
  */
 const props = withDefaults(
   defineProps<{
@@ -26,9 +28,8 @@ const props = withDefaults(
     /** Fields that differ from `sourceName`'s version. */
     differs?: ConfigField[];
     sourceName?: string | null;
-    exposure?: Record<string, McpExposure>;
   }>(),
-  { differs: () => [], sourceName: null, exposure: () => ({}) },
+  { differs: () => [], sourceName: null },
 );
 
 const differ = (field: ConfigField): boolean => !!props.sourceName && props.differs.includes(field);
@@ -70,13 +71,16 @@ const LINE = 'flex flex-wrap items-center gap-x-6 gap-y-4';
 
 /** "env INVOICE_DB_URL · differs from baseline". */
 function serverNote(m: McpServerRef): string {
-  const env = m.transport === 'stdio' ? (props.exposure[m.versionId]?.envNames ?? []) : [];
+  const env = m.transport === 'stdio' ? m.envNames : [];
   return [env.length ? `env ${env.join(', ')}` : '', differ('mcp_servers') ? differsNote.value : '']
     .filter(Boolean)
     .join(' · ');
 }
 
 const library = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: { tab } });
+
+/** What memory on and on-demand skills add to the stored toolsets at launch (Phase 6b #12). */
+const launchNote = computed(() => launchToolsetsNote(launchToolsets(props.version)));
 
 /** "Each skill is loaded into the prompt at start (-s per skill)." for the version's mode. */
 const loadingHelp = computed(
@@ -106,6 +110,9 @@ const loadingHelp = computed(
         <span :class="LINE">
           <span v-for="t in version.toolsets" :key="t" class="tag">{{ t }}</span>
           <span v-if="version.toolsets.length === 0" class="text-text-3">None</span>
+          <span v-if="launchNote" class="text-12 text-text-3" data-testid="launch-toolsets">{{
+            launchNote
+          }}</span>
           <span v-if="differ('toolsets')" class="text-12 text-text-3">{{ differsNote }}</span>
         </span>
       </template>
@@ -115,6 +122,7 @@ const loadingHelp = computed(
           <span v-if="!version.memoryEnabled" class="text-12 text-text-3"
             >(runtime default is on)</span
           >
+          <span v-else class="text-12 text-text-3">(adds the memory toolset at launch)</span>
           <span v-if="differ('memory')" class="text-12 text-text-3">{{ differsNote }}</span>
         </span>
       </template>
@@ -159,8 +167,8 @@ const loadingHelp = computed(
           </span>
           <McpExposureNote
             :server="m"
-            :env-names="exposure[m.versionId]?.envNames ?? null"
-            :headers="exposure[m.versionId]?.headers ?? null"
+            :env-names="m.envNames"
+            :headers="m.headers.map((h) => h.header)"
           />
         </div>
       </template>

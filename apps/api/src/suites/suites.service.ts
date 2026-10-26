@@ -17,27 +17,48 @@ import {
   taskStatesOf,
   tasksOf,
   versionsOf,
+  versionsOfMany,
 } from './suites.queries.js';
 import type { SuiteRow } from './views/rows.js';
-import { suiteDetail, suiteHistory, suiteListRow } from './views/suite-views.js';
+import {
+  changesThatCreated,
+  suiteDetail,
+  suiteHistory,
+  suiteListRow,
+  versionsToCompare,
+} from './views/suite-views.js';
 import { suiteTaskRow } from './views/task-views.js';
 
 @Injectable()
 export class SuitesService {
   constructor(@Inject(DB) private readonly db: AppDb) {}
 
-  /** One row per directory that serves a version, at that version. */
+  /**
+   * One row per directory that serves a version, at that version, with the
+   * changes that created it (its History row's: Phase 5 section 6.1).
+   */
   async list(): Promise<SuiteListRow[]> {
     const current = await currentSuites(this.db);
-    const states = await taskStatesOf(
-      this.db,
-      current.map((c) => c.suite.id),
+    const versions = groupBy(
+      await versionsOfMany(
+        this.db,
+        current.map((c) => c.source.path),
+      ),
+      (v) => v.sourcePath,
+    );
+    const compared = current.flatMap(({ suite }) =>
+      versionsToCompare(suite, versions.get(suite.sourcePath) ?? [suite]),
+    );
+    const states = groupBy(
+      await taskStatesOf(this.db, [...new Set(compared.map((v) => v.id))]),
+      (t) => t.suiteId,
     );
     return current.map(({ source, suite }) =>
       suiteListRow(
         suite,
         source,
-        states.filter((t) => t.suiteId === suite.id),
+        states.get(suite.id) ?? [],
+        changesThatCreated(suite, versions.get(suite.sourcePath) ?? [suite], source, states),
       ),
     );
   }
@@ -56,11 +77,23 @@ export class SuitesService {
         tasks.map((t) => t.id),
       ),
     );
-    const failures = await failuresOf(this.db, suite, tasks, filesByTask);
+    const [failures, states] = await Promise.all([
+      failuresOf(this.db, suite, tasks, filesByTask),
+      taskStatesOf(
+        this.db,
+        versionsToCompare(suite, versions).map((v) => v.id),
+      ),
+    ]);
     return suiteDetail({
       suite,
       source,
       versions,
+      changes: changesThatCreated(
+        suite,
+        versions,
+        source,
+        groupBy(states, (t) => t.suiteId),
+      ),
       verification: tasks,
       taskRows: tasks.map((task) =>
         suiteTaskRow(

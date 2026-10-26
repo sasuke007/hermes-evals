@@ -88,6 +88,8 @@ export async function loadResources(
             name: mcpServers.name,
             version: mcpServerVersions.version,
             transport: mcpServerVersions.transport,
+            envNames: mcpServerVersions.envNames,
+            headers: mcpServerVersions.headers,
             definitionHash: mcpServerVersions.definitionHash,
           })
           .from(mcpServerVersions)

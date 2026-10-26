@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
+import { errorMessage } from '@/api/client';
 import { documentContentUrl } from '@/api/resources';
+import type { DocumentRow } from '@/api/types/resources';
+import ConfirmInline from '@/components/ui/ConfirmInline.vue';
 import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import SkeletonRows from '@/components/ui/SkeletonRows.vue';
 import type { SkeletonColumn } from '@/components/ui/types';
@@ -16,6 +19,12 @@ import DocumentUploadDialog from './DocumentUploadDialog.vue';
  * the configurations they are attached to, with Download. A file dropped anywhere on the tab
  * opens the upload dialog at its review step; "Upload document" (the page header, or the
  * empty state) opens it at step 1. The stored document's row flashes.
+ *
+ * Delete (Phase 5 section 6.1; the board draws Download only, so it follows the skill panel's
+ * Delete): disabled with "Attached to 1 configuration. Remove it from with-skill first." while
+ * a configuration's latest version has the document; otherwise it asks in a tinted row under
+ * the document's (ConfirmInline, as System's Disconnect). The API also refuses a document an
+ * older configuration version keeps (409); the row then stays open with its sentence.
  */
 const uploadOpen = defineModel<boolean>('uploadOpen', { default: false });
 
@@ -35,6 +44,53 @@ const SKELETON: SkeletonColumn[] = [
   { width: 180 },
   { width: 70, height: 16, align: 'right' },
 ];
+
+// ── Delete ────────────────────────────────────────────────────────────────
+const confirmingId = ref<string | null>(null);
+const deleting = ref(false);
+const deleteError = ref<string | null>(null);
+const confirmOpen = computed({
+  get: () => confirmingId.value !== null,
+  set: (open: boolean) => {
+    if (!open) confirmingId.value = null;
+  },
+});
+/** Why Delete is disabled, worded like the skill panel's tooltip. */
+function deleteReason(doc: DocumentRow): string | null {
+  const used = doc.attachedTo;
+  if (used.length === 0) return null;
+  const names = used.map((c) => c.name).join(', ');
+  return `Attached to ${used.length} ${used.length === 1 ? 'configuration' : 'configurations'}. Remove it from ${names} first.`;
+}
+/** Opens the confirmation row; focus goes to its safe option, as ConfirmInline's own trigger does. */
+async function askDelete(doc: DocumentRow): Promise<void> {
+  deleteError.value = null;
+  confirmingId.value = doc.id;
+  await nextTick();
+  const buttons = document.querySelectorAll<HTMLButtonElement>(
+    '[data-testid="document-delete-row"] button',
+  );
+  buttons[buttons.length - 1]?.focus();
+}
+async function confirmDelete(): Promise<void> {
+  const id = confirmingId.value;
+  if (id === null) return;
+  deleting.value = true;
+  deleteError.value = null;
+  try {
+    await store.deleteDocument(id);
+    confirmingId.value = null;
+  } catch (err) {
+    deleteError.value = errorMessage(err);
+  } finally {
+    deleting.value = false;
+  }
+}
+async function backOut(id: string): Promise<void> {
+  deleteError.value = null;
+  await nextTick();
+  document.querySelector<HTMLButtonElement>(`[data-delete-document="${id}"]`)?.focus();
+}
 
 watch(uploadOpen, (isOpen) => {
   if (!isOpen) dropped.value = null;
@@ -108,53 +164,87 @@ function onDragLeave(event: DragEvent): void {
             <th>Hash</th>
             <th>Uploaded</th>
             <th>Attached to</th>
-            <th><span class="sr-only">Download</span></th>
+            <th><span class="sr-only">Download and delete</span></th>
           </tr>
         </thead>
         <tbody v-if="!documents.loaded">
           <SkeletonRows :columns="SKELETON" :rows="2" />
         </tbody>
         <tbody v-else>
-          <tr
-            v-for="doc in rows"
-            :key="doc.id"
-            :class="{ 'animate-flash': doc.id === store.flashId }"
-            data-testid="document-row"
-          >
-            <td class="font-mono font-semibold">{{ doc.filename }}</td>
-            <td class="text-right">{{ formatBytes(doc.sizeBytes) }}</td>
-            <td class="text-text-2">{{ doc.typeLabel }}</td>
-            <td class="font-mono text-12 text-text-2" :title="`sha256:${doc.sha256}`">
-              {{ formatSha256(doc.sha256) }}
-            </td>
-            <td class="text-text-2">{{ formatDateTime(doc.uploadedAt) }}</td>
-            <td>
-              <template v-if="doc.attachedTo.length">
-                <template v-for="(link, i) in doc.attachedTo" :key="link.configurationId"
-                  >{{ i > 0 ? ', ' : ''
-                  }}<RouterLink
-                    class="font-mono text-12"
-                    :to="{ name: ROUTE_NAMES.configuration, params: { id: link.configurationId } }"
-                    >{{ link.name }}</RouterLink
-                  ></template
-                >
-              </template>
-              <template v-else>
-                <span class="text-text-3">None</span>
-                {{ ' ' }}
-                <span class="text-12 text-text-3">not attached to any configuration</span>
-              </template>
-            </td>
-            <td class="text-right">
-              <a
-                class="btn sm"
-                :href="documentContentUrl(doc.id)"
-                :download="doc.filename"
-                :aria-label="`Download ${doc.filename}`"
-                >Download</a
-              >
-            </td>
-          </tr>
+          <template v-for="doc in rows" :key="doc.id">
+            <tr :class="{ 'animate-flash': doc.id === store.flashId }" data-testid="document-row">
+              <td class="font-mono font-semibold">{{ doc.filename }}</td>
+              <td class="text-right">{{ formatBytes(doc.sizeBytes) }}</td>
+              <td class="text-text-2">{{ doc.typeLabel }}</td>
+              <td class="font-mono text-12 text-text-2" :title="`sha256:${doc.sha256}`">
+                {{ formatSha256(doc.sha256) }}
+              </td>
+              <td class="text-text-2">{{ formatDateTime(doc.uploadedAt) }}</td>
+              <td>
+                <template v-if="doc.attachedTo.length">
+                  <template v-for="(link, i) in doc.attachedTo" :key="link.configurationId"
+                    >{{ i > 0 ? ', ' : ''
+                    }}<RouterLink
+                      class="font-mono text-12"
+                      :to="{
+                        name: ROUTE_NAMES.configuration,
+                        params: { id: link.configurationId },
+                      }"
+                      >{{ link.name }}</RouterLink
+                    ></template
+                  >
+                </template>
+                <template v-else>
+                  <span class="text-text-3">None</span>
+                  {{ ' ' }}
+                  <span class="text-12 text-text-3">not attached to any configuration</span>
+                </template>
+              </td>
+              <td class="text-right">
+                <span class="inline-flex items-center gap-6">
+                  <a
+                    class="btn sm"
+                    :href="documentContentUrl(doc.id)"
+                    :download="doc.filename"
+                    :aria-label="`Download ${doc.filename}`"
+                    >Download</a
+                  >
+                  <button
+                    type="button"
+                    class="btn sm"
+                    :disabled="!!deleteReason(doc) || confirmingId === doc.id"
+                    :title="deleteReason(doc) ?? undefined"
+                    :aria-description="deleteReason(doc) ?? undefined"
+                    :aria-label="`Delete ${doc.filename}`"
+                    :data-delete-document="doc.id"
+                    @click="askDelete(doc)"
+                  >
+                    Delete
+                  </button>
+                </span>
+              </td>
+            </tr>
+            <tr v-if="confirmingId === doc.id" data-testid="document-delete-row">
+              <td colspan="7" class="bg-fail-soft whitespace-normal">
+                <ConfirmInline
+                  v-model:open="confirmOpen"
+                  :title="`Delete ${doc.filename}?`"
+                  consequence="It leaves the library. No configuration uses it, so no run or experiment changes."
+                  confirm-label="Delete document"
+                  cancel-label="Keep it"
+                  busy-label="Deleting…"
+                  error-title="Could not delete. The document is kept."
+                  layout="row"
+                  button-size="mid"
+                  bare
+                  :busy="deleting"
+                  :error="deleteError"
+                  @confirm="confirmDelete"
+                  @cancel="backOut(doc.id)"
+                />
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
       <div

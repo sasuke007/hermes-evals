@@ -1,15 +1,19 @@
 /**
- * Suites and tasks: list, detail, reload, version history, task detail,
- * task history and task diff, fixture previews. Suites never call a model.
+ * Suites and tasks: list, detail, reload and its per-folder progress, version
+ * history, task detail, task history and task diff, fixture previews, a
+ * version's download. Suites never call a model. Authoring calls are in
+ * ./suites-authoring.ts.
  *
  * Live mode calls the endpoints of plan section 11 through apiGet/apiSend and
  * parses every answer with its shared schema; fixtures mode serves
  * src/fixtures/suites.ts (src/api/README.md).
  */
 import {
+  suiteVersionZipName,
   SuiteDetailSchema,
   SuiteHistoryEntrySchema,
   SuiteListRowSchema,
+  SuiteReloadProgressSchema,
   SuiteReloadResultSchema,
   TablePreviewSchema,
   TaskDetailSchema,
@@ -21,16 +25,23 @@ import type {
   SuiteDetail,
   SuiteHistoryEntry,
   SuiteListRow,
+  SuiteReloadProgress,
   SuiteReloadResult,
   TablePreview,
   TaskDetail,
   TaskDiff,
   TaskVersionEntry,
 } from './types/suites';
-import { apiGet, apiSend } from './client';
+import { API_BASE, apiGet, apiSend } from './client';
 import { apiMode, fixture, hasScenario, notFound, withQuery } from './source';
 import { experimentsOnSuiteFixture, taskUsageFixture } from '@/fixtures/experiments';
 import { withHomeFiles } from '@/fixtures/home';
+import {
+  draftStateFrom,
+  missingFolderRows,
+  reloadProgressFixture,
+  suiteStateForDraft,
+} from '@/fixtures/suites-authoring';
 import {
   fixturePreviewFixture,
   noSuitesFrom,
@@ -44,7 +55,8 @@ import {
   taskHistoryFixture,
 } from '@/fixtures/suites';
 
-const state = () => suiteStateFrom(hasScenario);
+/** The suite state of the active scenarios; a draft conflict implies the newer version on disk. */
+const state = () => suiteStateForDraft(draftStateFrom(hasScenario), suiteStateFrom(hasScenario));
 
 /** One path segment: ids and keys are slugs today, but a segment never splits the path. */
 const seg = (value: string): string => encodeURIComponent(value);
@@ -52,12 +64,16 @@ const suitePath = (id: string): string => `/suites/${seg(id)}`;
 const taskPath = (suiteId: string, key: string): string =>
   `${suitePath(suiteId)}/tasks/${seg(key)}`;
 
-/** GET /suites: one row per suite directory, at its current version. */
+/** GET /suites: one row per suite directory, at its current version, missing folders included. */
 export function listSuites(): Promise<SuiteListRow[]> {
   if (apiMode === 'live') return apiGet('/suites', SuiteListRowSchema.array());
-  return fixture(() => suiteListFixture(noSuitesFrom(hasScenario) ? 'none' : state()), {
-    request: 'GET /api/suites',
-  });
+  return fixture(
+    () => [
+      ...suiteListFixture(noSuitesFrom(hasScenario) ? 'none' : state()),
+      ...(hasScenario('missing-folders') ? missingFolderRows() : []),
+    ],
+    { request: 'GET /api/suites' },
+  );
 }
 
 /** GET /suites/:id: a suite version with its tasks, validity and version selector. */
@@ -93,6 +109,34 @@ export function reloadSuites(path?: string): Promise<SuiteReloadResult> {
     { request: 'POST /api/suites/reload', latencyMs: 1400 },
   );
 }
+
+/**
+ * GET /suites/reload/progress: where each folder of the running Reload all
+ * stands (one load-suites job per folder). The fixture shows the first
+ * folder loading and the rest queued.
+ */
+export function getReloadProgress(): Promise<SuiteReloadProgress> {
+  if (apiMode === 'live') return apiGet('/suites/reload/progress', SuiteReloadProgressSchema);
+  return fixture(
+    () =>
+      reloadProgressFixture(
+        suiteListFixture(noSuitesFrom(hasScenario) ? 'none' : state()).map((r) => r.path),
+      ),
+    { request: 'GET /api/suites/reload/progress' },
+  );
+}
+
+/**
+ * GET /suites/:suite/versions/:n/zip: the version's files as
+ * `<suite>-v<n>.zip` (a plain link, not a fetch). `folder` is the suite's
+ * folder name, the last segment of its path.
+ */
+export function suiteVersionZipUrl(folder: string, versionNumber: number): string {
+  return `${API_BASE}/suites/${seg(folder)}/versions/${versionNumber}/zip`;
+}
+
+/** The download's file name, as the API names it. */
+export { suiteVersionZipName };
 
 /** GET /suites/:id/history: every version of the directory with its changes and experiments. */
 export function getSuiteHistory(id: string): Promise<SuiteHistoryEntry[]> {

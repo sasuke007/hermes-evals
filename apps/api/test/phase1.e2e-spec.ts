@@ -14,7 +14,8 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { INestApplication, INestApplicationContext } from '@nestjs/common';
+import type { INestApplicationContext } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { eq } from 'drizzle-orm';
@@ -73,7 +74,7 @@ describe.skipIf(!SERVER_URL)('Phase 1 on Postgres 17: API and worker', () => {
   let suitesDir: string;
   let pool: pg.Pool;
   let db: NodePgDatabase<typeof schema>;
-  let api: INestApplication;
+  let api: NestExpressApplication;
   let worker: INestApplicationContext;
 
   const admin = async (statement: string) => {
@@ -145,15 +146,18 @@ describe.skipIf(!SERVER_URL)('Phase 1 on Postgres 17: API and worker', () => {
     const { configureApi } = await import('../src/app.setup.js');
     const { WorkerModule } = await import('../src/worker/worker.module.js');
     const { WorkerService } = await import('../src/worker/worker.service.js');
+    const { useVerifierRunner } = await import('../src/scoring/verifier-runner.js');
 
     // Compose order: the API (which migrates) first, then the worker.
-    api = await NestFactory.create(AppModule, { logger: false });
+    api = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false });
     configureApi(api);
     await api.init();
     // Never the Compose database: the guard against a .env winning.
     expect(api.get(ConfigService<Env, true>).get('DATABASE_URL', { infer: true })).toBe(url);
 
     worker = await NestFactory.createApplicationContext(WorkerModule, { logger: false });
+    // No docker-guard here: verifiers run as subprocesses, which only tests may choose (R7).
+    useVerifierRunner(null);
     await worker.init();
     // The start-up load ran on an empty SUITES_DIR; the suite is added after it.
     expect(await worker.get<WorkerService>(WorkerService).startupLoadSettled()).toEqual({
@@ -333,7 +337,10 @@ describe.skipIf(!SERVER_URL)('Phase 1 on Postgres 17: API and worker', () => {
       expect(diff.prompt).toContainEqual(
         expect.objectContaining({ kind: 'added', text: 'Round to the cent.' }),
       );
-      expect(diff.files.filter((f) => f.change !== 'unchanged')).toEqual([]);
+      // Root files are recorded (task_root_files), so the diff lists the edited prompt.
+      expect(diff.files.filter((f) => f.change !== 'unchanged')).toEqual([
+        expect.objectContaining({ path: 'prompt.md', change: 'changed' }),
+      ]);
     }, 120_000);
 
     it('revert → reverted', async () => {

@@ -1,8 +1,10 @@
 /**
  * Skills and documents on a real Postgres 17 through node-postgres, for what
  * PGlite cannot show: two confirms of the same name and version racing on
- * separate connections (exactly one wins, the other hears 409), and the
- * column types and array queries the services rely on.
+ * separate connections (exactly one wins, the other hears 409), the column
+ * types and array queries the services rely on, and a delete racing a
+ * configuration saved with the resource (migration 0009's guard, as
+ * node-postgres reports it, becomes the 409 that names the configuration).
  *
  *   TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e
  */
@@ -10,7 +12,8 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HttpException } from '@nestjs/common';
-import { DocumentRowSchema, SkillRowSchema } from '@hermes-evals/shared';
+import { DocumentRowSchema, ResourceInUseBodySchema, SkillRowSchema } from '@hermes-evals/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,6 +21,7 @@ import { runMigrations } from '../../database/migrator.js';
 import * as schema from '../../database/schema/index.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { DocumentsService } from '../documents/documents.service.js';
+import { deleteUnused } from './configuration-links.js';
 import { SkillUploadStore } from './skill-uploads.js';
 import { SkillsService } from './skills.service.js';
 import {
@@ -118,5 +122,48 @@ describe.skipIf(!SERVER_URL)('skills and documents on Postgres 17', () => {
     ]);
     expect(await skills.count()).toBe(2);
     expect(await documents.count()).toBe(1);
+  });
+
+  it('deletes an unused document and refuses one a configuration version names', async () => {
+    const unused = await documents.upload(
+      await uploadedFile(storage, '# terms\n', 'unused.md', 'text/markdown'),
+    );
+    await documents.remove(unused.id);
+    expect((await documents.list()).some((d) => d.id === unused.id)).toBe(false);
+
+    const kept = await documents.upload(
+      await uploadedFile(storage, '# kept\n', 'kept.md', 'text/markdown'),
+    );
+    await seedConfiguration(db, 'e2e-keeps', [{ documentIds: [kept.id] }, {}]);
+    const refused = await documents.remove(kept.id).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(refused).toBeInstanceOf(HttpException);
+    expect(ResourceInUseBodySchema.parse((refused as HttpException).getResponse())).toMatchObject({
+      statusCode: 409,
+      usedBy: [{ name: 'e2e-keeps' }],
+    });
+  });
+
+  it('turns the guard of a configuration saved meanwhile into the same 409', async () => {
+    const doc = await documents.upload(
+      await uploadedFile(storage, '# late\n', 'late.md', 'text/markdown'),
+    );
+    const attempt = deleteUnused(
+      db,
+      { column: 'documentIds', id: doc.id, what: 'document late.md' },
+      async () => {
+        await seedConfiguration(db, 'e2e-late', [{ documentIds: [doc.id] }]);
+        const gone = await db
+          .delete(schema.documents)
+          .where(eq(schema.documents.id, doc.id))
+          .returning({ id: schema.documents.id });
+        return gone.length > 0;
+      },
+    );
+    await expect(attempt).rejects.toMatchObject({
+      response: { statusCode: 409, usedBy: [{ name: 'e2e-late' }] },
+    });
   });
 });

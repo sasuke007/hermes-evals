@@ -221,7 +221,15 @@ describe('tasks', () => {
       { path: 'total_due', kind: 'changed', before: 48213.65, after: 48526.05 },
     ]);
     expect(diff.prompt.filter((l) => l.kind !== 'same')).toHaveLength(2);
-    expect(diff.files[0]).toMatchObject({ path: 'fixtures/invoices.csv', change: 'changed' });
+    // task.yaml, prompt.md and reference.json come first, with their recorded sizes and hashes.
+    expect(diff.files.map((f) => f.path).slice(0, 3)).toEqual([
+      'task.yaml',
+      'prompt.md',
+      'reference.json',
+    ]);
+    expect(diff.files.find((f) => f.path === 'fixtures/invoices.csv')).toMatchObject({
+      change: 'changed',
+    });
     const unchanged = await getTaskHistory(SUITE_V2_ID, 'dup_invoices');
     expect(unchanged).toHaveLength(1);
   });

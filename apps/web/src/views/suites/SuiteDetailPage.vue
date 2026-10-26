@@ -1,33 +1,45 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { errorMessage } from '@/api/client';
+import { suiteVersionZipName, suiteVersionZipUrl } from '@/api/suites';
 import type { SuiteHistoryEntry } from '@/api/types/suites';
 import PageContainer from '@/components/layout/PageContainer.vue';
+import ActionMenu, { type ActionMenuItem } from '@/components/suites/ActionMenu.vue';
+import DraftChip from '@/components/suites/DraftChip.vue';
+import DuplicateTaskDialog from '@/components/suites/DuplicateTaskDialog.vue';
 import ReloadFailedBanner from '@/components/suites/ReloadFailedBanner.vue';
 import ReloadIcon from '@/components/suites/ReloadIcon.vue';
 import SuiteHistoryPanel from '@/components/suites/SuiteHistoryPanel.vue';
 import SuiteTaskTable from '@/components/suites/SuiteTaskTable.vue';
 import SuiteVersionSelect from '@/components/suites/SuiteVersionSelect.vue';
 import { reloadLine } from '@/components/suites/suiteFormat';
+import { useDraftActions } from '@/components/suites/useDraftActions';
 import BaseTag from '@/components/ui/BaseTag.vue';
 import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import type { BreadcrumbItem } from '@/components/ui/types';
 import { formatDateTime, shortHash, plural } from '@/lib/format';
 import { ROUTE_NAMES } from '@/router';
+import { useSuiteAuthoringStore } from '@/stores/suites-authoring';
 import { useSuitesStore } from '@/stores/suites';
+import { folderOf } from './authoringRoutes';
 
 /**
  * One suite version (SuiteDetail, SuiteDetailStates boards; UI_FLOWS 8.2; Flow D step 3):
  * its tasks with validity, a failed self-check expanded in place, the version selector and
- * the History panel. An older version is read-only and says so, with the way back to the
- * current one; only the current version reloads from disk.
+ * the History panel, under the suite's description (which names its recommended
+ * experiment). An older version is read-only and says so, with the way back to the current
+ * one; only the current version reloads from disk or is edited. Add task, Edit details and a
+ * row's Edit, Duplicate and Remove start the suite's draft (Phase 5b); Download .zip saves
+ * the files of the version on screen.
  */
 const props = defineProps<{ suiteId: string }>();
 
 const store = useSuitesStore();
+const authoring = useSuiteAuthoringStore();
 const router = useRouter();
+onMounted(() => void authoring.loadDrafts());
 
 const error = ref<string | null>(null);
 const historyError = ref<string | null>(null);
@@ -107,6 +119,26 @@ function openVersion(id: string): void {
   void router.push({ name: ROUTE_NAMES.suite, params: { id } });
 }
 
+const folder = computed(() => (suite.value ? folderOf(suite.value.path) : ''));
+const draft = computed(() => (folder.value ? authoring.draftOf(folder.value) : null));
+const actions = useDraftActions(() => folder.value);
+const duplicateOpen = ref(false);
+
+const ADD_TASK_ITEMS: ActionMenuItem[] = [
+  { key: 'blank', label: 'Blank task' },
+  { key: 'duplicate', label: 'Duplicate a task…' },
+  { key: 'import', label: 'Import from CSV or JSONL' },
+];
+function addTask(item: string): void {
+  if (item === 'blank') void actions.blankTask();
+  else if (item === 'import') void actions.importTasks();
+  else duplicateOpen.value = true;
+}
+
+const zipName = computed(() =>
+  suite.value ? suiteVersionZipName(folder.value, suite.value.versionNumber) : '',
+);
+
 async function reload(): Promise<void> {
   const s = suite.value;
   if (!s) return;
@@ -144,6 +176,7 @@ async function reload(): Promise<void> {
           <span class="text-text-2" data-testid="task-count"
             >{{ plural(suite.taskCount, 'task') }} · {{ suite.validCount }} valid</span
           >
+          <DraftChip v-if="draft && !isOld" :draft="draft" />
         </template>
         <template #meta>
           <p class="text-12 text-text-3" data-testid="suite-strip">
@@ -157,9 +190,70 @@ async function reload(): Promise<void> {
             >
             <span v-if="reloadNote" role="status"> · {{ reloadNote }}</span>
           </p>
+          <p
+            v-if="suite.description"
+            class="max-w-900 text-text-2 whitespace-pre-line"
+            data-testid="suite-description"
+          >
+            {{ suite.description }}
+          </p>
         </template>
         <template #actions>
-          <!-- Phase 5b adds "Add task", "Edit details" and "Download .zip" here. -->
+          <template v-if="!isOld">
+            <ActionMenu
+              :items="ADD_TASK_ITEMS"
+              label="Add task"
+              align="right"
+              data-testid="add-task"
+              @select="addTask"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.25"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Add task
+              <span class="text-text-3" aria-hidden="true">▾</span>
+            </ActionMenu>
+            <button
+              type="button"
+              class="btn"
+              :disabled="actions.busy.value !== null"
+              data-testid="edit-details"
+              @click="actions.editDetails()"
+            >
+              Edit details
+            </button>
+          </template>
+          <a
+            class="btn"
+            :href="suiteVersionZipUrl(folder, suite.versionNumber)"
+            :download="zipName"
+            :title="`Downloads ${zipName}, the files of the version on screen`"
+            data-testid="download-zip"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.25"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 15V3M7 10l5 5 5-5M5 21h14" />
+            </svg>
+            Download .zip
+          </a>
           <button
             v-if="!isOld"
             type="button"
@@ -173,6 +267,14 @@ async function reload(): Promise<void> {
           </button>
         </template>
       </PageHeader>
+
+      <ErrorBanner
+        v-if="actions.error.value"
+        :title="`Could not start a draft of ${suite.name}`"
+        :detail="actions.error.value"
+        hint="Nothing on disk changed."
+        data-testid="draft-action-error"
+      />
 
       <ErrorBanner
         v-if="error"
@@ -284,6 +386,15 @@ async function reload(): Promise<void> {
         :suite-id="suite.suiteId"
         :tasks="suite.tasks"
         :changed-keys="changedKeys"
+        :editable="!isOld"
+        @edit="actions.editTask"
+        @duplicate="actions.duplicateTask"
+        @remove="actions.removeTask"
+      />
+      <DuplicateTaskDialog
+        v-model:open="duplicateOpen"
+        :keys="suite.tasks.map((t) => t.key)"
+        @duplicate="actions.duplicateTask"
       />
 
       <ErrorBanner

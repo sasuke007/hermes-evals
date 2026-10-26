@@ -98,6 +98,8 @@ describe('usage', () => {
         verdict: null,
         verdictReason: null,
         baselinePassRate: null,
+        taskCount: 1,
+        delta: null,
       },
     ]);
 
@@ -114,6 +116,9 @@ describe('usage', () => {
         verdict: 'not_computable',
         verdictReason: 'too_few_tasks',
         baselinePassRate: 0.5,
+        // For "No interval (1 task)"; the provisional Δ is 1 − 0.5 on the one task.
+        taskCount: 1,
+        delta: 0.5,
       }),
     ]);
 

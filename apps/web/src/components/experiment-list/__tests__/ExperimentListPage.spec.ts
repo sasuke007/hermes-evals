@@ -2,10 +2,16 @@
  * The Experiment list in each designed state (ExperimentList board, ExperimentStates list
  * frames), from fixtures: the rows with their chips, filters in the URL, loading, first-load
  * and refresh errors, empty (with and without a model), the setup cards, and live polling.
+ *
+ * Every page is unmounted after its test, and stores are read from the page's own Pinia.
+ * Pinia makes a store's Pinia the active one whenever one of its actions runs, so a page left
+ * mounted by an earlier test, polling refreshList() every 5 s, could make `useXStore()` (no
+ * argument) return that dead page's store under load, and the test then changed the wrong
+ * store: the Phase 6b flake of "refresh error" (open question 13), and of the API-key card.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
-import { createPinia, getActivePinia, setActivePinia } from 'pinia';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import * as experimentsApi from '@/api/experiments';
 import { newExperimentOptionsFixture } from '@/fixtures/experiments';
@@ -16,13 +22,17 @@ import { useProvidersStore } from '@/stores/providers';
 import ExperimentListPage from '@/views/experiments/ExperimentListPage.vue';
 
 let router: Router;
+/** The Pinia of the page the test mounted last. */
+let pinia: Pinia;
+/** Every page mounted, unmounted after each test so no poll outlives it. */
+const mounted: VueWrapper[] = [];
 
 async function mountPage(path = '/experiments') {
-  const pinia = createPinia();
+  pinia = createPinia();
   setActivePinia(pinia);
   router = createRouter({ history: createMemoryHistory(), routes });
   await router.push(path);
-  const providers = useProvidersStore();
+  const providers = useProvidersStore(pinia);
   // Under `loading` every fixture stays pending, the providers too.
   if (new URLSearchParams(window.location.search).get('scenario') === 'loading') {
     void providers.load();
@@ -33,6 +43,7 @@ async function mountPage(path = '/experiments') {
     global: { plugins: [pinia, router] },
     attachTo: document.body,
   });
+  mounted.push(w);
   await flushPromises();
   return w;
 }
@@ -47,6 +58,7 @@ const rowNamed = (w: Awaited<ReturnType<typeof mountPage>>, name: string) => {
 
 beforeEach(() => useScenario(null));
 afterEach(() => {
+  while (mounted.length) mounted.pop()!.unmount();
   vi.useRealTimers();
   vi.restoreAllMocks();
   document.body.innerHTML = '';
@@ -244,7 +256,7 @@ describe('ExperimentListPage', () => {
   it('refresh error: keeps the last rows under a banner with their time', async () => {
     const w = await mountPage();
     useScenario('error');
-    await useExperimentsStore().loadList();
+    await useExperimentsStore(pinia).loadList();
     await flushPromises();
     const alert = w.get('[role="alert"]');
     expect(alert.text()).toContain('Could not refresh experiments');
@@ -270,6 +282,7 @@ describe('ExperimentListPage', () => {
     const first = await mountPage();
     expect(first.text()).toContain('1 suite loaded · 0 configurations');
     first.unmount();
+    mounted.splice(mounted.indexOf(first), 1);
     // Flow A: the user went to Configurations and made the baseline and the candidate.
     const options = await experimentsApi.getNewExperimentOptions();
     const made = newExperimentOptionsFixture(() => false).configurations.slice(0, 2);
@@ -278,9 +291,10 @@ describe('ExperimentListPage', () => {
       configurations: made,
     });
     const again = mount(ExperimentListPage, {
-      global: { plugins: [getActivePinia()!, router] },
+      global: { plugins: [pinia, router] },
       attachTo: document.body,
     });
+    mounted.push(again);
     await flushPromises();
     expect(again.text()).toContain('1 suite loaded · 2 configurations');
   });
@@ -305,7 +319,7 @@ describe('ExperimentListPage', () => {
 
   it('only an API-key provider without its key: the .env step instead of Connect', async () => {
     const w = await mountPage();
-    const providers = useProvidersStore();
+    const providers = useProvidersStore(pinia);
     providers.providers = providers.providers.map((p) =>
       p.id === 'nous'
         ? { ...p, usedBy: [] }
@@ -328,22 +342,22 @@ describe('ExperimentListPage', () => {
   it('polls every 5 s while an experiment runs', async () => {
     vi.useFakeTimers();
     const w = await mountPage();
-    const store = useExperimentsStore();
+    const store = useExperimentsStore(pinia);
     const spy = vi.spyOn(store, 'refreshList');
     await vi.advanceTimersByTimeAsync(LIST_POLL_INTERVAL_MS);
     expect(spy).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(LIST_POLL_INTERVAL_MS);
     expect(spy).toHaveBeenCalledTimes(2);
-    w.unmount();
+    expect(w.find('h1').exists()).toBe(true);
   });
 
   it('does not poll when nothing runs', async () => {
     useScenario('empty');
     vi.useFakeTimers();
     const w = await mountPage();
-    const spy = vi.spyOn(useExperimentsStore(), 'refreshList');
+    const spy = vi.spyOn(useExperimentsStore(pinia), 'refreshList');
     await vi.advanceTimersByTimeAsync(LIST_POLL_INTERVAL_MS * 3);
     expect(spy).not.toHaveBeenCalled();
-    w.unmount();
+    expect(w.find('h1').exists()).toBe(true);
   });
 });

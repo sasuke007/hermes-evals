@@ -316,7 +316,8 @@ describe('getComparison', () => {
     expect(running.statistics?.verdict).toBe('provisional');
     const multi = await getComparison(EXPERIMENT_IDS.skillMcp);
     expect(multi.candidates.map((o) => [o.configuration.name, o.verdict])).toEqual([
-      ['with-skill', 'better'],
+      // Both provisional while it runs, as the API answers (Phase 5 #20).
+      ['with-skill', 'provisional'],
       ['with-mcp', 'provisional'],
     ]);
     const second = await getComparison(EXPERIMENT_IDS.skillMcp, {

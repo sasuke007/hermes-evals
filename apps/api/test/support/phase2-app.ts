@@ -14,7 +14,7 @@
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { asc, eq } from 'drizzle-orm';
@@ -123,7 +123,7 @@ export class Phase2World {
   readonly database: string;
   readonly scripts = new TrialScripts();
   readonly nous = new FakeNousLogin();
-  api!: INestApplication;
+  api!: NestExpressApplication;
   db!: Db;
   pool!: pg.Pool;
   engine!: FakeEngine;
@@ -214,7 +214,7 @@ export class Phase2World {
 
     const { AppModule } = await import('../../src/app.module.js');
     const { configureApi } = await import('../../src/app.setup.js');
-    this.api = await NestFactory.create(AppModule, { logger: false });
+    this.api = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false });
     configureApi(this.api);
     // Listening, so the SSE client can connect; supertest uses the same server.
     await this.api.listen(0, '127.0.0.1');
@@ -257,6 +257,9 @@ export class Phase2World {
   async stop(): Promise<void> {
     for (const worker of this.workers) await worker.close().catch(() => {});
     await this.api?.close();
+    // pool.end() resolves before its clients' sockets close; the forced drop below can end
+    // one mid-close, and the pool reports that as an error of an idle client.
+    this.pool?.on('error', () => {});
     await this.pool?.end();
     await this.nous.close().catch(() => {});
     await admin(this.serverUrl, `drop database if exists ${this.database} with (force)`);

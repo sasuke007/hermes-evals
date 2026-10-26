@@ -306,11 +306,10 @@ describe('the expected home', () => {
       'schema_invalid',
       'task.yaml#self_check.expected_home',
     ]);
-    // The schema refuses home/ itself, and the loader does not say it again; with no
-    // usable expected home, the home file_check has nothing to be proven on.
+    // The schema refuses home/ itself, and the loader does not say it again; the home
+    // file_check then has nothing to be proven on, but one cause gets one error (Phase 6 #8).
     expect(brief((await at('home')).issues)).toEqual([
       ['error', 'schema_invalid', 'task.yaml#self_check.expected_home'],
-      ['error', 'self_check_unsupported', 'task.yaml#verification[1]'],
     ]);
     expect(brief((await at('missing')).issues)).toEqual([
       ['error', 'file_missing', 'task.yaml#self_check.expected_home'],

@@ -319,13 +319,86 @@ describe('taskHistory and taskDiff', () => {
     expect(diff.reference).toEqual([
       { path: 'total_due', kind: 'changed', before: 48213.65, after: 48526.05 },
     ]);
+    // Loaded before Phase 5b: task.yaml and prompt.md measured from their text, no reference.json.
     expect(diff.files.map((f) => [f.path, f.change])).toEqual([
+      ['task.yaml', 'unchanged'],
+      ['prompt.md', 'changed'],
       ['fixtures/invoices.csv', 'changed'],
       ['verify/check.py', 'unchanged'],
     ]);
-    expect(diff.files[0]!.after).toEqual({
+    expect(diff.files[1]!.after).toEqual({
+      sizeBytes: Buffer.byteLength(t3.prompt!),
+      sha256: hash(t3.prompt!),
+    });
+    expect(diff.files[2]!.after).toEqual({
       sizeBytes: CSV.length + 'INV-3,1.00\n'.length,
       sha256: hash(`${CSV}INV-3,1.00\n`),
     });
+    expect(diff.textFiles).toEqual([]);
+  });
+
+  it('lists the recorded root files first and line-diffs a changed small text file', () => {
+    const record = (path: 'task.yaml' | 'prompt.md' | 'reference.json', content: string) => ({
+      path,
+      sha256: hash(content),
+      size: Buffer.byteLength(content),
+    });
+    const before = [
+      record('task.yaml', TOTAL_DUE_YAML),
+      record('prompt.md', t2.prompt!),
+      record('reference.json', '{ "total_due": 48213.65 }\n'),
+    ];
+    const after = [
+      record('task.yaml', TOTAL_DUE_YAML),
+      record('prompt.md', t3.prompt!),
+      record('reference.json', '{ "total_due": 48526.05 }\n'),
+    ];
+    const next = `${CSV}INV-3,1.00\n`;
+    const diff = TaskDiffSchema.parse(
+      taskDiff(rows[1]!, rows[2]!, {
+        rootFrom: before,
+        rootTo: after,
+        texts: new Map([
+          [hash(CSV), CSV],
+          [hash(next), next],
+        ]),
+      }),
+    );
+    expect(diff.files.map((f) => [f.path, f.change])).toEqual([
+      ['task.yaml', 'unchanged'],
+      ['prompt.md', 'changed'],
+      ['reference.json', 'changed'],
+      ['fixtures/invoices.csv', 'changed'],
+      ['verify/check.py', 'unchanged'],
+    ]);
+    expect(diff.files[2]!.before).toEqual({ sizeBytes: 26, sha256: before[2]!.sha256 });
+    expect(diff.textFiles).toEqual([
+      {
+        path: 'fixtures/invoices.csv',
+        lines: expect.arrayContaining([
+          { kind: 'added', text: 'INV-3,1.00', oldLine: null, newLine: expect.any(Number) },
+        ]),
+      },
+    ]);
+    expect(diff.textFiles[0]!.lines.filter((l) => l.kind !== 'same')).toHaveLength(1);
+  });
+
+  it('leaves a binary or oversized changed file out of the line diffs', () => {
+    const next = `${CSV}INV-3,1.00\n`;
+    const binary = taskDiff(rows[1]!, rows[2]!, {
+      texts: new Map([
+        [hash(CSV), CSV],
+        [hash(next), null],
+      ]),
+    });
+    expect(binary.textFiles).toEqual([]);
+    const big = 'x'.repeat(64 * 1024 + 1);
+    const large = taskDiff(rows[1]!, placed(t3, s3, big), {
+      texts: new Map([
+        [hash(CSV), CSV],
+        [hash(big), big],
+      ]),
+    });
+    expect(large.textFiles).toEqual([]);
   });
 });

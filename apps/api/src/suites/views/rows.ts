@@ -4,12 +4,19 @@
  */
 import type { TaskLimits } from '@hermes-evals/shared';
 import { parse } from 'yaml';
-import type { suiteSources, suites, taskFiles, tasks } from '../../database/schema/index.js';
+import type {
+  suiteSources,
+  suites,
+  taskFiles,
+  taskRootFiles,
+  tasks,
+} from '../../database/schema/index.js';
 
 export type SuiteRow = typeof suites.$inferSelect;
 export type SourceRow = typeof suiteSources.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type TaskFileRow = typeof taskFiles.$inferSelect;
+export type TaskRootFileRow = typeof taskRootFiles.$inferSelect;
 
 /**
  * A task's limits as the views show them: the stored limits, else whatever

@@ -16,6 +16,8 @@ export const QUEUES = {
   evaluateRunDead: 'evaluate-run-dead',
   testMcpServer: 'test-mcp-server',
   loadSuites: 'load-suites',
+  selfCheckDraft: 'self-check-draft',
+  saveSuiteDraft: 'save-suite-draft',
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
@@ -54,6 +56,27 @@ export type TestMcpServerJob =
  */
 export interface LoadSuitesJob {
   path: string | null;
+}
+
+/**
+ * Self-check one task of a suite draft (plan 4.6): the worker writes it from
+ * its blobs into scratch and runs the loader's own task self-check, then
+ * records the result on the draft task. `contentHash` is the task's hash the
+ * request saw; the result is recorded with the hash the worker read.
+ */
+export interface SelfCheckDraftJob {
+  draftTaskId: string;
+  contentHash: string;
+}
+
+/**
+ * Save a suite draft as the folder's next version (plan 4.6's five steps).
+ * `claim` is the draft's save_started_at the API set, as an ISO time: the
+ * worker acts only on the save it was sent for.
+ */
+export interface SaveSuiteDraftJob {
+  draftId: string;
+  claim: string;
 }
 
 /** Longest run budget a task or configuration may set, in seconds. */
@@ -99,6 +122,13 @@ export const MAX_LOAD_SELF_CHECK_SECONDS = 3600;
  * directories, and slack.
  */
 export const LOAD_SUITES_EXPIRE_SECONDS = MAX_LOAD_SELF_CHECK_SECONDS + 600;
+
+/**
+ * How long a self-check-draft or save-suite-draft job may stay active: like
+ * a load of one directory, its self-checks are bounded by
+ * MAX_LOAD_SELF_CHECK_SECONDS, plus writing the folder and slack.
+ */
+export const DRAFT_JOB_EXPIRE_SECONDS = LOAD_SUITES_EXPIRE_SECONDS;
 
 const DAY = 86_400;
 
@@ -203,10 +233,39 @@ export const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
       deleteAfterSeconds: DAY,
     },
   },
+  {
+    // Key: draftSelfCheckKey, so a second click on the same content waits on
+    // the live check. retryLimit 0: the user runs it again.
+    name: QUEUES.selfCheckDraft,
+    options: {
+      policy: 'exclusive',
+      retryLimit: 0,
+      expireInSeconds: DRAFT_JOB_EXPIRE_SECONDS,
+      heartbeatSeconds: 30,
+      deleteAfterSeconds: DAY,
+    },
+  },
+  {
+    // Key: the draft id. The API claims the draft (save_started_at) before it
+    // sends, so one save runs per draft; retryLimit 0, because a save that
+    // failed half way is the user's to retry, from a draft the worker kept.
+    name: QUEUES.saveSuiteDraft,
+    options: {
+      policy: 'exclusive',
+      retryLimit: 0,
+      expireInSeconds: DRAFT_JOB_EXPIRE_SECONDS,
+      heartbeatSeconds: 30,
+      deleteAfterSeconds: DAY,
+    },
+  },
 ];
 
 /** Singleton key of an execute-run job: one live token per run attempt. */
 export const executeRunKey = (runId: string, attempt: number): string => `${runId}:${attempt}`;
+
+/** Singleton key of a self-check-draft job: one live check per draft task content. */
+export const draftSelfCheckKey = (job: SelfCheckDraftJob): string =>
+  `${job.draftTaskId}:${job.contentHash}`;
 
 /** Singleton key of a load-suites job: the directory, or `*` for all of them. */
 export const loadSuitesKey = (job: LoadSuitesJob): string => job.path ?? '*';

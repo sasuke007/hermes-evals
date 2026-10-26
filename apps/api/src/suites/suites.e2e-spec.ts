@@ -63,7 +63,10 @@ describe.skipIf(!SERVER_URL)('suites API on Postgres 17', () => {
     }
   };
 
-  /** The stand-in worker: answers load-suites with a fixed result after a second. */
+  /**
+   * The stand-in worker: answers load-suites after a second, a Reload all's
+   * scan (`path: null`) with one directory, a directory with a fixed result.
+   */
   const startWorking = () =>
     worker.work<LoadSuitesJob>(
       QUEUES.loadSuites,
@@ -73,6 +76,9 @@ describe.skipIf(!SERVER_URL)('suites API on Postgres 17', () => {
         handled.push(job.data);
         // Long enough for a second request to find this job still active.
         await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (job.data.path === null) {
+          return { at: new Date().toISOString(), missing: [], directories: ['invoices-v1'] };
+        }
         return {
           at: new Date().toISOString(),
           suites: [
@@ -186,7 +192,7 @@ describe.skipIf(!SERVER_URL)('suites API on Postgres 17', () => {
     expect(versions.map((v) => v.version)).toEqual([2, 1]);
   });
 
-  it('reloads through the worker; two requests while it is queued share one job', async () => {
+  it('reloads through the worker; two requests while it is queued share one pass', async () => {
     // Paused, so the job is still created (nothing read yet) when the second request looks.
     await worker.offWork(QUEUES.loadSuites);
     const a = http()
@@ -206,7 +212,8 @@ describe.skipIf(!SERVER_URL)('suites API on Postgres 17', () => {
     const [ra, rb] = await Promise.all([a, b]);
     expect(SuiteReloadResultSchema.parse(ra.body)).toEqual(SuiteReloadResultSchema.parse(rb.body));
     expect(ra.body.suites[0].suiteId).toBe(seed.v2.id);
-    expect(handled).toEqual([{ path: null }]);
+    // One pass: the scan, then one job for the directory (Phase 4 question 9).
+    expect(handled).toEqual([{ path: null }, { path: 'invoices-v1' }]);
   }, 30_000);
 
   it('does not join a reload that is already running: a request then gets a pass of its own', async () => {
@@ -227,6 +234,11 @@ describe.skipIf(!SERVER_URL)('suites API on Postgres 17', () => {
       .expect(200)
       .then((res) => res);
     await Promise.all([first, second]);
-    expect(handled).toEqual([{ path: null }, { path: null }]);
+    expect(handled).toEqual([
+      { path: null },
+      { path: 'invoices-v1' },
+      { path: null },
+      { path: 'invoices-v1' },
+    ]);
   }, 30_000);
 });

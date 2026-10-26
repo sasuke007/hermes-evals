@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
+import { errorMessage } from '@/api/client';
 import { skillZipUrl } from '@/api/resources';
 import BaseDrawer from '@/components/ui/BaseDrawer.vue';
 import BaseTag from '@/components/ui/BaseTag.vue';
 import CodeBlock from '@/components/ui/CodeBlock.vue';
+import ConfirmInline from '@/components/ui/ConfirmInline.vue';
 import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import SkeletonRows from '@/components/ui/SkeletonRows.vue';
 import { formatDateTime, shortHash, formatBytes, plural } from '@/lib/format';
@@ -20,6 +22,12 @@ import SkillFileView from './SkillFileView.vue';
  * tree and the file it selects: SKILL.md (front matter as written, then its Markdown) by
  * default, any other file as SkillFileView draws it. Route-backed by the page (?skill=,
  * ?file=); Esc, × or the scrim close it.
+ *
+ * Delete (Phase 5 section 6.1) sits beside Download zip, as the board draws it: disabled with
+ * "Used by 1 configuration. Remove it from with-skill first." while a configuration's latest
+ * version uses the skill. Otherwise it asks in place (ConfirmInline under the header) and, once
+ * deleted, closes the panel. The API also refuses a skill an older configuration version keeps
+ * (409); the confirmation then stays open with its sentence.
  */
 const props = defineProps<{ skillId: string; file: string | null }>();
 const emit = defineEmits<{ 'update:file': [path: string | null]; close: [] }>();
@@ -47,6 +55,44 @@ watch(
 );
 const fileEntry = computed(() =>
   isSkillMd.value ? null : store.skillFile(props.skillId, current.value),
+);
+
+// ── Delete ────────────────────────────────────────────────────────────────
+const confirming = ref(false);
+const deleting = ref(false);
+const deleteError = ref<string | null>(null);
+const deleteButton = ref<HTMLButtonElement | null>(null);
+/** Why Delete is disabled: the board's tooltip, for the configurations "Used by" names. */
+const deleteReason = computed(() => {
+  const used = detail.value?.usedBy ?? [];
+  if (used.length === 0) return null;
+  const names = used.map((c) => c.name).join(', ');
+  return `Used by ${used.length} ${used.length === 1 ? 'configuration' : 'configurations'}. Remove it from ${names} first.`;
+});
+
+async function confirmDelete(): Promise<void> {
+  deleting.value = true;
+  deleteError.value = null;
+  try {
+    await store.deleteSkill(props.skillId);
+    emit('close');
+  } catch (err) {
+    deleteError.value = errorMessage(err);
+  } finally {
+    deleting.value = false;
+  }
+}
+async function backOut(): Promise<void> {
+  deleteError.value = null;
+  await nextTick();
+  deleteButton.value?.focus();
+}
+watch(
+  () => props.skillId,
+  () => {
+    confirming.value = false;
+    deleteError.value = null;
+  },
 );
 
 const depth = (path: string): number => path.split('/').length - 1;
@@ -108,6 +154,19 @@ function pick(path: string): void {
             >Download zip</a
           >
           <button
+            v-if="detail"
+            ref="deleteButton"
+            type="button"
+            class="btn sm"
+            :disabled="!!deleteReason || confirming"
+            :title="deleteReason ?? undefined"
+            :aria-description="deleteReason ?? undefined"
+            data-testid="delete-skill"
+            @click="confirming = true"
+          >
+            Delete
+          </button>
+          <button
             type="button"
             class="btn ghost h-28 px-6"
             aria-label="Close"
@@ -126,6 +185,23 @@ function pick(path: string): void {
           </button>
         </div>
       </div>
+      <ConfirmInline
+        v-if="detail"
+        v-model:open="confirming"
+        :class="{ 'mt-12': confirming }"
+        layout="row"
+        button-size="mid"
+        :title="`Delete ${detail.name} ${detail.version}?`"
+        consequence="It leaves the library. No configuration uses it, so no run or experiment changes."
+        confirm-label="Delete skill"
+        cancel-label="Keep it"
+        busy-label="Deleting…"
+        error-title="Could not delete. The skill is kept."
+        :busy="deleting"
+        :error="deleteError"
+        @confirm="confirmDelete"
+        @cancel="backOut"
+      />
     </template>
 
     <div v-if="entry?.error" class="col-span-full p-16">

@@ -12,7 +12,8 @@ import { ROUTE_NAMES } from '@/router';
  * execution errors with their categories and ungradable runs, then the candidate's difference
  * from the baseline. A non-zero error or ungradable count links to the Runs tab filtered to
  * those runs. The sensitivity line under it says what the verdict is without the runs that
- * broke rather than answered.
+ * broke rather than answered. A configuration name longer than its column (200px) ends in an
+ * ellipsis, the whole name on hover, so the table fits its panel (Phase 5 #23).
  */
 const props = defineProps<{ view: ComparisonView }>();
 
@@ -72,7 +73,14 @@ function signedUsd(v: number | null): string {
         </thead>
         <tbody>
           <tr v-for="row in view.secondary" :key="row.configuration.versionId">
-            <td class="font-mono font-semibold">{{ row.configuration.name }}</td>
+            <td class="font-mono font-semibold">
+              <span
+                class="block max-w-200 truncate"
+                :title="row.configuration.name"
+                data-testid="secondary-name"
+                >{{ row.configuration.name }}</span
+              >
+            </td>
             <td class="text-right">{{ formatDuration(row.medianDurationS) }}</td>
             <td class="text-right">{{ formatCount(row.meanTokens) }}</td>
             <td class="text-right">{{ formatUsd(row.costUsd) }}</td>

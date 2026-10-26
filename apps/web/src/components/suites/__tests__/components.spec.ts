@@ -139,16 +139,26 @@ describe('TaskUsagePanel', () => {
       experimentId: 'e1',
       experimentName: 'MCP vs baseline',
       status: 'running',
+      taskVersion: 2,
+      suiteVersion: 5,
       rows: [
         { configuration: 'baseline', role: 'baseline', passRate: 0.25, scored: 4, total: 5 },
         { configuration: 'with-mcp', role: 'candidate', passRate: null, scored: 0, total: 5 },
       ],
     },
   ];
+  const older: TaskExperimentUsage = {
+    experimentId: 'e0',
+    experimentName: 'Skill vs no skill',
+    status: 'completed',
+    taskVersion: 1,
+    suiteVersion: 4,
+    rows: [{ configuration: 'baseline', role: 'baseline', passRate: 1, scored: 3, total: 3 }],
+  };
 
-  it('shows a running experiment with its chip and scored / total', () => {
+  it('shows a running experiment with its chip and scored / total on a task with one version', () => {
     wrapper = mount(TaskUsagePanel, {
-      props: { experiments: usage, version: 2, versioned: true },
+      props: { experiments: usage, version: 2, versioned: false },
       global: { plugins: [router()] },
     });
     const rows = wrapper.findAll('tbody tr');
@@ -156,8 +166,41 @@ describe('TaskUsagePanel', () => {
     expect(flat(rows[0]!.findAll('td')[2]!.text())).toBe('0.25 4 / 5');
     expect(flat(rows[1]!.findAll('td')[2]!.text())).toBe('– 0 / 5');
     expect(rows[1]!.findAll('td')[0]!.text()).toBe('');
-    expect(wrapper.text()).toContain(
-      'Only experiments on task v2 are listed. Results on other versions are not comparable.',
+    expect(wrapper.text()).toContain('Every experiment so far ran on task v2.');
+  });
+
+  it('names the versions each experiment ran, and why they do not compare', () => {
+    wrapper = mount(TaskUsagePanel, {
+      props: {
+        experiments: [...usage, older],
+        version: 2,
+        versioned: true,
+        changedFiles: ['prompt.md', 'reference.json', 'fixtures/invoices.csv'],
+      },
+      global: { plugins: [router()] },
+    });
+    expect(wrapper.text()).toContain('which task version each one ran');
+    const rows = wrapper.findAll('[data-testid="usage-versioned"] tbody tr');
+    expect(rows.map((r) => r.findAll('td').map((td) => flat(td.text())))).toEqual([
+      ['MCP vs baseline running', 'v2', 'v5'],
+      ['Skill vs no skill', 'v1', 'v4'],
+    ]);
+    expect(wrapper.get('[data-testid="usage-note"]').text()).toBe(
+      'Results on v1 and v2 are not comparable: the prompt, the reference answer and the workspace files changed.',
+    );
+  });
+
+  it('says which experiment ran the version on screen, and why an invalid one cannot be chosen', async () => {
+    wrapper = mount(TaskUsagePanel, {
+      props: { experiments: [older], version: 1, versioned: true },
+      global: { plugins: [router()] },
+    });
+    expect(wrapper.get('[data-testid="usage-note"]').text()).toBe(
+      'Skill vs no skill ran on this version.',
+    );
+    await wrapper.setProps({ valid: false, version: 4 });
+    expect(wrapper.get('[data-testid="usage-note"]').text()).toBe(
+      'v4 cannot be selected in a new experiment until its self-check passes. Existing experiments keep the version they ran on.',
     );
   });
 
@@ -190,9 +233,11 @@ describe('VerificationSentence and ZoneLabel', () => {
     ]);
   });
 
-  it('labels what the agent sees and what it never sees', () => {
+  it('labels what the agent sees and what it never sees', async () => {
     wrapper = mount(ZoneLabel, { props: { zone: 'hidden' } });
     expect(wrapper.text()).toBe('Hidden from the agent');
     expect(wrapper.attributes('data-zone')).toBe('hidden');
+    await wrapper.setProps({ zone: 'visible', label: 'Agent sees · prompt.md' });
+    expect(wrapper.text()).toBe('Agent sees · prompt.md');
   });
 });

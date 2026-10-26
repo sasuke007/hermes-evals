@@ -76,6 +76,14 @@ export const SuiteListRowSchema = SuiteVersionRefSchema.extend({
   verificationTypes: z.array(scorerType),
   loadedAt: isoTimeView,
   lastLoad: SuiteLastLoadSchema,
+  /**
+   * The changes that created the current version, against the version
+   * before it: its History row's changes (a v1 lists every task as added).
+   * `lastLoad.changes` is the last reload's, empty after a reload that found
+   * nothing new; this one keeps saying "1 changed: total_due" (Phase 5
+   * section 6.1).
+   */
+  currentChanges: SuiteChangeSetSchema,
 });
 export type SuiteListRow = z.infer<typeof SuiteListRowSchema>;
 
@@ -157,28 +165,6 @@ export const SuiteHistoryEntrySchema = z.object({
   experiments: z.array(z.object({ id: z.string(), name: z.string() })),
 });
 export type SuiteHistoryEntry = z.infer<typeof SuiteHistoryEntrySchema>;
-
-/** The result of reloading one suite directory. */
-export const SuiteReloadEntrySchema = z.object({
-  /** Directory as shown, the same as SuiteListRow.path: `./suites/invoices-v1`. */
-  sourcePath: z.string(),
-  name: z.string(),
-  outcome: loadOutcome,
-  suiteId: z.string().nullable(),
-  versionNumber: z.number().int().positive().nullable(),
-  changes: SuiteChangeSetSchema,
-  /** Result line, e.g. "1 task now invalid: late_fees" or "All self-checks passed". */
-  message: z.string(),
-  error: SuiteLoadErrorViewSchema.nullable(),
-});
-export type SuiteReloadEntry = z.infer<typeof SuiteReloadEntrySchema>;
-
-/** Result of POST /suites/reload, one entry per suite directory. */
-export const SuiteReloadResultSchema = z.object({
-  at: isoTimeView,
-  suites: z.array(SuiteReloadEntrySchema),
-});
-export type SuiteReloadResult = z.infer<typeof SuiteReloadResultSchema>;
 
 /** First rows of a CSV (or other tabular) file. */
 export const TablePreviewSchema = z.object({
@@ -263,11 +249,20 @@ export const TaskSelfCheckViewSchema = z.object({
 });
 export type TaskSelfCheckView = z.infer<typeof TaskSelfCheckViewSchema>;
 
-/** One experiment that included a task, with the task's pass rate per configuration. */
+/**
+ * One experiment that included a task, with the task's pass rate per
+ * configuration. TaskDetail lists the experiments of every version of the
+ * task, so each names the versions it ran: results on different task
+ * versions do not compare.
+ */
 export const TaskExperimentUsageSchema = z.object({
   experimentId: z.string(),
   experimentName: z.string(),
   status: z.enum(EXPERIMENT_STATUSES),
+  /** The task version the experiment ran (`total_due v1`). */
+  taskVersion: z.number().int().positive(),
+  /** The suite version it was launched on (`suite v4`). */
+  suiteVersion: z.number().int().positive(),
   rows: z.array(
     z.object({
       configuration: z.string(),
@@ -310,6 +305,7 @@ export const TaskDetailSchema = z.object({
   }),
   valid: z.boolean(),
   selfCheckFailure: SelfCheckFailureViewSchema.nullable(),
+  /** Experiments that ran any version of this task, newest first. */
   experiments: z.array(TaskExperimentUsageSchema),
 });
 export type TaskDetail = z.infer<typeof TaskDetailSchema>;
@@ -346,6 +342,15 @@ export type JsonDiffEntry = z.infer<typeof JsonDiffEntrySchema>;
 
 const fileVersion = z.object({ sizeBytes: countView, sha256: sha256View }).nullable();
 
+/**
+ * One file of a task diff. The list holds task.yaml, prompt.md and
+ * reference.json first (Phase 5 section 6.1), then every task file by path;
+ * `before` is null for an added file and `after` for a removed one.
+ * The root files' sizes and hashes are those the loader recorded
+ * (task_root_files, from Phase 5b); a version loaded before has none, so its
+ * reference.json is left out of the list (its JSON diff is shown either way)
+ * and its task.yaml and prompt.md are measured from their stored text.
+ */
 export const TaskFileChangeSchema = z.object({
   path: z.string(),
   change: z.enum(['added', 'removed', 'changed', 'unchanged']),
@@ -353,6 +358,18 @@ export const TaskFileChangeSchema = z.object({
   after: fileVersion,
 });
 export type TaskFileChange = z.infer<typeof TaskFileChangeSchema>;
+
+/**
+ * The line diff of one changed text fixture of at most
+ * AUTHORING_LIMITS.textFixtureDiffMaxBytes on both sides, valid UTF-8, such as
+ * `fixtures/policy_terms.json`; larger or binary files show only their size
+ * and hash in `files`.
+ */
+export const TaskTextFileDiffSchema = z.object({
+  path: z.string(),
+  lines: z.array(TextDiffLineSchema),
+});
+export type TaskTextFileDiff = z.infer<typeof TaskTextFileDiffSchema>;
 
 const diffSide = z.object({
   suiteId: z.string(),
@@ -369,21 +386,7 @@ export const TaskDiffSchema = z.object({
   taskYaml: z.array(TextDiffLineSchema),
   reference: z.array(JsonDiffEntrySchema),
   files: z.array(TaskFileChangeSchema),
+  /** Line diffs of the changed small text fixtures, in `files` order. */
+  textFiles: z.array(TaskTextFileDiffSchema),
 });
 export type TaskDiff = z.infer<typeof TaskDiffSchema>;
-
-// ---------------------------------------------------------------------------
-// Requests
-// ---------------------------------------------------------------------------
-
-/** Body of POST /suites/reload. */
-export const SuiteReloadRequestSchema = z.strictObject({
-  /**
-   * One suite directory to reload, as SuiteListRow.path and
-   * SuiteReloadEntry.sourcePath show it (`./suites/invoices-v1`; the bare
-   * directory name is accepted too); every directory under SUITES_DIR when
-   * absent. Matched against the directories on disk, never opened as given.
-   */
-  path: z.string().min(1).optional(),
-});
-export type SuiteReloadRequest = z.infer<typeof SuiteReloadRequestSchema>;

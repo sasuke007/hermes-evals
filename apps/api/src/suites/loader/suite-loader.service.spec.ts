@@ -12,12 +12,16 @@ import { PinoLogger } from 'nestjs-pino';
 import type { PgBoss } from 'pg-boss';
 import { SuiteReloadResultSchema, type SuiteReloadResult } from '@hermes-evals/shared';
 import { DB } from '../../database/db.provider.js';
-import { MAX_LOAD_SELF_CHECK_SECONDS, QUEUES } from '../../queue/queues.js';
+import { QUEUES } from '../../queue/queues.js';
 import { BlobStore } from '../../storage/blob-store.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
-import { handleLoadSuitesJob, registerSuiteLoadHandler } from './load-suites.handler.js';
-import type { LoaderLogger } from './suite-loader.js';
+import {
+  handleLoadSuitesJob,
+  registerSuiteLoadHandler,
+  SuiteScanSchema,
+} from './load-suites.handler.js';
+import type { LoaderLogger, SuiteScan } from './suite-loader.js';
 import { SuiteLoaderService } from './suite-loader.service.js';
 
 const FIXTURES = join(import.meta.dirname, '../../../test/fixtures/suites');
@@ -98,18 +102,17 @@ describe('SuiteLoaderService', () => {
 
 describe('the load-suites handler', () => {
   const result: SuiteReloadResult = { at: '2026-10-24T10:00:00.000Z', suites: [] };
-  const loader = { loadAll: vi.fn(async () => result), loadOne: vi.fn(async () => result) };
+  const scanned: SuiteScan = { at: result.at, missing: [], directories: ['invoices-v1'] };
+  const loader = { scan: vi.fn(async () => scanned), loadOne: vi.fn(async () => result) };
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as LoaderLogger;
 
   beforeEach(() => vi.clearAllMocks());
 
-  it('loads every directory for path null, else the one named', async () => {
-    expect(await handleLoadSuitesJob({ path: null }, loader, logger)).toBe(result);
-    // Every directory shares the one budget of declared self-check time a job has.
-    expect(loader.loadAll).toHaveBeenCalledWith({
-      selfCheckBudgetS: MAX_LOAD_SELF_CHECK_SECONDS,
-    });
-    await handleLoadSuitesJob({ path: 'invoices-v1' }, loader, logger);
+  it('scans for path null (the API then sends one job per directory), else loads the one named', async () => {
+    expect(await handleLoadSuitesJob({ path: null }, loader, logger)).toBe(scanned);
+    expect(SuiteScanSchema.parse(scanned)).toEqual(scanned);
+    expect(loader.loadOne).not.toHaveBeenCalled();
+    expect(await handleLoadSuitesJob({ path: 'invoices-v1' }, loader, logger)).toBe(result);
     expect(loader.loadOne).toHaveBeenCalledWith('invoices-v1');
   });
 
@@ -118,13 +121,14 @@ describe('the load-suites handler', () => {
     await expect(handleLoadSuitesJob({}, loader, logger)).rejects.toThrow();
   });
 
-  it('registers one job at a time on the load-suites queue and returns the result as output', async () => {
+  it('registers one job at a time on the load-suites queue, wakes itself after each, and returns the result as output', async () => {
     let handler: ((jobs: { data: unknown }[]) => Promise<unknown>) | undefined;
     const boss = {
       work: vi.fn(async (_queue: string, _options: unknown, fn: typeof handler) => {
         handler = fn;
         return 'worker-1';
       }),
+      notifyWorker: vi.fn(),
     };
     expect(await registerSuiteLoadHandler(boss as unknown as PgBoss, loader, logger)).toBe(
       'worker-1',
@@ -134,7 +138,12 @@ describe('the load-suites handler', () => {
       { batchSize: 1, localConcurrency: 1 },
       expect.any(Function),
     );
-    expect(await handler!([{ data: { path: null } }])).toBe(result);
+    expect(await handler!([{ data: { path: 'invoices-v1' } }])).toBe(result);
+    // The next job of a Reload all is fetched at once, not after the 2 s poll.
+    expect(boss.notifyWorker).toHaveBeenCalledWith('worker-1');
+    await expect(handler!([{ data: { path: 3 } }])).rejects.toThrow();
+    expect(boss.notifyWorker).toHaveBeenCalledTimes(2);
     expect(await handler!([])).toBeNull();
+    expect(boss.notifyWorker).toHaveBeenCalledTimes(2);
   });
 });

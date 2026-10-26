@@ -209,6 +209,8 @@ describe('running (currency_mix · with-mcp · rep 5)', () => {
     await trigger.trigger('click');
     const group = wrapper.get('[role="group"][aria-label="Cancel this run?"]');
     expect(group.text()).toContain('A cancelled run is not scored');
+    // The title over its long consequence, buttons right (Phase 5 #22).
+    expect(group.attributes('data-layout')).toBe('columns');
     await group
       .findAll('button')
       .find((b) => b.text() === 'Cancel run')!

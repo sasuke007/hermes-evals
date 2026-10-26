@@ -1,39 +1,56 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import type { SuiteListRow } from '@/api/types/suites';
+import ImportSuiteDialog from '@/components/authoring/import/ImportSuiteDialog.vue';
 import PageContainer from '@/components/layout/PageContainer.vue';
+import {
+  draftChipText,
+  hhmm,
+  isMissing,
+  lastChangeOf,
+  lastChangeText,
+  progressLine,
+} from '@/components/suites/authoringFormat';
+import DraftChip from '@/components/suites/DraftChip.vue';
 import ReloadFailedBanner from '@/components/suites/ReloadFailedBanner.vue';
 import ReloadIcon from '@/components/suites/ReloadIcon.vue';
-import {
-  changePhrases,
-  keysText,
-  lastLoadLine,
-  reloadLine,
-  type LoadLine,
-} from '@/components/suites/suiteFormat';
+import { lastLoadLine, reloadLine, type LoadLine } from '@/components/suites/suiteFormat';
 import BaseTag from '@/components/ui/BaseTag.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import type { DataTableColumn } from '@/components/ui/types';
-import { formatDateTime, MISSING, shortHash } from '@/lib/format';
+import { formatDateTime, MISSING, plural, shortHash } from '@/lib/format';
 import { ROUTE_NAMES } from '@/router';
+import { useSuiteAuthoringStore } from '@/stores/suites-authoring';
 import { useSuitesStore } from '@/stores/suites';
+import { draftLocation, folderOf, newSuiteLocation } from './authoringRoutes';
 
 /**
- * Suites (SuiteList, SuiteListStates, LibraryStates boards; UI_FLOWS 8.1 and 8.2): one row
- * per folder under ./suites at its current version, with what the last reload changed and
- * how it went. "Reload all from disk" re-reads every folder and re-runs every self-check;
- * a row's button reloads that folder alone. Suites never call a model, so this page shows
- * no model-access nudge.
+ * Suites (SuiteList, SuiteListStates, LibraryStates boards; SA.1; UI_FLOWS 8.1 and 8.2): one
+ * row per folder under ./suites at its current version, with the changes that created it and
+ * how the last reload went. New suite and Import .zip start a draft; a suite with an open
+ * draft carries a chip that links to it, and new suites not saved yet are listed above the
+ * table. "Reload all from disk" sends one job per folder, and each row shows where its folder
+ * stands; a row's button reloads that folder alone. Folders gone from disk are hidden behind
+ * "Show N missing from disk" (Phase 5 question 16). Suites never call a model, so this page
+ * shows no model-access nudge.
  */
 const store = useSuitesStore();
-onMounted(() => void store.loadList());
+const authoring = useSuiteAuthoringStore();
+onMounted(() => {
+  void store.loadList();
+  void authoring.loadDrafts();
+});
 
 const VISIBLE_TYPES = 3;
+/** The folder format, for a first suite written by hand (no task page exists yet to show it). */
+const FOLDER_FORMAT_URL =
+  'https://github.com/sasuke007/hermes-evals#suites-generators-and-the-sample-skills';
+const importOpen = ref(false);
+const showMissing = ref(false);
 
 const columns: DataTableColumn<SuiteListRow>[] = [
   { key: 'name', label: 'Name', skeleton: 90 },
@@ -47,26 +64,47 @@ const columns: DataTableColumn<SuiteListRow>[] = [
   { key: 'actions', label: '', align: 'right', skeleton: 110 },
 ];
 
+const missing = computed(() => store.list.filter(isMissing));
+const present = computed(() => store.list.filter((row) => !isMissing(row)));
+const rows = computed(() => (showMissing.value ? store.list : present.value));
+const newDrafts = computed(() => authoring.newSuiteDrafts());
+
 const loading = computed(() => !store.listLoaded && !store.listError);
-const empty = computed(() => store.listLoaded && store.list.length === 0 && !store.listError);
-const countLine = computed(() =>
-  store.listLoaded ? `${store.list.length} suite${store.list.length === 1 ? '' : 's'}` : null,
+/** Nothing on disk and no draft: the first-launch state, with missing folders behind the toggle. */
+const empty = computed(
+  () =>
+    store.listLoaded &&
+    present.value.length === 0 &&
+    newDrafts.value.length === 0 &&
+    !store.listError &&
+    !showMissing.value,
 );
+const countLine = computed(() => (store.listLoaded ? plural(present.value.length, 'suite') : null));
 const failedRows = computed(() =>
   store.list.filter((row) => row.lastLoad.outcome === 'error' && row.lastLoad.error),
 );
 
-/** The first change worth naming: what became invalid before what changed. */
-const firstChange = (row: SuiteListRow) => changePhrases(row.lastLoad.changes)[0] ?? null;
-
 function loadLine(row: SuiteListRow): LoadLine {
+  const progress = store.progressFor(row.path);
+  if (progress) return progressLine(progress);
+  // Reload all reads the folders on disk: one it does not list is not being reloaded.
+  if (store.reloadProgress) return lastLoadLine(row);
   if (store.isReloading(row.path))
     return { text: 'Reloading and running self-checks…', problem: false };
   const entry = store.reloadEntryFor(row.path);
   return entry ? reloadLine(entry) : lastLoadLine(row);
 }
 
+/** A row's button reads "Reloading…" only while its own folder loads. */
+function rowBusy(row: SuiteListRow): boolean {
+  const progress = store.progressFor(row.path);
+  if (progress) return progress.state === 'loading';
+  return !store.reloadProgress && store.isReloading(row.path);
+}
+
 const suiteTo = (row: SuiteListRow) => ({ name: ROUTE_NAMES.suite, params: { id: row.suiteId } });
+const draftOf = (row: SuiteListRow) => authoring.draftOf(folderOf(row.path));
+const newSuiteTo = newSuiteLocation;
 const reloadAll = (): void => void store.reload(null);
 const reloadOne = (row: SuiteListRow): void => void store.reload(row.path);
 const retryFailedReload = (): void => void store.reload(store.reloadErrorPath);
@@ -86,11 +124,31 @@ const retryFailedReload = (): void => void store.reload(store.reloadErrorPath);
               stroke-linejoin="round"
             />
           </svg>
-          <span>Suites are folders in <code>./suites</code>. Edit the files and reload.</span>
+          <span
+            >Suites are folders in <code>./suites</code>. Create and edit them here, or edit the
+            files and reload.</span
+          >
         </p>
       </template>
       <template #actions>
-        <!-- Phase 5b adds "New suite" (primary) and "Import .zip" before this button. -->
+        <RouterLink class="btn primary" :to="newSuiteTo" data-testid="new-suite">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.25"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New suite
+        </RouterLink>
+        <button type="button" class="btn" data-testid="import-zip" @click="importOpen = true">
+          Import .zip
+        </button>
         <button
           type="button"
           class="btn"
@@ -124,25 +182,75 @@ const retryFailedReload = (): void => void store.reload(store.reloadErrorPath);
       @retry="reloadOne(row)"
     />
 
-    <EmptyState
-      v-if="empty"
-      title="No suites yet"
-      body="A suite is a set of tasks your agent is tested on: a prompt, input files, a hidden answer and checks."
+    <section
+      v-if="newDrafts.length"
+      aria-label="New suites not saved yet"
+      class="flex flex-col rounded-6 border border-border bg-surface"
+      data-testid="new-suite-drafts"
     >
-      <!-- Phase 5b adds "Create a suite" (primary) and "Import a .zip" here, and the line below starts "Or put"; the board draws both. -->
-      <div class="mt-14 flex flex-wrap items-center justify-center gap-8 text-12 text-text-3">
-        <span>Put a suite folder in <code>./suites</code> and reload.</span>
-        <span
-          class="inline-flex h-28 items-center gap-8 rounded-4 border border-border bg-surface-2 pr-4 pl-10 font-mono text-12 text-text"
-          >./suites<CopyButton text="./suites" label="Copy ./suites"
-        /></span>
+      <div
+        v-for="draft in newDrafts"
+        :key="draft.id"
+        class="flex flex-wrap items-center gap-x-12 gap-y-4 border-b border-border px-14 py-10 last:border-b-0"
+      >
+        <RouterLink :to="draftLocation(draft.folder)" class="font-mono font-semibold text-text">{{
+          draft.name
+        }}</RouterLink>
+        <span class="chip bg-que-soft text-que-text">not saved yet</span>
+        <span class="text-12 text-text-3"
+          >{{ draftChipText(draft) }} · {{ plural(draft.taskCount, 'task') }} · last edited
+          {{ hhmm(draft.updatedAt) }} · <code>{{ draft.path }}</code></span
+        >
+        <RouterLink :to="draftLocation(draft.folder)" class="btn sm ml-auto">Open draft</RouterLink>
       </div>
-    </EmptyState>
+    </section>
+
+    <template v-if="empty">
+      <div
+        class="flex flex-col items-center gap-10 rounded-6 border border-border bg-surface px-24 py-56 text-center"
+        data-testid="suites-empty"
+      >
+        <b class="text-15">No suites yet</b>
+        <p class="max-w-560 text-text-2">
+          A suite is a set of tasks your agent is tested on: a prompt, input files, a hidden answer
+          and checks.
+        </p>
+        <div class="mt-6 flex gap-8">
+          <RouterLink class="btn primary" :to="newSuiteTo">Create a suite</RouterLink>
+          <button type="button" class="btn" @click="importOpen = true">Import a .zip</button>
+        </div>
+        <div class="mt-14 flex flex-wrap items-center justify-center gap-8 text-12 text-text-3">
+          <span>Or put a suite folder in <code>./suites</code> and reload.</span>
+          <span
+            class="inline-flex h-28 items-center gap-8 rounded-4 border border-border bg-surface-2 pr-4 pl-10 font-mono text-12 text-text"
+            >./suites<CopyButton text="./suites" label="Copy ./suites"
+          /></span>
+          <a
+            class="text-12"
+            :href="FOLDER_FORMAT_URL"
+            target="_blank"
+            rel="noopener"
+            data-testid="folder-format"
+            >See the folder format</a
+          >
+        </div>
+      </div>
+      <button
+        v-if="missing.length && !loading"
+        type="button"
+        class="linkbtn self-start text-12"
+        :aria-expanded="showMissing"
+        data-testid="toggle-missing"
+        @click="showMissing = !showMissing"
+      >
+        {{ showMissing ? 'Hide' : 'Show' }} {{ missing.length }} missing from disk
+      </button>
+    </template>
 
     <template v-else>
       <DataTable
         :columns="columns"
-        :rows="store.list"
+        :rows="rows"
         row-key="path"
         :loading="loading"
         :skeleton-rows="2"
@@ -153,9 +261,12 @@ const retryFailedReload = (): void => void store.reload(store.reloadErrorPath);
         @retry="store.loadList()"
       >
         <template #cell-name="{ row }">
-          <RouterLink :to="suiteTo(row)" class="font-mono font-semibold text-text">{{
-            row.name
-          }}</RouterLink>
+          <span class="inline-flex items-center gap-8">
+            <RouterLink :to="suiteTo(row)" class="font-mono font-semibold text-text">{{
+              row.name
+            }}</RouterLink>
+            <DraftChip v-if="draftOf(row)" :draft="draftOf(row)!" />
+          </span>
         </template>
         <template #cell-version="{ row }">
           <span class="font-mono font-semibold">v{{ row.versionNumber }}</span>
@@ -167,15 +278,17 @@ const retryFailedReload = (): void => void store.reload(store.reloadErrorPath);
           <BaseTag :title="row.contentHash">{{ shortHash(row.contentHash) }}</BaseTag>
         </template>
         <template #cell-change="{ row }">
-          <template v-if="firstChange(row)">
+          <template v-if="lastChangeOf(row)">
             <span
               :class="
-                firstChange(row)!.kind === 'now invalid' ? 'font-medium text-fail-text' : undefined
+                lastChangeOf(row)!.kind === 'now invalid' ? 'font-medium text-fail-text' : undefined
               "
-              >{{ firstChange(row)!.keys.length }} {{ firstChange(row)!.kind }}:</span
+              >{{ lastChangeText(lastChangeOf(row)!).lead }}</span
             >
-            {{ ' ' }}
-            <code>{{ keysText(firstChange(row)!) }}</code>
+            <template v-if="lastChangeText(lastChangeOf(row)!).keys">
+              {{ ' ' }}
+              <code>{{ lastChangeText(lastChangeOf(row)!).keys }}</code>
+            </template>
           </template>
           <span v-else-if="row.lastLoad.outcome === 'unchanged'" class="text-text-3"
             >Unchanged since v{{ row.versionNumber }}</span
@@ -227,17 +340,30 @@ const retryFailedReload = (): void => void store.reload(store.reloadErrorPath);
             :aria-label="`Reload ${row.name} from disk`"
             @click="reloadOne(row)"
           >
-            {{ store.isReloading(row.path) ? 'Reloading…' : 'Reload from disk' }}
+            {{ rowBusy(row) ? 'Reloading…' : 'Reload from disk' }}
           </button>
         </template>
       </DataTable>
+      <button
+        v-if="missing.length && !loading"
+        type="button"
+        class="linkbtn self-start text-12"
+        :aria-expanded="showMissing"
+        data-testid="toggle-missing"
+        @click="showMissing = !showMissing"
+      >
+        {{ showMissing ? 'Hide' : 'Show' }} {{ missing.length }} missing from disk
+      </button>
       <p v-if="!loading && !store.listError" class="text-12 text-text-3">
-        A reload re-reads every <code>task.yaml</code>, re-hashes fixtures and re-runs each task's
-        self-check: every verification entry is scored against the task's own reference answer, and
-        must pass. Each reload that finds a change creates a new suite version (v1, v2, …), numbered
-        by the platform; the number next to it is the author label from <code>suite.yaml</code>.
+        Saving a draft writes the folder and loads it exactly as a reload does. A reload re-reads
+        every <code>task.yaml</code>, re-hashes fixtures and re-runs each task's self-check: every
+        verification entry is scored against the task's own reference answer, and must pass. Each
+        reload that finds a change creates a new suite version (v1, v2, …), numbered by the
+        platform; the number next to it is the author label from <code>suite.yaml</code>.
         Experiments keep the version they were created on.
       </p>
     </template>
+
+    <ImportSuiteDialog v-model:open="importOpen" />
   </PageContainer>
 </template>

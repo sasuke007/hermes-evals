@@ -116,6 +116,9 @@ describe.skipIf(!SERVER_URL)('execution lifecycle on Postgres 17', () => {
   afterEach(async () => {
     for (const lifecycle of lifecycles) await lifecycle.stop();
     for (const b of bosses) await b.stop({ graceful: false, timeout: 1000 });
+    // pool.end() resolves before its clients' sockets close; the forced drop below can end
+    // one mid-close, and the pool reports that as an error of an idle client.
+    pool?.on('error', () => {});
     await pool?.end();
     await admin(`drop database if exists ${database} with (force)`);
     if (trialsDir) await rm(trialsDir, { recursive: true, force: true });

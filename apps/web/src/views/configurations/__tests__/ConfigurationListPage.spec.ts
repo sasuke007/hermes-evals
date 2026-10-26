@@ -134,6 +134,34 @@ describe('ConfigurationListPage', () => {
     }
   });
 
+  it('filters by name, in the URL, keeping picked rows for Compare (Phase 5 #18)', async () => {
+    const { w, router } = await open();
+    const names = () =>
+      w
+        .findAll('tbody tr')
+        .filter((r) => r.findAll('td').length > 1)
+        .map((r) => r.findAll('td')[1]!.text());
+    // Pick baseline, then hide it with the filter: Compare still counts it.
+    await w.findAll('tbody tr')[0]!.get('input[type=checkbox]').setValue(true);
+    await w.get('[data-testid="config-filter"]').setValue('WITH');
+    await flushPromises();
+    expect(names()).toEqual(['with-skill v1', 'with-mcp v1']);
+    expect(w.get('[data-testid="filter-count"]').text()).toBe('2 of 3 configurations');
+    expect(router.currentRoute.value.query.q).toBe('WITH');
+    expect(w.get('[data-testid="compare"]').text()).toBe('Compare (1)');
+
+    await w.get('[data-testid="config-filter"]').setValue('skill  v');
+    await flushPromises();
+    expect(names()).toEqual([]);
+    const empty = w.get('[data-testid="empty-state"]');
+    expect(empty.text()).toContain('No configurations match this filter');
+    await empty.get('button').trigger('click');
+    await flushPromises();
+    expect(names()).toHaveLength(3);
+    expect(router.currentRoute.value.query.q).toBeUndefined();
+    expect(w.find('[data-testid="filter-count"]').exists()).toBe(false);
+  });
+
   it('loading: skeleton rows at the real columns', async () => {
     const { w } = await open('loading');
     expect(w.get('table').attributes('aria-busy')).toBe('true');
@@ -150,6 +178,8 @@ describe('ConfigurationListPage', () => {
     );
     expect(empty.get('a').attributes('href')).toBe('/configurations/new');
     expect(w.findAll('thead th')).toHaveLength(11);
+    // Nothing to filter yet.
+    expect(w.find('[data-testid="config-filter"]').exists()).toBe(false);
   });
 
   it('error: the failed request verbatim where the table would be, with Retry', async () => {

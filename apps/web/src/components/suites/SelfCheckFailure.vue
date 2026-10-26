@@ -7,17 +7,21 @@ import { formatDateTime, formatDateTimeSeconds } from '@/lib/format';
 /**
  * Why a task failed its self-check, as its expanded row on Suite detail shows it (Flow D,
  * step 3): the headline, when it ran and how the same check did on the previous load, the
- * command and its output exactly as captured, the likely cause, a way to the task, and for
- * a verifier script the contract it must keep.
+ * command and its output exactly as captured, the likely cause, a way to the task (and,
+ * on the current version, to its editor), and for a verifier script the contract it must
+ * keep.
  */
 const props = withDefaults(
   defineProps<{
     failure: SelfCheckFailureView;
     /** "Open task detail" goes here; none on the task page itself. */
     taskTo?: RouteLocationRaw | null;
+    /** "Edit task" shows: the current version, which a draft can change. */
+    editable?: boolean;
   }>(),
-  { taskTo: null },
+  { taskTo: null, editable: false },
 );
+defineEmits<{ edit: [] }>();
 
 const isScript = computed(() => props.failure.type === 'verifier_script');
 /** The script named in the headline: "verifier_script check_late_fees.py printed …". */
@@ -46,7 +50,15 @@ const seconds = computed(() => `${(props.failure.durationMs / 1000).toFixed(1)} 
       >{{ failure.transcript }}</pre>
     <p class="text-text-2">{{ failure.explanation }}</p>
     <div v-if="taskTo" class="flex flex-wrap items-center gap-8">
-      <!-- Phase 5b adds "Edit task" (primary) here. -->
+      <button
+        v-if="editable"
+        type="button"
+        class="btn sm primary"
+        data-testid="failure-edit"
+        @click="$emit('edit')"
+      >
+        Edit task
+      </button>
       <RouterLink class="btn sm" :to="taskTo">Open task detail</RouterLink>
       <span v-if="isScript" class="text-12 text-text-3">Verifier scripts are edited on disk.</span>
     </div>

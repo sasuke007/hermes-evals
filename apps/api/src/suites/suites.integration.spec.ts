@@ -26,12 +26,15 @@ import {
   seedExperiment,
   startAttempt,
 } from '../../test/support/seed.js';
-import { evaluations, runs, scores } from '../database/schema/index.js';
+import { evaluations, runs, scores, taskRootFiles } from '../database/schema/index.js';
 import { BlobStore } from '../storage/blob-store.js';
 import { SuiteTasksService } from './suite-tasks.service.js';
+import { taskByKey } from './suites.queries.js';
 import { SuitesService } from './suites.service.js';
 import {
   CHECK_PY,
+  POLICY_V1,
+  POLICY_V2,
   README_MD,
   T_V1,
   T_V2,
@@ -97,6 +100,13 @@ describe('a directory with two versions', () => {
           },
           error: null,
           servedVersion: null,
+        },
+        currentChanges: {
+          added: [],
+          removed: [],
+          changed: ['late_fees'],
+          nowInvalid: ['late_fees'],
+          nowValid: [],
         },
       },
     ]);
@@ -277,10 +287,49 @@ describe('a directory with two versions', () => {
     expect(diff.to).toEqual({ suiteId: seed.v2.id, suiteVersion: 2, taskVersion: 2 });
     expect(diff.prompt.every((l) => l.kind === 'same')).toBe(true);
     expect(diff.reference).toEqual([]);
+    // No root-file record (rows seeded as before Phase 5b): task.yaml and prompt.md are
+    // measured from their stored text, and reference.json is left out.
     expect(diff.files.map((f) => [f.path, f.change])).toEqual([
+      ['task.yaml', 'unchanged'],
+      ['prompt.md', 'unchanged'],
       ['fixtures/invoices.csv', 'unchanged'],
       ['fixtures/policy_terms.json', 'changed'],
       ['verify/check_late_fees.py', 'unchanged'],
+    ]);
+    expect(diff.textFiles).toEqual([
+      {
+        path: 'fixtures/policy_terms.json',
+        lines: [
+          { kind: 'removed', text: POLICY_V1.trimEnd(), oldLine: 1, newLine: null },
+          { kind: 'added', text: POLICY_V2.trimEnd(), oldLine: null, newLine: 1 },
+        ],
+      },
+    ]);
+  });
+
+  it('lists reference.json with the sizes and hashes the loader recorded', async () => {
+    const [fromTask, toTask] = await Promise.all([
+      taskByKey(t.db, seed.v1.id, 'late_fees'),
+      taskByKey(t.db, seed.v2.id, 'late_fees'),
+    ]);
+    const record = (taskId: string, content: string) => ({
+      taskId,
+      path: 'reference.json' as const,
+      sha256: hash(content),
+      size: Buffer.byteLength(content),
+      text: content,
+    });
+    await t.db
+      .insert(taskRootFiles)
+      .values([
+        record(fromTask!.id, '{"late_fee": 12.5}\n'),
+        record(toTask!.id, '{"late_fee": 12.5}\n'),
+      ]);
+    const diff = TaskDiffSchema.parse(await tasks.diff(seed.v2.id, 'late_fees', seed.v1.id));
+    expect(diff.files.slice(0, 3).map((f) => [f.path, f.change, f.after?.sizeBytes])).toEqual([
+      ['task.yaml', 'unchanged', expect.any(Number)],
+      ['prompt.md', 'unchanged', expect.any(Number)],
+      ['reference.json', 'unchanged', 19],
     ]);
   });
 
@@ -410,6 +459,8 @@ describe('experiments on a suite version', () => {
           experimentId: seed.experiment.id,
           experimentName: 'Skill vs no skill',
           status: seed.experiment.status,
+          taskVersion: 1,
+          suiteVersion: 1,
           rows: [
             { configuration: 'baseline', role: 'baseline', passRate: 0.5, scored: 2, total: 2 },
             { configuration: 'with-skill', role: 'candidate', passRate: 1, scored: 1, total: 2 },

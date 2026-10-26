@@ -22,6 +22,10 @@ import { SecretsController } from '../resources/secrets/secrets.controller.js';
 import { SkillsController } from '../resources/skills/skills.controller.js';
 import { RunsCommandsController } from '../runs/commands/runs-commands.controller.js';
 import { RunsReadController } from '../runs/views/runs-read.controller.js';
+import { DraftTasksController } from '../suites/drafts/draft-tasks.controller.js';
+import { SuiteDraftsController } from '../suites/drafts/drafts.controller.js';
+import { SuiteImportController } from '../suites/import/suite-import.controller.js';
+import { DraftJobsController } from '../suites/save/draft-jobs.controller.js';
 import { SuitesController } from '../suites/suites.controller.js';
 import { SystemEventsController } from '../system/events/system-events.controller.js';
 import { SystemController } from '../system/system.controller.js';
@@ -33,6 +37,7 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/health'],
   ['get', '/api/suites'],
   ['post', '/api/suites/reload'],
+  ['get', '/api/suites/reload/progress'],
   ['get', '/api/suites/{id}'],
   ['get', '/api/suites/{id}/history'],
   ['get', '/api/suites/{id}/tasks/{key}'],
@@ -40,6 +45,35 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/suites/{id}/tasks/{key}/diff'],
   ['get', '/api/suites/{id}/tasks/{key}/fixtures/{path}'],
   ['get', '/api/suites/{id}/tasks/{key}/fixtures/{path}/preview'],
+  // Suite authoring (Phase 5b): drafts, their tasks and files, the jobs, the imports.
+  ['get', '/api/suites/drafts'],
+  ['post', '/api/suites/drafts'],
+  ['post', '/api/suites/{suite}/draft'],
+  ['get', '/api/suites/{suite}/draft'],
+  ['patch', '/api/suites/{suite}/draft'],
+  ['delete', '/api/suites/{suite}/draft'],
+  ['get', '/api/suites/{suite}/draft/review'],
+  ['post', '/api/suites/{suite}/draft/save'],
+  ['post', '/api/suites/{suite}/draft/rebase'],
+  ['get', '/api/suites/{suite}/versions/{n}/zip'],
+  ['post', '/api/suites/{suite}/draft/tasks'],
+  ['get', '/api/suites/{suite}/draft/tasks/{key}'],
+  ['put', '/api/suites/{suite}/draft/tasks/{key}'],
+  ['delete', '/api/suites/{suite}/draft/tasks/{key}'],
+  ['post', '/api/suites/{suite}/draft/tasks/{key}/revert'],
+  ['get', '/api/suites/{suite}/draft/tasks/{key}/readiness'],
+  ['post', '/api/suites/{suite}/draft/tasks/{key}/try'],
+  ['post', '/api/suites/{suite}/draft/tasks/{key}/self-check'],
+  ['get', '/api/suites/{suite}/draft/tasks/{key}/diff'],
+  ['post', '/api/suites/{suite}/draft/tasks/{key}/files'],
+  ['patch', '/api/suites/{suite}/draft/tasks/{key}/files/{path}'],
+  ['delete', '/api/suites/{suite}/draft/tasks/{key}/files/{path}'],
+  ['get', '/api/suites/{suite}/draft/tasks/{key}/files/{path}'],
+  ['get', '/api/suites/{suite}/draft/tasks/{key}/files/{path}/preview'],
+  ['post', '/api/suites/{suite}/draft/import/validate'],
+  ['post', '/api/suites/{suite}/draft/import'],
+  ['post', '/api/suites/import/validate'],
+  ['post', '/api/suites/import'],
   ['get', '/api/resources/counts'],
   ['get', '/api/resources/skills'],
   ['post', '/api/resources/skills'],
@@ -47,9 +81,11 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/resources/skills/{id}'],
   ['get', '/api/resources/skills/{id}/files/{path}'],
   ['get', '/api/resources/skills/{id}/zip'],
+  ['delete', '/api/resources/skills/{id}'],
   ['get', '/api/resources/documents'],
   ['post', '/api/resources/documents'],
   ['get', '/api/resources/documents/{id}/content'],
+  ['delete', '/api/resources/documents/{id}'],
   ['get', '/api/resources/mcp-servers'],
   ['post', '/api/resources/mcp-servers'],
   ['post', '/api/resources/mcp-servers/test'],
@@ -99,8 +135,21 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/runs/{id}/artifacts/{artifactId}/preview'],
 ];
 
+/** Routes that answer 204 with no body. */
+const NO_CONTENT = new Set([
+  'delete /api/resources/skills/{id}',
+  'delete /api/resources/documents/{id}',
+  'delete /api/suites/{suite}/draft',
+]);
+
 /** State-changing routes that take no body (RequestedWithGuard still wants a JSON one, `{}`). */
 const BODILESS = new Set([
+  ...NO_CONTENT,
+  'post /api/suites/{suite}/draft',
+  'delete /api/suites/{suite}/draft/tasks/{key}',
+  'post /api/suites/{suite}/draft/tasks/{key}/revert',
+  'post /api/suites/{suite}/draft/tasks/{key}/self-check',
+  'delete /api/suites/{suite}/draft/tasks/{key}/files/{path}',
   'post /api/resources/mcp-servers/{id}/test',
   'post /api/configurations/{id}/duplicate',
   'post /api/providers/nous/login',
@@ -143,6 +192,10 @@ beforeAll(async () => {
       ExperimentsReadController,
       ComparisonController,
       RunsReadController,
+      SuiteDraftsController,
+      DraftTasksController,
+      DraftJobsController,
+      SuiteImportController,
     ],
   })
     .useMocker(() => ({}))
@@ -186,6 +239,13 @@ describe('the API document', () => {
   it('gives every route a success response with a schema', () => {
     for (const [method, path] of ROUTES) {
       const op = operation(method, path);
+      if (NO_CONTENT.has(`${method} ${path}`)) {
+        const statuses = Object.keys(op.responses).filter((s) => /^2\d\d$/.test(s));
+        expect(statuses, `${method} ${path}`).toEqual(['204']);
+        expect(op.responses['204']!.content, `${method} ${path}`).toBeUndefined();
+        expect(op.responses['default'], `${method} ${path} error body`).toBeTruthy();
+        continue;
+      }
       const success = Object.entries(op.responses).filter(([status]) => /^2\d\d$/.test(status));
       expect(success, `${method} ${path}`).toHaveLength(1);
       const content = success[0]![1].content ?? {};
@@ -283,6 +343,40 @@ describe('the API document', () => {
     ]);
     expect(query('/api/runs/{id}/events')).toEqual(['after']);
     expect(query('/api/experiments/{id}/comparison')).toEqual(['candidate', 'filter', 'key']);
+  });
+
+  it('documents the Phase 5b contracts by name, and the refusals the pages read', () => {
+    const json = (method: string, path: string, status = '200') =>
+      operation(method, path).responses[status]!.content!['application/json']!.schema;
+    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+    const body = (method: string, path: string) =>
+      operation(method, path).requestBody!.content['application/json']!.schema;
+    const draft = '/api/suites/{suite}/draft';
+    expect(json('get', '/api/suites/drafts')).toEqual({
+      type: 'array',
+      items: ref('DraftSummary'),
+    });
+    expect(json('post', '/api/suites/drafts', '201')).toEqual(ref('SuiteDraftView'));
+    expect(body('post', '/api/suites/drafts')).toEqual(ref('CreateSuiteDraftRequest'));
+    expect(json('post', draft, '201')).toEqual(ref('SuiteDraftView'));
+    expect(json('get', `${draft}/review`)).toEqual(ref('DraftReview'));
+    expect(json('put', `${draft}/tasks/{key}`)).toEqual(ref('DraftTaskDetail'));
+    expect(body('put', `${draft}/tasks/{key}`)).toEqual(ref('UpdateDraftTaskRequest'));
+    expect(json('get', `${draft}/tasks/{key}/readiness`)).toEqual(ref('TaskReadiness'));
+    expect(json('post', `${draft}/tasks/{key}/try`)).toEqual(ref('TryCheckResult'));
+    expect(json('post', `${draft}/tasks/{key}/self-check`)).toEqual(ref('DraftSelfCheckView'));
+    expect(json('post', `${draft}/save`)).toEqual(ref('DraftSaveResult'));
+    expect(json('post', `${draft}/save`, '409')).toEqual(ref('DraftConflictBody'));
+    expect(json('post', `${draft}/save`, '422')).toEqual(ref('DraftSaveFailureBody'));
+    expect(json('post', `${draft}/rebase`, '409')).toEqual(ref('DraftConflictBody'));
+    expect(json('post', `${draft}/import`, '422')).toEqual(ref('TaskImportRefusalBody'));
+    expect(json('post', '/api/suites/import/validate')).toEqual(ref('SuiteZipValidation'));
+    expect(body('post', '/api/suites/import')).toEqual(ref('SuiteZipImportRequest'));
+    expect(json('get', '/api/suites/reload/progress')).toEqual(ref('SuiteReloadProgress'));
+    expect(json('delete', '/api/resources/skills/{id}', '409')).toEqual(ref('ResourceInUseBody'));
+    expect(
+      operation('get', '/api/suites/{suite}/versions/{n}/zip').responses['200']!.content,
+    ).toEqual({ 'application/zip': { schema: { type: 'string', format: 'binary' } } });
   });
 
   it('converts the contracts field by field', () => {

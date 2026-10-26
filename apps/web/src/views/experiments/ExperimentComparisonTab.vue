@@ -214,7 +214,6 @@ const SKELETON_CELLS = 5;
       aria-label="Loading the comparison"
       data-testid="comparison-loading"
     >
-      <span class="text-12 text-text-3">control bar · task grid · statistics</span>
       <div class="flex items-center gap-8" aria-hidden="true">
         <span
           v-for="w in [180, 200, 120]"

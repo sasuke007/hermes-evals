@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import ConfigCompareWith from '@/components/configurations/ConfigCompareWith.vue';
 import ConfigFieldsPanel from '@/components/configurations/ConfigFieldsPanel.vue';
@@ -43,10 +43,6 @@ function openCompare(): void {
   comparing.value = !comparing.value;
   if (comparing.value && !store.listState.loaded) void store.loadList();
 }
-
-onMounted(() => {
-  void store.loadMcpExposure();
-});
 
 /** "Saved as version 2." once, after the form routes here. */
 const saved = ref(store.takeSaved(props.configurationId));
@@ -183,7 +179,6 @@ const latestRoute = computed(() => ({
         :version="detail.shown"
         :differs="detail.differsFromSource"
         :source-name="source?.name ?? null"
-        :exposure="store.mcpExposure"
       />
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(min(520px,100%),1fr))] items-start gap-16">

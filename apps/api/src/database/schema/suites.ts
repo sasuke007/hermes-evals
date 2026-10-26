@@ -224,3 +224,39 @@ export const taskFiles = pgTable(
     check('task_files_path_ck', isRelativePath(t.path)),
   ],
 );
+
+/** The files at a task folder's root that the loader stores on the task row instead of as task files. */
+export const TASK_ROOT_FILES = ['task.yaml', 'prompt.md', 'reference.json'] as const;
+export type TaskRootFile = (typeof TASK_ROOT_FILES)[number];
+
+/**
+ * task.yaml, prompt.md and reference.json of a task version exactly as the
+ * loader read them (Phase 5b): their size and hash, which a task diff shows
+ * beside the task files', and their text when it is UTF-8, which a draft of
+ * the task starts from, so an unedited file is written back byte for byte
+ * (plan 4.6). The task row keeps the parsed reference and the texts it has
+ * always kept. Task versions loaded before Phase 5b have no rows here.
+ * Immutable, like the task it belongs to.
+ */
+export const taskRootFiles = pgTable(
+  'task_root_files',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    path: text('path').$type<TaskRootFile>().notNull(),
+    sha256: text('sha256').notNull(),
+    size: bigint('size', { mode: 'number' }).notNull(),
+    /** The file's text, when it is valid UTF-8 (a byte-order mark kept); null otherwise. */
+    text: storableText('text'),
+  },
+  (t) => [
+    primaryKey({ name: 'task_root_files_pk', columns: [t.taskId, t.path] }),
+    check(
+      'task_root_files_path_ck',
+      sql`${t.path} in (${sql.raw(TASK_ROOT_FILES.map((p) => `'${p}'`).join(', '))})`,
+    ),
+    check('task_root_files_sha256_ck', isSha256(t.sha256)),
+    check('task_root_files_size_ck', sql`${t.size} >= 0`),
+  ],
+);

@@ -130,6 +130,40 @@ describe('ArtifactsSection with home files only', () => {
   });
 });
 
+describe('ArtifactsSection with memory on and nothing saved (Phase 6 #11)', () => {
+  const memoryOn = (d: RunDetail): RunDetail => ({
+    ...d,
+    launchRecord: d.launchRecord && {
+      ...d.launchRecord,
+      configYaml: d.launchRecord.configYaml.replace(
+        'memory_enabled: false',
+        'memory_enabled: true',
+      ),
+    },
+  });
+
+  it('keeps the Memory group to say the agent saved nothing', () => {
+    const d = memoryOn(detailOf(SAMPLE_RUN_ID));
+    expect(d.artifacts.items.some((a) => a.root === 'home')).toBe(false);
+    wrapper = mount(ArtifactsSection, { props: { detail: d, sectionId: 'ri-artifacts' } });
+    const group = wrapper.get('[data-testid="memory-group"]');
+    expect(group.find('table').exists()).toBe(false);
+    expect(group.get('[data-testid="memory-note"]').text()).toBe(
+      'Memory is on; the agent saved nothing.',
+    );
+  });
+
+  it('has no Memory group with memory off, nor while the run is unfinished', () => {
+    const off = detailOf(SAMPLE_RUN_ID);
+    wrapper = mount(ArtifactsSection, { props: { detail: off, sectionId: 'ri-artifacts' } });
+    expect(wrapper.find('[data-testid="memory-group"]').exists()).toBe(false);
+    wrapper.unmount();
+    const running = { ...memoryOn(detailOf(SAMPLE_RUN_ID)), status: 'running' as const };
+    wrapper = mount(ArtifactsSection, { props: { detail: running, sectionId: 'ri-artifacts' } });
+    expect(wrapper.find('[data-testid="memory-group"]').exists()).toBe(false);
+  });
+});
+
 describe('skill loading in the launch record', () => {
   it('preload: -s per skill', async () => {
     const id = runOf('skillVsNoSkill', 'dup_invoices', 'with-skill', 3);

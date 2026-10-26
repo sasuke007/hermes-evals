@@ -282,6 +282,16 @@ export function previewKind(artifact: ArtifactView): 'table' | 'text' | null {
 /** invoices.csv from workspace/invoices.csv. */
 export const fileName = (path: string): string => path.split('/').pop() ?? path;
 
+/**
+ * Whether the run had memory on: config.yaml's `memory.memory_enabled`, as the launch record
+ * keeps the file verbatim (the API writes it with the yaml package, one key per line). Null
+ * without a launch record: nothing was launched, so nothing says.
+ */
+export function memoryEnabledIn(record: { configYaml: string } | null): boolean | null {
+  if (!record) return null;
+  return /^\s+memory_enabled:\s*true\s*$/m.test(record.configYaml);
+}
+
 /** One line of the parsed-answer and reference trees. */
 export interface AnswerLine {
   key: string | null;

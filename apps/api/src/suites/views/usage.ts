@@ -1,14 +1,20 @@
 /**
- * "In experiments" on Task detail: each experiment that ran a task version,
- * with the task's pass rate under each of its configurations.
+ * "In experiments" on Task detail: each experiment that ran any version of a
+ * task, with the task and suite versions it ran and the task's pass rate
+ * under each of its configurations. Results on different task versions do
+ * not compare, so the page names the version beside each experiment.
  */
 import type { ExperimentStatus, TaskExperimentUsage } from '@hermes-evals/shared';
 
-/** Run counts of one task version under one configuration version of one experiment. */
+/** Run counts of one task under one configuration version of one experiment. */
 export interface UsageCounts {
   experimentId: string;
   experimentName: string;
   status: ExperimentStatus;
+  /** The task version the experiment ran. */
+  taskVersion: number;
+  /** The suite version it was launched on. */
+  suiteVersion: number;
   baselineVersionId: string;
   candidateVersionIds: readonly string[];
   configurationVersionId: string;
@@ -45,6 +51,8 @@ export function taskUsageView(rows: readonly UsageCounts[]): TaskExperimentUsage
       experimentId: first.experimentId,
       experimentName: first.experimentName,
       status: first.status,
+      taskVersion: first.taskVersion,
+      suiteVersion: first.suiteVersion,
       rows: [...list]
         .sort((a, b) => rank(a) - rank(b))
         .map((r) => ({

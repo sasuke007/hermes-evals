@@ -63,3 +63,64 @@ export function trialBody(): Record<string, unknown> {
     NetworkingConfig: { EndpointsConfig: { 'hermes-evals-trial-0': {} } },
   };
 }
+
+export const VERIFIER = '01K8ZQ7M3V5X9C2B4N6P8R0T2A';
+export const VERIFIER_NAME = `hermes-evals-verify-${VERIFIER}`;
+
+/** The body the worker sends for a verifier script (Phase 5b, R7): the only verifier shape the guard accepts. */
+export function verifierBody(): Record<string, unknown> {
+  return {
+    Image: config.trialImage,
+    Entrypoint: ['/usr/local/bin/python3'],
+    Cmd: [
+      '/check/verify/check.py',
+      '--answer',
+      '/check/answer.json',
+      '--workspace',
+      '/check/workspace',
+      '--home',
+      '/check/home',
+    ],
+    Env: ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'],
+    User: '10000:10000',
+    WorkingDir: '/check/verify',
+    Hostname: 'verifier',
+    Labels: {
+      'hermes-evals.role': 'trial',
+      'hermes-evals.kind': 'verifier',
+      'hermes-evals.verifier': VERIFIER,
+      'hermes-evals.deadline': '1900000000',
+    },
+    AttachStdin: false,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: false,
+    OpenStdin: false,
+    HostConfig: {
+      ReadonlyRootfs: true,
+      CapDrop: ['ALL'],
+      SecurityOpt: ['no-new-privileges'],
+      Privileged: false,
+      Init: true,
+      AutoRemove: false,
+      NetworkMode: 'none',
+      Mounts: [
+        {
+          Type: 'volume',
+          Source: 'hermes-evals-trials',
+          Target: '/check',
+          ReadOnly: true,
+          VolumeOptions: { NoCopy: true, Subpath: `verify-${VERIFIER}` },
+        },
+      ],
+      Tmpfs: { '/tmp': 'rw,nosuid,nodev,noexec,size=64m,mode=1777' },
+      Memory: 512 * 1024 * 1024,
+      MemorySwap: 512 * 1024 * 1024,
+      NanoCpus: 1_000_000_000,
+      PidsLimit: 128,
+      Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 1024 }],
+      LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '1' } },
+      RestartPolicy: { Name: 'no' },
+    },
+  };
+}

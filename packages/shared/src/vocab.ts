@@ -171,3 +171,39 @@ export const SUITE_LOAD_OUTCOMES = [
   'missing',
 ] as const;
 export type SuiteLoadOutcome = (typeof SUITE_LOAD_OUTCOMES)[number];
+
+/**
+ * How a task of a suite draft stands against the draft's base version (plan
+ * 4.6, migration 0009 suite_draft_tasks_state_ck). `restored` holds the files
+ * of an older task version (Restore on Task detail); `removed` stays in the
+ * draft, struck through, until the save removes its folder or Undo brings it
+ * back. A task of a new suite's draft is always `added`.
+ */
+export const DRAFT_TASK_STATES = ['added', 'changed', 'removed', 'restored', 'unchanged'] as const;
+export type DraftTaskState = (typeof DRAFT_TASK_STATES)[number];
+
+/**
+ * What a file a draft task holds by blob reference is (plan 4.6, migration
+ * 0009 suite_draft_files_kind_ck). The text files the forms edit (task.yaml,
+ * prompt.md, reference.json and llm_judge rubrics) are stored verbatim on the
+ * draft task instead, so they are not kinds here. `verifier` (anything under
+ * `verify/`) is read-only: draft endpoints refuse every write there (R7).
+ * `other` is any file the loader does not read (a README), kept as is.
+ */
+export const DRAFT_FILE_KINDS = [
+  'fixture',
+  'expected',
+  'expected_home',
+  'home_seed',
+  'verifier',
+  'other',
+] as const;
+export type DraftFileKind = (typeof DRAFT_FILE_KINDS)[number];
+
+/**
+ * How a suite draft began (migration 0009 suite_drafts_origin_ck): `edit` of
+ * an existing suite folder, or a new suite that starts `empty`, as a `copy`
+ * of a suite version, or from a validated `zip`.
+ */
+export const DRAFT_ORIGINS = ['edit', 'empty', 'copy', 'zip'] as const;
+export type DraftOrigin = (typeof DRAFT_ORIGINS)[number];

@@ -13,7 +13,8 @@ import { ROUTE_NAMES } from '@/router';
  * version, with a checkbox to pick it for Compare. Clicking a row (or Enter on it) opens the
  * detail; a picked row is tinted. Loading draws skeleton rows at the real columns; with no
  * configurations the header stays and the body explains what one is (LibraryStates ›
- * Configurations · empty). Skills loaded on demand (Phase 6 P5) carry an "on demand" tag.
+ * Configurations · empty), or what the #empty slot says (no match for the page's filter).
+ * Skills loaded on demand (Phase 6 P5) carry an "on demand" tag.
  */
 const props = withDefaults(
   defineProps<{
@@ -100,12 +101,14 @@ const skeleton: SkeletonColumn[] = [
       <tbody v-else-if="rows.length === 0">
         <tr class="hover:[&>td]:bg-transparent">
           <td colspan="11" class="cursor-default whitespace-normal">
-            <EmptyState
-              title="No configurations yet"
-              body="A configuration records how the agent is set up: model, provider, toolsets, memory, skills, documents and MCP servers. An experiment compares two or more of them."
-              :panel="false"
-              :action="{ label: 'New configuration', to: { name: ROUTE_NAMES.configurationNew } }"
-            />
+            <slot name="empty">
+              <EmptyState
+                title="No configurations yet"
+                body="A configuration records how the agent is set up: model, provider, toolsets, memory, skills, documents and MCP servers. An experiment compares two or more of them."
+                :panel="false"
+                :action="{ label: 'New configuration', to: { name: ROUTE_NAMES.configurationNew } }"
+              />
+            </slot>
           </td>
         </tr>
       </tbody>

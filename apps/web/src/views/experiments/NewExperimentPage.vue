@@ -44,9 +44,10 @@ import { useSystemStore } from '@/stores/system';
  *
  * /experiments/new?from=<id> is Duplicate: the form prefilled on the suite's current version,
  * with what changed and what was left out. &repetitions=<n> then sets the repetitions (the
- * Comparison's "Duplicate with 5 repetitions").
+ * Comparison's "Duplicate with 5 repetitions"). ?suite=<suiteId> starts on that suite version
+ * with all its valid tasks (Review and save's "New experiment on v7", Flow E).
  */
-const props = defineProps<{ duplicateOf?: string; repetitions?: number }>();
+const props = defineProps<{ duplicateOf?: string; repetitions?: number; suite?: string }>();
 
 const router = useRouter();
 const store = useExperimentsStore();
@@ -83,12 +84,14 @@ async function load(): Promise<void> {
   failure.value = null;
   const options = await store.loadOptions();
   if (options) form.reset(options);
+  if (options && props.suite && options.suites.some((s) => s.suiteId === props.suite))
+    form.selectSuite(props.suite);
   loading.value = false;
   if (options && props.duplicateOf) await loadDraft(props.duplicateOf);
   if (options && props.repetitions !== undefined) form.state.repetitions = props.repetitions;
 }
 watch(
-  () => [props.duplicateOf, props.repetitions],
+  () => [props.duplicateOf, props.repetitions, props.suite],
   () => void load(),
   { immediate: true },
 );

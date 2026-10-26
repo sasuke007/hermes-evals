@@ -9,6 +9,7 @@
  */
 import type {
   ScorerType,
+  SuiteChangeSet,
   SuiteDetail,
   SuiteHistoryEntry,
   SuiteLastLoad,
@@ -121,12 +122,15 @@ export function verificationTypesByUse(
 
 /**
  * One row of the suite list, for the version `suite` of its directory. The
- * load time of the current version is the last load that confirmed it.
+ * load time of the current version is the last load that confirmed it;
+ * `currentChanges` are the changes that created it (changesThatCreated),
+ * left empty by callers that read only the load time.
  */
 export function suiteListRow(
   suite: SuiteRow,
   source: SourceRow | null,
   tasks: readonly { verification: readonly VerificationEntry[] }[],
+  currentChanges: SuiteChangeSet = emptyChangeSet(),
 ): SuiteListRow {
   const confirmed =
     source !== null && source.currentSuiteId === suite.id && SERVING.has(source.lastOutcome);
@@ -139,6 +143,7 @@ export function suiteListRow(
     verificationTypes: verificationTypesByUse(tasks),
     loadedAt: isoTime(confirmed ? source.lastAttemptedAt : suite.loadedAt),
     lastLoad: lastLoadView(source, currentOf([suite], source)),
+    currentChanges,
   };
 }
 
@@ -194,6 +199,8 @@ export interface SuiteDetailInput {
   source: SourceRow | null;
   /** Every version of the directory. */
   versions: readonly SuiteRow[];
+  /** The changes that created this version (changesThatCreated). */
+  changes: SuiteChangeSet;
   /** This version's tasks, as rows of Suite detail, in suite order. */
   taskRows: readonly SuiteTaskRow[];
   /** This version's verification lists, for the type summary. */
@@ -203,7 +210,7 @@ export interface SuiteDetailInput {
 export function suiteDetail(input: SuiteDetailInput): SuiteDetail {
   const { suite, source, versions } = input;
   const current = source?.currentSuiteId === suite.id;
-  const row = suiteListRow(suite, source, input.verification);
+  const row = suiteListRow(suite, source, input.verification, input.changes);
   const previous = versions
     .filter((v) => v.versionNumber < suite.versionNumber)
     .reduce<SuiteRow | null>((a, b) => (!a || b.versionNumber > a.versionNumber ? b : a), null);
@@ -218,11 +225,85 @@ export function suiteDetail(input: SuiteDetailInput): SuiteDetail {
   };
 }
 
+/** Each version's tasks, by suite id, as its change set reads them. */
+export type TasksBySuite = ReadonlyMap<string, readonly TaskState[]>;
+
+/**
+ * The changes of the `created` History row of version `v`: the loader's own
+ * record when the last load created it and it is still current, else
+ * computed against the version numbered before it (null for a first one).
+ */
+function createdChanges(
+  v: SuiteRow,
+  previous: SuiteRow | null,
+  highest: SuiteRow,
+  source: SourceRow | null,
+  tasksBySuite: TasksBySuite,
+): SuiteChangeSet {
+  const latestCreated =
+    v === highest && source?.lastOutcome === 'created' && source.currentSuiteId === v.id;
+  if (latestCreated && source.lastChanges) return changeSetView(source.lastChanges);
+  return suiteChanges(
+    previous ? (tasksBySuite.get(previous.id) ?? []) : null,
+    tasksBySuite.get(v.id) ?? [],
+  );
+}
+
+/** The changes of the `reverted` History row: back from the newest version to `current`. */
+function revertChanges(
+  current: SuiteRow,
+  highest: SuiteRow,
+  source: SourceRow,
+  tasksBySuite: TasksBySuite,
+): SuiteChangeSet {
+  if (source.lastOutcome === 'reverted' && source.lastChanges)
+    return changeSetView(source.lastChanges);
+  return suiteChanges(tasksBySuite.get(highest.id) ?? [], tasksBySuite.get(current.id) ?? []);
+}
+
+/**
+ * The changes that created version `suite`, as its History row reads them:
+ * for the current version of a directory that went back to older files, the
+ * revert's changes; else its `created` row's. A v1 lists every task as added.
+ * `tasksBySuite` needs this version, the one numbered before it and the
+ * directory's newest.
+ */
+export function changesThatCreated(
+  suite: SuiteRow,
+  versions: readonly SuiteRow[],
+  source: SourceRow | null,
+  tasksBySuite: TasksBySuite,
+): SuiteChangeSet {
+  const ascending = [...versions].sort((a, b) => a.versionNumber - b.versionNumber);
+  const highest = ascending.at(-1) ?? suite;
+  if (source && source.currentSuiteId === suite.id && isReverted(ascending, source))
+    return revertChanges(suite, highest, source, tasksBySuite);
+  const previous = ascending.filter((v) => v.versionNumber < suite.versionNumber).at(-1) ?? null;
+  return createdChanges(
+    ascending.find((v) => v.id === suite.id) ?? suite,
+    previous,
+    highest,
+    source,
+    tasksBySuite,
+  );
+}
+
+/**
+ * The versions changesThatCreated reads for `suite`: itself, the one
+ * numbered before it and the directory's newest.
+ */
+export function versionsToCompare(suite: SuiteRow, versions: readonly SuiteRow[]): SuiteRow[] {
+  const ascending = [...versions].sort((a, b) => a.versionNumber - b.versionNumber);
+  const previous = ascending.filter((v) => v.versionNumber < suite.versionNumber).at(-1);
+  const highest = ascending.at(-1);
+  return [...new Set([suite, previous, highest].filter((v): v is SuiteRow => v !== undefined))];
+}
+
 export interface HistoryInput {
   versions: readonly SuiteRow[];
   source: SourceRow | null;
   /** Tasks of each version, by suite id, in suite order. */
-  tasksBySuite: ReadonlyMap<string, readonly TaskState[]>;
+  tasksBySuite: TasksBySuite;
   /** Experiments launched on each version, by suite id. */
   experimentsBySuite: ReadonlyMap<string, readonly { id: string; name: string }[]>;
 }
@@ -234,15 +315,12 @@ export interface HistoryInput {
  * directory went back to an older row.
  */
 export function suiteHistory(input: HistoryInput): SuiteHistoryEntry[] {
-  const { source } = input;
+  const { source, tasksBySuite } = input;
   const ascending = [...input.versions].sort((a, b) => a.versionNumber - b.versionNumber);
-  const tasksOf = (s: SuiteRow) => input.tasksBySuite.get(s.id) ?? [];
   const experimentsOf = (s: SuiteRow) => [...(input.experimentsBySuite.get(s.id) ?? [])];
   const highest = ascending.at(-1);
   const entries: SuiteHistoryEntry[] = ascending.map((v, i) => {
     const previous = i > 0 ? ascending[i - 1]! : null;
-    const latestCreated =
-      v === highest && source?.lastOutcome === 'created' && source.currentSuiteId === v.id;
     const sameFiles = ascending
       .slice(0, i)
       .filter((p) => p.contentHash === v.contentHash)
@@ -254,10 +332,7 @@ export function suiteHistory(input: HistoryInput): SuiteHistoryEntry[] {
       contentHash: v.contentHash,
       loadedAt: isoTime(v.loadedAt),
       outcome: 'created',
-      changes:
-        latestCreated && source.lastChanges
-          ? changeSetView(source.lastChanges)
-          : suiteChanges(previous ? tasksOf(previous) : null, tasksOf(v)),
+      changes: createdChanges(v, previous, highest!, source, tasksBySuite),
       sameFilesAs: sameFiles?.versionNumber ?? null,
       current: false,
       experiments: experimentsOf(v),
@@ -273,10 +348,7 @@ export function suiteHistory(input: HistoryInput): SuiteHistoryEntry[] {
       contentHash: current.contentHash,
       loadedAt: isoTime(revertedAt(source, current)),
       outcome: 'reverted',
-      changes:
-        source.lastOutcome === 'reverted' && source.lastChanges
-          ? changeSetView(source.lastChanges)
-          : suiteChanges(tasksOf(highest!), tasksOf(current)),
+      changes: revertChanges(current, highest!, source, tasksBySuite),
       sameFilesAs: null,
       current: false,
       experiments: experimentsOf(current),

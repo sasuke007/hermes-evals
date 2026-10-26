@@ -6,6 +6,7 @@ import {
   type SuiteChanges,
 } from '@hermes-evals/shared';
 import {
+  changesThatCreated,
   lastLoadView,
   loadErrorView,
   suiteDetail,
@@ -13,7 +14,9 @@ import {
   suiteListRow,
   verificationTypesByUse,
   versionOptions,
+  versionsToCompare,
 } from './suite-views.js';
+import { emptyChangeSet } from './format.js';
 import { T0, T1, T2, T3, hash, sourceRow, suiteRow } from './test-rows-spec.js';
 import type { TaskState } from './changes.js';
 
@@ -157,12 +160,14 @@ describe('verificationTypesByUse', () => {
 describe('suiteListRow', () => {
   it('shows the current version at the time the last load confirmed it', () => {
     const v1 = suiteRow(1);
-    const row = suiteListRow(v1, sourceRow(v1, { lastAttemptedAt: T1 }), []);
+    const added = { ...emptyChangeSet(), added: ['total_due'] };
+    const row = suiteListRow(v1, sourceRow(v1, { lastAttemptedAt: T1 }), [], added);
     expect(SuiteListRowSchema.parse(row)).toMatchObject({
       suiteId: v1.id,
       path: './suites/invoices-v1',
       loadedAt: T1.toISOString(),
       verificationTypes: [],
+      currentChanges: added,
     });
   });
 
@@ -176,6 +181,7 @@ describe('suiteListRow', () => {
         lastError: { file: 'suite.yaml', line: null, column: null, message: 'bad', excerpt: null },
       }),
       [],
+      emptyChangeSet(),
     );
     expect(row.loadedAt).toBe(T0.toISOString());
     expect(row.lastLoad.at).toBe(T2.toISOString());
@@ -226,6 +232,7 @@ describe('suiteDetail', () => {
       suite: v2,
       source: sourceRow(v3, { lastAttemptedAt: T3 }),
       versions: [v1, v2, v3],
+      changes: emptyChangeSet(),
       taskRows: [],
       verification: [],
     });
@@ -244,6 +251,7 @@ describe('suiteDetail', () => {
       suite: v1,
       source: sourceRow(v1),
       versions: [v1],
+      changes: emptyChangeSet(),
       taskRows: [],
       verification: [],
     });
@@ -371,5 +379,50 @@ describe('suiteHistory', () => {
       experimentsBySuite: none,
     });
     expect(entries.map((e) => e.sameFilesAs)).toEqual([1, null]);
+  });
+});
+
+describe('changesThatCreated', () => {
+  const v1 = suiteRow(1);
+  const v2 = suiteRow(2, { loadedAt: T2 });
+  const v3 = suiteRow(3, { loadedAt: T3 });
+  const tasksBySuite = new Map([
+    [v1.id, [state('total_due', 'v1')]],
+    [v2.id, [state('total_due', 'v2')]],
+    [v3.id, [state('total_due', 'v2'), state('late_fees', 'v1')]],
+  ]);
+
+  it('keeps naming what created the current version after an unchanged reload', () => {
+    const source = sourceRow(v2, { lastOutcome: 'unchanged' });
+    expect(changesThatCreated(v2, [v1, v2], source, tasksBySuite)).toEqual({
+      ...emptyChangeSet(),
+      changed: ['total_due'],
+    });
+  });
+
+  it('lists every task of a first version as added', () => {
+    expect(changesThatCreated(v1, [v1], sourceRow(v1), tasksBySuite).added).toEqual(['total_due']);
+  });
+
+  it("uses the loader's record when the last load created the version", () => {
+    const source = sourceRow(v3, {
+      lastOutcome: 'created',
+      lastChanges: changes({ added: ['late_fees'], removed: ['old'] }),
+    });
+    expect(changesThatCreated(v3, [v1, v2, v3], source, tasksBySuite).removed).toEqual(['old']);
+  });
+
+  it('gives a reverted current version the changes back from the newest', () => {
+    const source = sourceRow(v1, { lastOutcome: 'unchanged' });
+    expect(changesThatCreated(v1, [v1, v2, v3], source, tasksBySuite)).toEqual({
+      ...emptyChangeSet(),
+      changed: ['total_due'],
+      removed: ['late_fees'],
+    });
+  });
+
+  it('reads only the version, the one before it and the newest', () => {
+    expect(versionsToCompare(v2, [v3, v1, v2]).map((v) => v.versionNumber)).toEqual([2, 1, 3]);
+    expect(versionsToCompare(v1, [v1]).map((v) => v.versionNumber)).toEqual([1]);
   });
 });

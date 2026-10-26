@@ -2,27 +2,27 @@
 
 This document walks through everything a user can do in the UI. For each feature it shows what the user does, which API calls the web app makes, what the API writes to Postgres, which jobs it queues, and what the worker, docker-guard, egress and the trial container do with them.
 
-It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of truth), the design canvas, and the code as it stands on 24 Oct 2026. Where those three disagree, or where something is not decided, the flow says so and the point is collected in [section 19, Open points](#19-open-points-found-while-writing-this).
+It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of truth), the design canvas, and the code as it stands on 26 Oct 2026 (Phase 5b). Where those three disagree, or where something is not decided, the flow says so and the point is collected in [section 19, Open points](#19-open-points-found-while-writing-this).
 
 ## How to read this
 
 - **Built** means code exists and is tested today. **Planned** means it is specified in the plan but not written yet. Each feature section starts with a status line.
 - Diagrams use these participants:
 
-| Name      | What it is                                                                                                               |
-| --------- | ------------------------------------------------------------------------------------------------------------------------ |
-| User      | The person in the browser                                                                                                |
-| Web       | The Vue app (served by nginx, `/api` proxied to the API)                                                                 |
-| API       | NestJS HTTP API. Validates, writes Postgres, queues jobs, serves reads and SSE. Never talks to Docker                    |
-| DB        | PostgreSQL: the tables in section 2, plus pg-boss's job tables                                                           |
-| Queue     | pg-boss, inside the same Postgres. Jobs are rows, so "write rows and queue jobs" commits in one transaction              |
-| Worker    | NestJS worker process. Claims jobs, prepares trial folders, drives trials through the guard, writes events, runs scorers |
-| Guard     | docker-guard: the only process holding the Docker socket. Starts nothing but hardened trial containers                   |
-| Egress    | The trial's only network path out: CONNECT proxy plus model gateway. Holds API keys. Counts tokens per attempt           |
-| Trial     | One container per attempt, running Hermes once (`hermes chat --oneshot --format stream-json`)                            |
-| NousLogin | `nous-login` service: runs Hermes's device login and writes the login into the `nous-home` volume                        |
-| NousProxy | `nous-proxy` service: `hermes proxy start --provider nous`, reads that login, forwards model calls to Nous Portal        |
-| Disk      | `./suites` on disk (read by the loader only) and the blob store under `DATA_DIR/blobs/<sha256>`                          |
+| Name      | What it is                                                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| User      | The person in the browser                                                                                                       |
+| Web       | The Vue app (served by nginx, `/api` proxied to the API)                                                                        |
+| API       | NestJS HTTP API. Validates, writes Postgres, queues jobs, serves reads and SSE. Never talks to Docker                           |
+| DB        | PostgreSQL: the tables in section 2, plus pg-boss's job tables                                                                  |
+| Queue     | pg-boss, inside the same Postgres. Jobs are rows, so "write rows and queue jobs" commits in one transaction                     |
+| Worker    | NestJS worker process. Claims jobs, prepares trial folders, drives trials through the guard, writes events, runs scorers        |
+| Guard     | docker-guard: the only process holding the Docker socket. Starts nothing but hardened trial containers and verifier containers  |
+| Egress    | The trial's only network path out: CONNECT proxy plus model gateway. Holds API keys. Counts tokens per attempt                  |
+| Trial     | One container per attempt, running Hermes once (`hermes chat --oneshot --format stream-json`)                                   |
+| NousLogin | `nous-login` service: runs Hermes's device login and writes the login into the `nous-home` volume                               |
+| NousProxy | `nous-proxy` service: `hermes proxy start --provider nous`, reads that login, forwards model calls to Nous Portal               |
+| Disk      | `./suites` on disk (read by the loader; written only by the save of a draft) and the blob store under `DATA_DIR/blobs/<sha256>` |
 
 ## Contents
 
@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`); the platform additions of Phase 6 (home seeds, the agent's memory files collected, skill loading, the launch check for unset MCP variables) and the two sample MCP servers, `invoice-db` (stdio, in the trial image) and `vendor-directory` (http, Compose profile `samples`, on a network only egress shares; `docs/phases/phase-6.md`); the five sample suites and the skills and documents their arms use (Phase 6b; `docs/phases/phase-6b.md`). **Planned**: suite authoring (Phase 5b).
+Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`); the platform additions of Phase 6 (home seeds, the agent's memory files collected, skill loading, the launch check for unset MCP variables) and the two sample MCP servers, `invoice-db` (stdio, in the trial image) and `vendor-directory` (http, Compose profile `samples`, on a network only egress shares; `docs/phases/phase-6.md`); the five sample suites and the skills and documents their arms use (Phase 6b; `docs/phases/phase-6b.md`); suite authoring in the UI, the save jobs and verifier scripts in their own containers (Phase 5b; `docs/phases/phase-5b.md`).
 
 ```mermaid
 flowchart LR
@@ -76,6 +76,9 @@ flowchart LR
     T["trial container<br/>Hermes, uid 10000<br/>/opt/data + /workspace"]
   end
 
+  VC["verifier container (Phase 5b)<br/>network: none, python3, uid 10000<br/>inputs read-only at /check"]
+  S[("./suites<br/>read-write for the save of a draft alone")]
+
   E["egress<br/>CONNECT proxy :3128<br/>model + MCP gateway :8080"]
 
   subgraph edge["edge network (internet)"]
@@ -96,6 +99,8 @@ flowchart LR
   WK -- "filtered Docker API<br/>unix socket" --> G
   G -- "Docker socket" --> D
   D -- "creates" --> T
+  D -- "creates, one per verifier run" --> VC
+  WK -- "loads suites, saves a draft<br/>through staging and rename" --> S
   WK -- "attempt tokens, LLM judge calls<br/>unix socket" --> E
   T -- "model calls with attempt token" --> E
   T -- "HTTPS via CONNECT" --> E
@@ -115,14 +120,15 @@ What the picture enforces:
 - The trial can reach **only egress**. Postgres, the API, the host, other trials and the internet are not on its network. Its filesystem is two mounts: its own home (`/opt/data`) and workspace (`/workspace`).
 - **No provider credential enters a trial.** The trial gets a per-attempt token. Egress swaps it for the real API key, or forwards Nous calls to nous-proxy, which holds the OAuth login. The token dies when the attempt ends. The same holds for http MCP header values, which egress adds. The one exception is a stdio MCP server's env values: that server runs inside the trial, so the agent can read them, and the UI says so (section 9.4).
 - **The worker and the API hold no provider key either.** Compose blanks every key in their environments, and the LLM judge's model calls go through egress's admin socket, one short-lived registration per judge call (section 13).
-- **Only docker-guard can touch Docker**, and it refuses anything that is not a trial container of the pinned image with the hardened settings.
+- **Only docker-guard can touch Docker**, and it refuses anything that is not a trial container of the pinned image with the hardened settings, or, since Phase 5b, a verifier container of one exact spec: the trial image's python3, no network, its inputs read-only (section 8.5).
+- **`./suites` is written by one job only**: the worker's save of a draft, through a staging folder and renames, under the folder's lock. The loader only reads it, and the API does not mount it (sections 8.1 and 8.6).
 - The API never talks to Docker. The worker never serves HTTP.
 
 ---
 
 ## 2. Data model
 
-Status: **Built** (migrations 0000 to 0005, integrity triggers, tests on PGlite and Postgres 17). Migration 0004 added the `provider_disconnected` pause reason and `workers.host_proxy`; 0005 added `runs.next_trigger` and the `over_budget` artifact reason. **Planned**: the suite draft tables (Phase 5b).
+Status: **Built** (migrations 0000 to 0009, integrity triggers, tests on PGlite and Postgres 17). Migration 0004 added the `provider_disconnected` pause reason and `workers.host_proxy`; 0005 added `runs.next_trigger` and the `over_budget` artifact reason; 0009 the suite draft tables, `task_root_files` and the guards that keep a skill or document a configuration version names (Phase 5b).
 
 ```mermaid
 erDiagram
@@ -150,16 +156,23 @@ erDiagram
   attempts ||--o{ evaluations : "scoring passes (generations)"
   evaluations ||--o{ scores : "one per verification key"
   workers ||--o{ attempts : "sandbox host"
+  tasks ||--o{ task_root_files : "task.yaml, prompt.md, reference.json"
+  suite_drafts }o--o| suites : "base version"
+  suite_drafts ||--o{ suite_draft_tasks : "tasks, in order"
+  suite_draft_tasks }o--o| tasks : "base or restored-from task"
+  suite_draft_tasks ||--o{ suite_draft_files : "files by kind"
+  suite_draft_files }o--|| blobs : "content by sha256"
 ```
 
 The rules that matter for every flow below, all enforced by the database whatever code path writes:
 
-- **Evidence is immutable.** Events, artifacts and scores are append-only. Suites, tasks, task files, skills, documents and blobs never change. Runs, attempts, experiments and evaluations are never deleted.
+- **Evidence is immutable.** Events, artifacts and scores are append-only. Suites, tasks, task files, task root files, skills, documents and blobs never change. Runs, attempts, experiments and evaluations are never deleted.
 - **Only the lease holder writes.** Events and artifacts can be added only while their attempt is `running` and its lease is not revoked. Every worker write is fenced on the lease token.
 - **Experiments freeze what they test.** Launch needs frozen configuration versions and valid tasks of the experiment's own suite version.
 - **Publishing a score set is strict.** It needs the run's current attempt and exactly the task's declared keys, and fails if a newer generation is already published.
 - **`results_revision`** on the experiment goes up whenever a run changes status or a score set is published or superseded. The comparison cache and the verdict history key off it.
 - **Lock order** in every status-changing transaction: experiment, then runs, attempts, evaluations.
+- **Drafts are working state, not evidence** (Phase 5b): the one mutable suite data, never launched from, deleted on save or discard. A skill or document that a configuration version names cannot be deleted.
 
 ---
 
@@ -511,13 +524,15 @@ flowchart TD
 
 ## 8. Suites and tasks
 
-Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5); home seeds, the expected home and home checks in the format, the loader and Task detail, and all 12 `invoices-v1` tasks (Phase 6; `docs/phases/phase-6.md`); the four capability suites `mcp-v1`, `memory-v1`, `knowledge-v1` and `tools-v1`, so the suite list holds five suites (Phase 6b; `docs/phases/phase-6b.md`). **Planned**: authoring in the UI (Phase 5b).
+Status: **Built** (Phase 1): the file format, the loader in the worker with self-checks and version numbering, the suites endpoints and version history, and the first `invoices-v1` task (`total_due`); the list, suite, task and task-diff pages against the real API, without authoring (Phase 5); home seeds, the expected home and home checks in the format, the loader and Task detail, and all 12 `invoices-v1` tasks (Phase 6; `docs/phases/phase-6.md`); the four capability suites `mcp-v1`, `memory-v1`, `knowledge-v1` and `tools-v1`, so the suite list holds five suites (Phase 6b; `docs/phases/phase-6b.md`); authoring in the UI, Reload all as one job per directory, and verifier scripts in their own containers (Phase 5b; `docs/phases/phase-5b.md`).
 
-Suites are folders under `./suites`, edited on disk with any editor. It shows what was loaded, whether every task passes its own self-check, and every version. The repository ships five: `invoices-v1` (12 tasks), `mcp-v1`, `memory-v1` and `knowledge-v1` (8 each) and `tools-v1` (6), each measuring one thing a configuration can vary. Each `suite.yaml` description names the experiment that measures it (the API's suite list carries it; no page shows it yet), and the skills and documents its arms need are in `samples/` (plan 18.3). Phase 5b adds creating and editing suites in the UI: edits go into a draft, and saving writes the same files and loads them as a reload does (plan section 4.6). Its flows are added here when that phase is built.
+Suites are folders under `./suites`, edited on disk with any editor or in the web app (sections 8.3 to 8.11). It shows what was loaded, whether every task passes its own self-check, and every version. The repository ships five: `invoices-v1` (12 tasks), `mcp-v1`, `memory-v1` and `knowledge-v1` (8 each) and `tools-v1` (6), each measuring one thing a configuration can vary. Each `suite.yaml` description names the experiment that measures it (Suite detail shows it), and the skills and documents its arms need are in `samples/` (plan 18.3). Since Phase 5b suites can be created and edited in the UI: edits go into a draft, and saving writes the same files and loads them as a reload does (plan section 4.6).
 
 ### 8.1 Reload from disk
 
-The user clicks **Reload all from disk** on the suite list, or **Reload from disk** on one suite. The loader runs in the **worker**, because self-checks run the suite's own verifier scripts (built in Phase 1, decision D1). The API sends a `load-suites` job and waits for its result. The worker also loads every suite when it starts.
+Status: **Built** (Phase 1); Reload all as a scan and one job per directory, with each folder's progress on the suite list, since Phase 5b.
+
+The user clicks **Reload all from disk** on the suite list, or **Reload from disk** on one suite. The loader runs in the **worker**, because self-checks run the suite's own verifier scripts (built in Phase 1, decision D1). The API sends a `load-suites` job and waits for its result. Since Phase 5b, Reload all first sends a scan (vanished directories are marked missing) and then one `load-suites` job per directory, and the suite list polls `GET /suites/reload/progress` to show each folder queued, loading, done or failed. The worker also loads every suite when it starts.
 
 ```mermaid
 sequenceDiagram
@@ -527,7 +542,7 @@ sequenceDiagram
   participant A as API
   participant Q as Queue (pg-boss)
   participant WK as Worker (suite loader)
-  participant FS as ./suites on disk (read-only)
+  participant FS as ./suites on disk (the loader only reads)
   participant B as Blob store
   participant DB as DB
 
@@ -543,7 +558,7 @@ sequenceDiagram
     WK->>DB: BEGIN, advisory lock on the directory
     WK->>FS: read suite.yaml and every task file (never follows a link)
     WK->>WK: hash every file, parse task.yaml, validate with zod<br/>one primary key, unique keys, known scorer types, valid params
-    WK->>WK: self-check each task against its own reference answer, expected workspace or expected home<br/>(verifier scripts as a subprocess, the task's timeout_s, minimal env)
+    WK->>WK: self-check each task against its own reference answer, expected workspace or expected home<br/>(each verifier script in its own container through docker-guard, the task's timeout_s, no env but PATH)
     WK->>B: write each fixture, home seed, verifier, rubric, expected and expected-home file by sha256 (temp, fsync, rename)
     WK->>DB: insert blobs rows (new content only)
     alt same content hash and check hash as an existing version
@@ -579,6 +594,8 @@ After a load, **nothing reads `./suites` again**. Trials, verifiers, judges and 
 
 ### 8.2 Browsing suites and tasks
 
+Status: **Built** (the API in Phase 1, the pages in Phase 5); since Phase 5b the list's last change is the one that created the version shown, task diffs list the root files' sizes and hashes and line diffs of small text files, and Task detail lists the experiments of every version of the task.
+
 | User action                           | Call                                               | What the API reads                                                                                                                                                                             |
 | ------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Open Suites                           | `GET /suites`                                      | `suite_sources` with the current `suites` row: name, v5, label 0.3, task and valid counts, last change                                                                                         |
@@ -588,7 +605,7 @@ After a load, **nothing reads `./suites` again**. Trials, verifiers, judges and 
 | Expand a failed self-check            | (already in the suite payload)                     | verifier output, the contract, what changed                                                                                                                                                    |
 | Open a task                           | `GET /suites/:id/tasks/:key`                       | prompt, fixtures with hashes, home seeds and expected-home files (`homeFiles`, Phase 6), verification entries, hidden reference, verifier source, self-check, limits, experiments that used it |
 | Task History                          | `GET /suites/:id/tasks/:key/history`               | the task key's versions and where each first appeared                                                                                                                                          |
-| Open a diff                           | `GET /suites/:id/tasks/:key/diff?against=:suiteId` | prompt and task.yaml text diffs, reference JSON diff, file list changes                                                                                                                        |
+| Open a diff                           | `GET /suites/:id/tasks/:key/diff?against=:suiteId` | prompt and task.yaml text diffs, reference JSON diff, file list changes with task.yaml, prompt.md and reference.json first, line diffs of changed text files up to 64 KiB                      |
 | Preview or download a fixture         | `GET /suites/:id/tasks/:key/fixtures/:path`        | the blob by hash                                                                                                                                                                               |
 
 ```mermaid
@@ -622,11 +639,299 @@ The reference answer is shown to the user (it is their own task) but marked "Hid
 
 **Home files on Task detail** (Phase 6). A task that seeds the agent's memory (`home/memories/MEMORY.md`, `USER.md`) shows a **Home seeds** panel after Fixtures, marked visible to the agent: "Copied into the agent's memories/ before every run, in every configuration; read only with memory on". A task that declares `self_check.expected_home` shows an **Expected home** panel after the reference answer, marked hidden: what a home check expects the memory files to hold, laid over the seeds, never copied into a run. Each row has the path in the task folder, its kind, where it sits in the home (`memories/USER.md`, as the API works it out), size, hash, and the file's text (up to 16 KB), the first one open. A `file_check` with `root: home` carries a `root: home` tag, and its sentence reads "file_check: memories/USER.md in the home exists …". A home check's self-check reads "passes on the expected home; fails on the home seeds alone, as it should"; one that passes on the seeds alone makes the task invalid, "passes on the home seeds alone too, so it would pass any agent". A verifier's contract now reads `--answer <file> --workspace <dir> --home <dir>`.
 
+### 8.3 Authoring: a new suite
+
+Status: **Built** (Phase 5b; `docs/phases/phase-5b.md`; boards SA.1, SA.2 and Flow E steps 1 to 3).
+
+Files stay the source of truth (plan 4.6). An edit never touches a version: it goes into a draft, one per suite folder (or new suite name), stored in Postgres and the blob store, which saves on every change and lasts until it is saved or discarded. Nothing reaches `./suites` before Save (section 8.6). Draft routes address a suite by its folder name. The suite list marks a folder that has a draft with a chip ("draft · 3 changes", "Draft based on v6, last edited 16:31" on hover) and lists new suites not saved yet above its table.
+
+Suites › New suite (or Create a suite on the empty list) opens a 640 px form. The name is also the folder, `./suites/<name>/`, fixed after the first save; it is checked as it is typed against the folder rule and the names suites and drafts hold.
+
+```mermaid
+flowchart TD
+  N["Suites › New suite"] --> NAME{"Name: a folder name,<br/>held by no suite and no draft?"}
+  NAME -- "no" --> MSG["The reason under the field, Create disabled<br/>'invoices-v1 is already used by ./suites/invoices-v1.'"]
+  NAME -- yes --> FROM{"Start from"}
+  FROM -- "Empty" --> E["POST /suites/drafts, from empty"]
+  FROM -- "Copy of a suite" --> C["POST /suites/drafts, from a copy of a version<br/>every task at that version, verify/ scripts included<br/>no confirmation: the scripts are on disk already"]
+  FROM -- "A .zip file" --> Z["The import dialog (section 8.10)"]
+  E --> D["The new suite's draft (section 8.4), every task added<br/>'Add at least one task to save v1.' while it has none"]
+  C --> D
+  Z --> D
+  E -. "409: the name was taken meanwhile" .-> MSG
+```
+
+### 8.4 Authoring: drafts and the task editor
+
+Status: **Built** (Phase 5b; boards SA.3 to SA.8 and SA.13).
+
+A draft records its base version and every file of the folder: the texts the forms edit verbatim (`task.yaml`, `prompt.md`, `reference.json`, rubrics), every other file as a blob with its kind (fixture, expected, expected_home, home_seed, verifier, other). A draft of a folder on disk is built from its current version in the database (the API has no suites mount), with every task `unchanged`.
+
+| User action                                                 | Call                                                             | What happens                                                                                                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Suite detail › Add task, Edit details, a row's Edit         | `POST /suites/:suite/draft` (201 new, 200 the open one)          | a draft on the folder's current version, every task `unchanged`; the draft page is `/suites/:suite/draft`                                        |
+| Add task › Blank task, Duplicate a task…, copy from a suite | `POST /suites/:suite/draft/tasks`                                | new draft tasks; a duplicated or copied task carries its files' blobs (a copied verifier check its `verify/` folder)                             |
+| Edit details (label, description), drag a row               | `PATCH /suites/:suite/draft` (Edit details debounced 500 ms)     | the label, the description, or the order written to suite.yaml at save                                                                           |
+| Edit the Form, prompt, reference or task.yaml tab           | `PUT /suites/:suite/draft/tasks/:key` (debounced 400 ms)         | stored at once; task.yaml is patched through the `yaml` Document API, so comments and formatting survive; readiness runs again                   |
+| Drop files on Workspace, Expected or Home files             | `POST …/tasks/:key/files` (multipart `file`, `kind`, `path`)     | the file goes to the blob store first (temp file, fsync, rename), then the draft names it; over 25 MB is refused before sending (413 in the API) |
+| Rename, move or delete a file                               | `PATCH` / `DELETE …/tasks/:key/files/:path`                      | any path under `verify/` is refused (400): scripts are code, edited on disk or brought by a trusted zip (section 8.10)                           |
+| View a verifier script                                      | `GET …/tasks/:key/files/:path`                                   | the source, read-only, with its path, hash and Copy path                                                                                         |
+| Try it on an answer check                                   | `POST …/tasks/:key/try` `{ key, reply }`                         | extraction and that check's scorer, in the API, on the pasted reply or the reference; nothing is stored and no model is called                   |
+| Remove a task, Undo, Revert                                 | `DELETE …/tasks/:key`, `PUT { removed: false }`, `POST …/revert` | a base task is marked removed (its folder goes at save), an added one dropped; Revert puts the base version's files back                         |
+| Discard the draft                                           | `DELETE /suites/:suite/draft`                                    | 204, after "Discard this draft? Nothing on disk changes."; nothing on disk changes                                                               |
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant W as Web (task editor)
+  participant A as API
+  participant DB as DB
+  participant B as Blob store
+
+  U->>W: types in the Form tab
+  W->>W: waits 400 ms after the last change, one write at a time
+  W->>A: PUT /suites/:suite/draft/tasks/:key with the form and its revision
+  A->>DB: lock the draft row, refuse while a save runs or for a stale revision (409)
+  A->>A: patch task.yaml (only the changed nodes), keep prompt.md and reference.json as typed
+  A->>A: readiness, the 13 rules, without running user code<br/>(shared schemas, the loader's task analysis on an in-memory folder,<br/>answer checks scored against the reference, the cross-checks)
+  A->>DB: store texts, state (by content hash, so an undone edit is unchanged again), readiness, revisions
+  A-->>W: the task, its files and readiness
+  W->>W: the readiness panel, and a problem's Fix link opens its field
+  U->>W: drops invoices.csv
+  W->>A: POST …/files (multipart, kind fixture)
+  A->>B: write by sha256 (temp, fsync, rename)
+  A->>DB: blobs row, draft file row, readiness again
+```
+
+The form and task.yaml are never sent together, so each tab follows the other; a task.yaml the form cannot hold (an unknown key, a value of the wrong type, two primaries) locks the form under a banner, and a form sent meanwhile answers 409. A rename is sent only once the key is a free folder name. A failed write is kept, with "draft · not saved" and Try again. Leaving the editor while an upload runs asks first ("1 upload is still running. Leave anyway?").
+
+The readiness rules, in the order the panel lists them: key and summary; task.yaml is valid; one primary check; check settings; reference.json parses; every check path resolves in the reference; file checks have an expected workspace (and home checks an expected home); the prompt asks for the answer block; files the prompt mentions exist; no text fixture holds a reference value of 4 or more characters; files within the limits; the self-check; the negative control. Problems never block saving: a task with problems is saved as invalid, as on disk.
+
+### 8.5 Authoring: a self-check in the worker
+
+Status: **Built** (Phase 5b; boards SA.7 and SA.8).
+
+File checks and verifier scripts run user code or need a known-good folder, so the API cannot self-check them; the panel shows them pending until the user clicks **Run self-check**, and again after any edit.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant W as Web
+  participant A as API
+  participant Q as Queue
+  participant WK as Worker
+  participant G as Guard
+  participant DB as DB
+
+  W->>A: POST /suites/:suite/draft/tasks/:key/self-check
+  A->>DB: is a worker live?
+  alt no live worker
+    A-->>W: 503 "The worker isn't running, so file checks and scripts can't be self-checked. Your draft is kept."
+  end
+  A->>Q: self-check-draft with the draft task and its content hash, and wait
+  Q->>WK: job
+  WK->>WK: write the draft task from its blobs into scratch, analyse it with the loader
+  WK->>G: each verifier in its own container (below)
+  WK->>WK: the loader's own task self-check, the positive run, then the negative control
+  WK-->>Q: the self-check record, with the content hash it ran on
+  A->>DB: store it on the draft task, readiness again (rows 12 and 13)
+  A-->>W: the results, with each verifier's command and output
+```
+
+**Every verifier runs in a container of its own** since Phase 5b (plan 14, R7): for a draft's self-check, a load's self-checks and scoring alike. The worker copies the script's folder, the answer, the workspace and the home into a scratch subpath of the trials volume and asks docker-guard for `hermes-evals-verify-<id>`, which must match the verifier policy exactly:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant WK as Worker
+  participant V as Trials volume
+  participant G as Guard
+  participant C as Verifier container
+
+  WK->>V: copy verify/, answer.json, workspace/ and home/ into verify-ID
+  WK->>G: create hermes-evals-verify-ID
+  alt any other shape: a network, a writable or second mount, another image, a capability, more environment
+    G-->>WK: 403 refused
+    WK->>WK: VerifierUnavailable: the load records an error, scoring retries, a draft answers 503
+  end
+  G->>C: the trial image's python3, network none, read-only root and inputs,<br/>a 64 MiB /tmp, uid 10000, no capabilities, PATH only, pids and memory limits
+  C-->>WK: the last stdout line, a JSON score and comment
+  WK->>G: kill at the deadline, then remove the container
+  WK->>V: remove verify-ID
+```
+
+### 8.6 Authoring: review and save
+
+Status: **Built** (Phase 5b; boards SA.11, SaveSteps and Flow E step 7).
+
+**Review and save** (`/suites/:suite/save`, `GET /suites/:suite/draft/review`) lists each change with its diff, every file the save writes, and each changed task's readiness; tasks with problems are named ("Save with 1 invalid task?"). **Save as vN** sends `save-suite-draft` and waits. The draft is claimed while it runs: other writes answer 409 and the page shows the steps (staging, loading, self-checks, moving).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant W as Web (SaveSteps)
+  participant A as API
+  participant Q as Queue
+  participant WK as Worker (save handler)
+  participant FS as ./suites (read-write for the save alone)
+  participant DB as DB
+
+  W->>A: POST /suites/:suite/draft/save with the label and revision
+  alt no live worker
+    A-->>W: 503 "No worker is running. Saving needs the worker. Your draft is kept."
+  end
+  A->>DB: claim the draft (save_started_at)
+  A->>Q: save-suite-draft, and wait
+  Q->>WK: job
+  WK->>DB: advisory lock on the folder, one transaction
+  WK->>WK: 1. conflict check, the current version still the base,<br/>the files on disk hashing to it with its task folders
+  alt the folder moved on
+    WK-->>A: conflict (files edited on disk are loaded first, as the next version)
+    A-->>W: 409 with the new version and the tasks both sides changed (section 8.7)
+  end
+  WK->>FS: 2. list the live folder, build the staging folder .draft-ID beside it,<br/>the draft's files from blobs, every entry it does not decide copied untouched
+  WK->>WK: 3. load the staging folder with the loader, self-checks included
+  alt a folder-level failure (a task.yaml that does not parse, an unsafe file, a taken name)
+    WK->>FS: remove the staging folder
+    A-->>W: 422 "Not saved. (file) line N: (message). Nothing on disk changed. Your draft is kept."
+  end
+  WK->>WK: 4. the disk checked again, hash, task folders and listing
+  alt changed by hand during the save
+    A-->>W: 409 disk_changed for a stored file, else 422, changed on disk during the save
+  end
+  WK->>FS: live folder aside, staging into place (nothing moves when staging hashes like the base)
+  WK->>DB: record that read under the folder (a new version, or unchanged), 5. delete the draft, commit
+  WK->>FS: remove the old folder
+  A-->>W: "v7 saved · 1 added · 12 tasks, 12 valid", and New experiment on v7
+```
+
+What staging copies: a file is the draft's to decide when the draft holds it or the base version stored it; every other entry of the live folder (`verify/`, a README, notes, hidden files, links) is copied untouched. A save that fails after the first rename puts the live folder back. A save that outlasts `SUITE_RELOAD_TIMEOUT_S` answers 504 and goes on; the draft page shows its steps until it ends.
+
+### 8.7 Authoring: a conflict, and Combine
+
+Status: **Built** (Phase 5b; board SA.12).
+
+A draft on v6 can find the folder moved on: a reload created v7 (shown as soon as the draft opens), or files were edited on disk and not reloaded (found by the save, which loads them as v7 first). The draft bar turns amber, names the new version, when it was loaded, its changes and the tasks both sides changed, and asks for one choice per such task.
+
+```mermaid
+flowchart TD
+  S["Save, or open the draft"] --> C{"Current version = the draft's base,<br/>and the disk hashes to it?"}
+  C -- yes --> OK["Save goes on"]
+  C -- "no: a reload made v7" --> M["Conflict, version_moved"]
+  C -- "no: files edited on disk" --> D["The save loads them as v7 first,<br/>then: conflict, disk_changed"]
+  M --> R["Draft bar: v7's changes, your changes, the tasks both changed"]
+  D --> R
+  R --> P["Per overlapping task: Keep my version or Keep the version on disk"]
+  P --> CB["Combine: POST /suites/:suite/draft/rebase with onto 7 and the choices"]
+  CB --> N["The draft is now on v7; Review and save as v8"]
+  CB -- "the folder moved again" --> R
+```
+
+Review and save is blocked while the draft carries a conflict, and a 409 at save goes back to the draft page. Discard stays available.
+
+### 8.8 Authoring: tasks from CSV or JSONL
+
+Status: **Built** (Phase 5b; board SA.9).
+
+**Import tasks** (`/suites/:suite/import`, from Add task › Import from CSV or JSONL; it opens the suite's draft) makes many tasks over the same files. The file is parsed in the API: CSV (comma, semicolon or tab, read from the header line) or JSONL, UTF-8 or UTF-16 with its mark, at most 5 MB and 500 rows. Each column maps to the task key (or a key prefix generating `overdue_q01`, …), the summary (or the prompt's first 80 characters), the prompt, the whole reference, or the value at the answer path. The new tasks share workspace files (none, a task's, or uploaded), checks (new, or a task's) and limits, and the answer paragraph can be appended to every prompt.
+
+```mermaid
+flowchart TD
+  U["1 Upload: POST …/draft/import/validate with the file alone"] --> P{"Readable?"}
+  P -- no --> PR["The refusal in the board's words:<br/>'questions.xlsx: use CSV or JSONL.', '1,240 rows. The limit is 500 per import.'"]
+  P -- yes --> M["2 Map columns (ColumnMapper)<br/>'Map one column to Prompt.' until it is done"]
+  M --> S["3 Shared settings: workspace, checks, limits, answer paragraph"]
+  S --> V["4 Preview: validate with the settings<br/>each row's key, reference value and readiness"]
+  V --> A{"Add: POST …/draft/import"}
+  A -- "a key that is not a folder name, or is taken" --> F["422 with the preview: fix the key on its row"]
+  F --> A
+  A -- ok --> T["201: the rows are added tasks of the draft; nothing on disk until Save"]
+```
+
+### 8.9 Authoring: download a version, restore a task
+
+Status: **Built** (Phase 5b; boards SA.3 and SA.10).
+
+**Download .zip** on Suite detail (and on the draft, for the version on screen): `GET /suites/:suite/versions/:n/zip` streams `<suite>-v<n>.zip` from the version's blobs; suite.yaml is written anew from the stored version, and files the loader never stored (a README) are not in it. **Restore this version into the draft** on an older version's Task detail: `POST /suites/:suite/draft/tasks` with `kind: restore`, the suite version and the key, opening the draft if needed, copies that task version's texts and files from its blobs into the draft, marked "restored from vN"; the save writes them, `verify/` included, and keeps the author's unstored files beside them.
+
+### 8.10 Authoring: a suite from a .zip
+
+Status: **Built** (Phase 5b; board SA.10, plan R7).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant W as Web (ImportSuiteDialog)
+  participant A as API
+  participant B as Blob store
+
+  U->>W: Import .zip (up to 100 MB)
+  W->>A: POST /suites/import/validate (multipart)
+  A->>A: index checks before reading, no links, absolute paths or .., at most 20,000 entries,<br/>no file over 25 MB, depth 12, no paths that differ only in case, nothing encrypted
+  A->>A: suite.yaml, folder names and every task.yaml checked with the loader's rules
+  A->>B: stream the files into the blob store, analyse each task, no code runs
+  A-->>W: the suite, its tasks (worker-only checks "self-check not run"),<br/>every verify/ file with path, size and SHA-256, a free name if the name is taken, and a token
+  W->>W: "This suite contains code", Import disabled until "I trust these scripts" is ticked
+  U->>W: ticks, Import as a draft
+  W->>A: POST /suites/import with the token, the name and trustScripts true
+  alt scripts and no tick
+    A-->>W: 409 "Confirm the verifier scripts first."
+  else an unknown or expired token
+    A-->>W: 404 or 410, validate again
+  end
+  A-->>W: the draft of the new suite, every task added, saved as v1 after review (section 8.6)
+```
+
+A refused zip shows its reasons in the board's words, such as "The zip has a symbolic link at …", "… points outside the suite.", "suite.yaml: version_label is required." or "Over 20,000 files.". A taken name offers Import as a new suite named `<name>-copy`, or Open the existing suite. A zip without scripts shows no panel. Copy of a suite needs no tick: its scripts are already on disk.
+
+### 8.11 Flow E: from nothing to a first experiment
+
+Status: **Built** (Phase 5b; board FlowE). Walked in the browser on the Compose stack (`docs/phases/phase-5b.md` 5.4; the manual walk is `docs/flows.md`, "Flow E").
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant W as Web
+  participant A as API
+  participant WK as Worker
+  participant G as Guard
+  participant FS as ./suites
+
+  U->>W: Suites › New suite, name and description, Create
+  W->>A: POST /suites/drafts from empty
+  A-->>W: the draft, no tasks, "Add at least one task to save v1."
+  U->>W: Add task › Blank task, key, summary, prompt, Add answer instructions
+  W->>A: PUT the task, debounced
+  A-->>W: readiness, two files mentioned but not in the workspace, no reference, no check
+  U->>W: drop statements.csv and ledger.csv, the reference, the answer path, a Number within tolerance check
+  W->>A: POST the files, PUT the task
+  A-->>W: readiness "Ready to save"
+  U->>W: Try it with a pasted reply
+  W->>A: POST …/try
+  A-->>W: extracted, value 2, passed, nothing stored
+  U->>W: Review and save as v1, Save as v1
+  W->>A: POST …/draft/save
+  A->>WK: save-suite-draft
+  WK->>FS: staging folder, loaded with self-checks, renamed into place
+  WK->>G: verifier containers for any verify/ scripts
+  WK-->>A: v1 created
+  A-->>W: "v1 saved · 1 added: unmatched_lines · 1 task, 1 valid"
+  U->>W: New experiment on v1
+  W->>W: /experiments/new with the suite preselected and its valid tasks
+  U->>W: pick the configurations, Launch
+  W->>A: POST /experiments, as in section 11
+```
+
+The experiment on v1 runs like any other: it is pinned to v1, and a later save creates v2 for future experiments only.
+
 ---
 
 ## 9. Resources: skills, documents, MCP servers, secrets
 
-Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2); the four tabs against the real API (Phase 5).
+Status: **Built**: the tables, every endpoint and the MCP test handler (Phase 1); the http branch of Test start through the egress MCP gateway (Phase 2); the four tabs against the real API (Phase 5); deleting an unused skill or document, and a passing Test start of an unsaved MCP form kept when it is saved (Phase 5b).
 
 Resources are the building blocks configurations point at. Every resource version is immutable once a configuration uses it.
 
@@ -664,6 +969,8 @@ Skill detail (`GET /resources/skills/:id/files/:path`, `GET /resources/skills/:i
 ### 9.2 Upload a document
 
 `POST /resources/documents` (50 MB cap) stores the content in the blob store by sha256 and inserts a `documents` row. Documents attach to configurations only. At run time they are copied into the workspace under `docs/`, and the artifact list later marks them unchanged or modified.
+
+**Delete** (Phase 5b). `DELETE /resources/skills/:id` and `DELETE /resources/documents/:id` remove a skill or document that no configuration version names, and answer 204. One that a version names stays, because a configuration version keeps what it was saved with: 409 with the configurations in `usedBy`, which the confirmation quotes. Migration 0009's guard catches a configuration saved between the check and the delete, so both never commit. The skill tree and the blob stay on disk (content may be shared).
 
 ### 9.3 Define and test an MCP server
 
@@ -1456,21 +1763,22 @@ Actions in the drawer:
 
 Each of these needs a decision or a fix before the matching code is written.
 
-| #   | Where               | Point                                                                                                                                                                                                                                                                                                                                                                             | Suggested resolution                                                                                                              |
-| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).                                                                     | Done. Follow-ups are points 14 to 16.                                                                                             |
-| 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                                                                                   | Done.                                                                                                                             |
-| 3   | API surface         | **Resolved.** Phase 1 built its own routes (`GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route); Phase 2 built `GET /experiments/new-options` and the artifact preview route. All are in Swagger and plan section 11. | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 4   | Banner on Resources | **Resolved in Phase 5**, as suggested: the banner shows on Resources and is hidden on Suites only. Before, the web shell hid it on Suites and Resources (designer note), while the plan and the design brief exempt only Suites.                                                                                                                                                  | Done (`docs/phases/phase-5.md` section 2.5).                                                                                      |
-| 5   | Pause reason        | **Resolved in Phase 2.** `provider_disconnected` is in migration 0004 and `packages/shared`.                                                                                                                                                                                                                                                                                      | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 6   | Network events      | **Resolved in Phase 2.** Subtype `network`, with a defined payload (kind, decision, background, and host, port, reason, status, ms, model, server, method and tokens where known).                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 7   | Host login status   | **Resolved in Phase 2**, as suggested: egress's admin `/health` reports the host forward, the worker records `workers.host_proxy`, and `GET /providers` reports `host` or `host_unreachable`.                                                                                                                                                                                     | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                                                                                              | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2). |
-| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling is built in Phase 5: the list every 5 s while anything runs, the inspector every 1 s while a run is live.                                                                                                                           | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 10  | Spend ceiling       | **Resolved in Phase 2.** Launch is allowed over the ceiling; the spend guard pauses at it.                                                                                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 11  | Launch and sandbox  | **Resolved in Phase 2.** Launch answers 409 when no connected worker has proven sandbox isolation.                                                                                                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are built in Phase 5.                                                                                                                                                                                                                                                         | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
-| 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                                                                                    | Done.                                                                                                                             |
-| 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                                                                                 | Done.                                                                                                                             |
-| 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                                                                                       | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                     |
-| 16  | Egress allowlist    | **Resolved in Phase 2.** In allowlist mode egress refuses every CONNECT and plain-http request before any DNS lookup.                                                                                                                                                                                                                                                             | Done (`docs/phases/phase-2.md` section 2.3).                                                                                      |
+| #   | Where               | Point                                                                                                                                                                                                                                                                                                                                                                             | Suggested resolution                                                                                                                           |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).                                                                     | Done. Follow-ups are points 14 to 16.                                                                                                          |
+| 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                                                                                   | Done.                                                                                                                                          |
+| 3   | API surface         | **Resolved.** Phase 1 built its own routes (`GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route); Phase 2 built `GET /experiments/new-options` and the artifact preview route. All are in Swagger and plan section 11. | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 4   | Banner on Resources | **Resolved in Phase 5**, as suggested: the banner shows on Resources and is hidden on Suites only. Before, the web shell hid it on Suites and Resources (designer note), while the plan and the design brief exempt only Suites.                                                                                                                                                  | Done (`docs/phases/phase-5.md` section 2.5).                                                                                                   |
+| 5   | Pause reason        | **Resolved in Phase 2.** `provider_disconnected` is in migration 0004 and `packages/shared`.                                                                                                                                                                                                                                                                                      | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 6   | Network events      | **Resolved in Phase 2.** Subtype `network`, with a defined payload (kind, decision, background, and host, port, reason, status, ms, model, server, method and tokens where known).                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 7   | Host login status   | **Resolved in Phase 2**, as suggested: egress's admin `/health` reports the host forward, the worker records `workers.host_proxy`, and `GET /providers` reports `host` or `host_unreachable`.                                                                                                                                                                                     | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                                                                                              | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2).              |
+| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling is built in Phase 5: the list every 5 s while anything runs, the inspector every 1 s while a run is live.                                                                                                                           | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 10  | Spend ceiling       | **Resolved in Phase 2.** Launch is allowed over the ceiling; the spend guard pauses at it.                                                                                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 11  | Launch and sandbox  | **Resolved in Phase 2.** Launch answers 409 when no connected worker has proven sandbox isolation.                                                                                                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are built in Phase 5.                                                                                                                                                                                                                                                         | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                                                                                    | Done.                                                                                                                                          |
+| 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                                                                                 | Done.                                                                                                                                          |
+| 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                                                                                       | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                                  |
+| 16  | Egress allowlist    | **Resolved in Phase 2.** In allowlist mode egress refuses every CONNECT and plain-http request before any DNS lookup.                                                                                                                                                                                                                                                             | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
+| 17  | Save refusals       | **Open (Phase 5b).** The web fixtures' `save-failed` scenario, after SA.11's sample, shows a save refused at loading for an unknown key in task.yaml ("unknown key prmary"). The API saves a task with an unknown key as invalid (section 8.6) and refuses a save only for a task.yaml or suite.yaml that does not parse, an unsafe file or a taken name.                         | Change the scenario's example to a task.yaml that does not parse, so fixtures mode shows what the API answers (`docs/phases/phase-5b.md` 6.2). |

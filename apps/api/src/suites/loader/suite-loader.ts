@@ -14,13 +14,15 @@
  * After a load nothing reads SUITES_DIR again; trials, verifiers and the API
  * read blobs by hash.
  *
- * A load-suites job must finish before its expiry, so a reload of every
- * suite is given a budget of declared self-check time
- * (MAX_LOAD_SELF_CHECK_SECONDS, Phase 3 question 14): each directory counts
- * its suite's declared worst case against it, in order, and a directory that
- * no longer fits is not loaded by that reload (an `error` entry saying to
- * reload it on its own, with nothing recorded, so its last version stays).
- * The start-up pass is not a job and has no budget.
+ * A load-suites job must finish before its expiry, so a Reload all is one
+ * job per directory (Phase 4 question 9): `scan` marks the vanished
+ * directories missing and lists the others, which the API then loads one
+ * job each, so every directory has the whole budget of declared self-check
+ * time a job has (MAX_LOAD_SELF_CHECK_SECONDS, Phase 3 question 14).
+ * `loadAll` with a budget still shares one across its directories, in
+ * order, and a directory that no longer fits is not loaded by that pass (an
+ * `error` entry saying to reload it on its own, with nothing recorded, so
+ * its last version stays). The start-up pass is not a job and has no budget.
  */
 import { lstat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -101,6 +103,19 @@ interface DirectoryLoad {
   suite: LoadedSuite | null;
 }
 
+/**
+ * The first step of a Reload all, which then sends one load-suites job per
+ * directory (Phase 4 question 9): the directories that vanished, marked
+ * missing, and the ones on disk to load.
+ */
+export interface SuiteScan {
+  at: string;
+  /** Entries for the directories marked missing by this scan. */
+  missing: SuiteReloadEntry[];
+  /** Every candidate directory under SUITES_DIR, in path order. */
+  directories: string[];
+}
+
 export interface LoadAllOptions {
   /** Seconds of declared self-checks the whole pass may use; absent, no budget (the start-up pass). */
   selfCheckBudgetS?: number;
@@ -138,6 +153,25 @@ export class SuiteLoader {
   }
 
   /**
+   * Marks the directories that vanished `missing` (first, so a renamed
+   * directory can take its old name when it loads) and lists the ones on
+   * disk, for the API to load one job each. Throws only when SUITES_DIR
+   * itself cannot be listed.
+   */
+  scan(): Promise<SuiteScan> {
+    return this.serially(async () => {
+      const at = this.persist.now().toISOString();
+      const listing = await listSuitesDir(this.suitesDir);
+      const missing = await this.markVanished(new Set(listing.map((e) => e.name)));
+      return {
+        at,
+        missing: missing.map((outcome) => reloadEntry(outcome, null)),
+        directories: listing.map((e) => e.name),
+      };
+    });
+  }
+
+  /**
    * Loads one directory, named relative to SUITES_DIR. A name that is not one
    * directory name is refused (the API checks it first); one that is not on
    * disk is `missing`.
@@ -149,7 +183,7 @@ export class SuiteLoader {
     return this.serially(async () => {
       const at = this.persist.now().toISOString();
       const { outcome, suite } = await this.loadDirectory(path);
-      return { at, suites: [this.entry(outcome, suite)] };
+      return { at, suites: [reloadEntry(outcome, suite)] };
     });
   }
 
@@ -162,13 +196,9 @@ export class SuiteLoader {
   private async loadAllNow(options: LoadAllOptions): Promise<SuiteReloadResult> {
     const at = this.persist.now().toISOString();
     const listing = await listSuitesDir(this.suitesDir);
-    const onDisk = new Set(listing.map((e) => e.name));
-    const loads: DirectoryLoad[] = [];
-    for (const path of await liveDirectories(this.options.db)) {
-      if (onDisk.has(path)) continue;
-      const outcome = await this.locked(path, (tx) => markMissing(tx, this.persist, path));
-      if (outcome) loads.push({ outcome, suite: null });
-    }
+    const loads: DirectoryLoad[] = (
+      await this.markVanished(new Set(listing.map((e) => e.name)))
+    ).map((outcome) => ({ outcome, suite: null }));
     const budget = options.selfCheckBudgetS;
     let used = 0;
     for (const dir of listing) {
@@ -181,13 +211,24 @@ export class SuiteLoader {
     }
     await this.settleNameConflicts(loads);
 
-    const entries = loads.map(({ outcome, suite }) => this.entry(outcome, suite));
+    const entries = loads.map(({ outcome, suite }) => reloadEntry(outcome, suite));
     entries.sort((a, b) => comparePaths(a.sourcePath, b.sourcePath));
     this.options.logger.info(
       { directories: entries.length, outcomes: entries.map((e) => `${e.sourcePath}:${e.outcome}`) },
       'suites loaded',
     );
     return { at, suites: entries };
+  }
+
+  /** Marks every live directory not on disk `missing`, each under its lock. */
+  private async markVanished(onDisk: ReadonlySet<string>): Promise<DirectoryOutcome[]> {
+    const marked: DirectoryOutcome[] = [];
+    for (const path of await liveDirectories(this.options.db)) {
+      if (onDisk.has(path)) continue;
+      const outcome = await this.locked(path, (tx) => markMissing(tx, this.persist, path));
+      if (outcome) marked.push(outcome);
+    }
+    return marked;
   }
 
   /**
@@ -323,53 +364,57 @@ export class SuiteLoader {
     // Without `onlyAfter`, persistSuite always writes.
     return { outcome: outcome!, suite: read.suite };
   }
+}
 
-  private entry(outcome: DirectoryOutcome, suite: LoadedSuite | null): SuiteReloadEntry {
-    // The directory as the list shows it, so the page can match entries to rows.
-    const base = { sourcePath: suiteDisplayPath(outcome.path), name: outcome.name ?? outcome.path };
-    switch (outcome.outcome) {
-      case 'created':
-      case 'unchanged':
-      case 'reverted':
-        return {
-          ...base,
-          outcome: outcome.outcome,
-          suiteId: outcome.suiteId,
-          versionNumber: outcome.versionNumber,
-          changes: changeSetView(outcome.changes),
-          message:
-            outcome.outcome === 'created'
-              ? createdMessage({
-                  first: outcome.first,
-                  changes: outcome.changes,
-                  tasks: suite?.tasks ?? [],
-                  sameFilesAs: outcome.sameFilesAs,
-                })
-              : outcome.outcome === 'unchanged'
-                ? unchangedMessage(outcome.versionNumber)
-                : revertedMessage(outcome.versionNumber, outcome.changes),
-          error: null,
-        };
-      case 'error':
-        return {
-          ...base,
-          outcome: 'error',
-          suiteId: null,
-          versionNumber: null,
-          changes: changeSetView(noChanges()),
-          message: errorMessage(outcome.error),
-          error: toErrorView(outcome.error),
-        };
-      case 'missing':
-        return {
-          ...base,
-          outcome: 'missing',
-          suiteId: null,
-          versionNumber: null,
-          changes: changeSetView(noChanges()),
-          message: MISSING_MESSAGE,
-          error: null,
-        };
-    }
+/** One directory's outcome as POST /suites/reload reports it. */
+export function reloadEntry(
+  outcome: DirectoryOutcome,
+  suite: Pick<LoadedSuite, 'tasks'> | null,
+): SuiteReloadEntry {
+  // The directory as the list shows it, so the page can match entries to rows.
+  const base = { sourcePath: suiteDisplayPath(outcome.path), name: outcome.name ?? outcome.path };
+  switch (outcome.outcome) {
+    case 'created':
+    case 'unchanged':
+    case 'reverted':
+      return {
+        ...base,
+        outcome: outcome.outcome,
+        suiteId: outcome.suiteId,
+        versionNumber: outcome.versionNumber,
+        changes: changeSetView(outcome.changes),
+        message:
+          outcome.outcome === 'created'
+            ? createdMessage({
+                first: outcome.first,
+                changes: outcome.changes,
+                tasks: suite?.tasks ?? [],
+                sameFilesAs: outcome.sameFilesAs,
+              })
+            : outcome.outcome === 'unchanged'
+              ? unchangedMessage(outcome.versionNumber)
+              : revertedMessage(outcome.versionNumber, outcome.changes),
+        error: null,
+      };
+    case 'error':
+      return {
+        ...base,
+        outcome: 'error',
+        suiteId: null,
+        versionNumber: null,
+        changes: changeSetView(noChanges()),
+        message: errorMessage(outcome.error),
+        error: toErrorView(outcome.error),
+      };
+    case 'missing':
+      return {
+        ...base,
+        outcome: 'missing',
+        suiteId: null,
+        versionNumber: null,
+        changes: changeSetView(noChanges()),
+        message: MISSING_MESSAGE,
+        error: null,
+      };
   }
 }

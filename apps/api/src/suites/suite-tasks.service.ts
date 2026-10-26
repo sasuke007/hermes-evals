@@ -15,6 +15,7 @@ import {
   type TablePreview,
   type TaskDetail,
   type TaskDiff,
+  type TaskFileChange,
   type TaskFixtureFile,
   type TaskVersionEntry,
 } from '@hermes-evals/shared';
@@ -27,12 +28,15 @@ import { failuresOf, groupByTask } from './suite-failures.js';
 import {
   filesOf,
   keyRowsInDirectory,
+  rootFilesOf,
   sourceOf,
   suiteById,
   taskByKey,
   taskUsage,
   versionsOf,
 } from './suites.queries.js';
+import { isTextDiffCandidate } from './views/diff-files.js';
+import { fileChanges } from './views/changes.js';
 import { fixtureDisplayPath } from './views/format.js';
 import type { SuiteRow, TaskFileRow, TaskRow } from './views/rows.js';
 import { streamTablePreview, tablePreview, tabularFormatOf } from './views/table.js';
@@ -74,7 +78,7 @@ export class SuiteTasksService {
     const [introducedIn, failures, usage, fixtures, homeTexts, verifier] = await Promise.all([
       task.introducedInSuiteId === suite.id ? suite : suiteById(this.db, task.introducedInSuiteId),
       failuresOf(this.db, suite, [task], new Map([[task.id, files]])),
-      taskUsage(this.db, suite.sourcePath, task.key, task.versionNumber),
+      taskUsage(this.db, suite.sourcePath, task.key),
       Promise.all(files.filter((f) => f.kind === 'fixture').map((f) => this.fixtureView(f))),
       this.homeTexts(files),
       this.verifierOf(task, files),
@@ -124,10 +128,21 @@ export class SuiteTasksService {
     }
     const fromTask = await taskByKey(this.db, against.id, key);
     if (!fromTask) throw notFound(`task ${key} in suite ${againstId}`);
-    const files = groupByTask(await filesOf(this.db, [fromTask.id, to.task.id]));
+    const ids = [fromTask.id, to.task.id];
+    const [files, roots] = await Promise.all([
+      filesOf(this.db, ids).then(groupByTask),
+      rootFilesOf(this.db, ids).then(groupByTask),
+    ]);
+    const fromFiles = files.get(fromTask.id) ?? [];
+    const toFiles = files.get(to.task.id) ?? [];
     return taskDiff(
-      { suite: against, task: fromTask, files: files.get(fromTask.id) ?? [] },
-      { ...to, files: files.get(to.task.id) ?? [] },
+      { suite: against, task: fromTask, files: fromFiles },
+      { ...to, files: toFiles },
+      {
+        rootFrom: roots.get(fromTask.id) ?? [],
+        rootTo: roots.get(to.task.id) ?? [],
+        texts: await this.diffTexts(fileChanges(fromFiles, toFiles)),
+      },
     );
   }
 
@@ -188,6 +203,23 @@ export class SuiteTasksService {
         if (f.size > TASK_HOME_FILE_TEXT_LIMIT) return [f.sha256, null];
         const content = await this.readOrNull(f.sha256);
         return [f.sha256, content ? utf8OrNull(content) : null];
+      }),
+    );
+    return new Map(texts);
+  }
+
+  /**
+   * The texts of the changed task files small enough for a line diff, by
+   * sha256; null for one that is not UTF-8 or gone from the blob store.
+   */
+  private async diffTexts(changes: readonly TaskFileChange[]): Promise<Map<string, string | null>> {
+    const hashes = new Set(
+      changes.filter(isTextDiffCandidate).flatMap((c) => [c.before!.sha256, c.after!.sha256]),
+    );
+    const texts = await Promise.all(
+      [...hashes].map(async (sha256): Promise<[string, string | null]> => {
+        const content = await this.readOrNull(sha256);
+        return [sha256, content ? utf8OrNull(content) : null];
       }),
     );
     return new Map(texts);

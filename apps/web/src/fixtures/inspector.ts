@@ -602,8 +602,8 @@ const KEY_COMMENTS: Record<string, { passed: string; failed: string }> = {
       'no read_file call on invoices.csv; the file was only read through terminal (head, python3)',
   },
   uses_db: {
-    passed: 'trajectory_match: invoice-db.list_invoices called 3 times (required ≥ 1)',
-    failed: 'no tool invoice-db.list_invoices available',
+    passed: 'trajectory_match: mcp__invoice_db__list_invoices called 3 times (required ≥ 1)',
+    failed: 'no tool mcp__invoice_db__list_invoices available',
   },
   method: {
     passed: 'llm_judge: applies every credit note to its invoice before totalling',
@@ -956,7 +956,7 @@ function executionErrorFor(
         stderrTail: {
           lines: [
             run.config === 'with-mcp'
-              ? 'tool invoice-db.list_invoices {"currency": "USD"} (started)'
+              ? 'tool mcp__invoice_db__list_invoices {"currency": "USD"} (started)'
               : 'tool terminal: python3 -c "…" (started)',
             'hermes: time budget 300 s reached; sending SIGTERM',
             'hermes: no final response; partial transcript written to /trial/home/transcript.jsonl',

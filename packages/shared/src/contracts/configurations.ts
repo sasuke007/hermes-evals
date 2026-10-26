@@ -4,9 +4,11 @@
  */
 import { z } from 'zod';
 import { EXPERIMENT_STATUSES, NOT_COMPUTABLE_REASONS } from '../status.js';
+import { McpHeaderSchema } from '../records.js';
 import { MCP_TRANSPORTS, PROVIDERS, SKILL_LOADING_MODES, type SkillLoadingMode } from '../vocab.js';
 import {
   countView,
+  deltaView,
   HTTP_URL_PATTERN,
   isoTimeView,
   isUnique,
@@ -77,6 +79,14 @@ export const McpServerRefSchema = z.object({
   /** Definition version of the server (frozen once a configuration version uses it). */
   version: z.number().int().positive(),
   transport: z.enum(MCP_TRANSPORTS),
+  /**
+   * The secret names of this very version (Phase 5 section 6.1), so a
+   * configuration pinned to an older definition names its own: stdio
+   * environment variable names (readable by the agent), and http header and
+   * variable pairs (added by egress). Names only, never a value.
+   */
+  envNames: z.array(z.string()),
+  headers: z.array(McpHeaderSchema),
 });
 export type McpServerRef = z.infer<typeof McpServerRefSchema>;
 
@@ -151,6 +161,14 @@ export const ConfigurationUsageSchema = z.object({
   verdictReason: z.enum(NOT_COMPUTABLE_REASONS).nullable(),
   /** Pass rate of the baseline in the same experiment, for "vs baseline 0.633". */
   baselinePassRate: rate.nullable(),
+  /** Tasks the experiment ran, for "No interval (2 tasks)" (Phase 5 question 1). */
+  taskCount: countView,
+  /**
+   * The candidate's observed difference from the baseline in its verdict
+   * ("Δ +0.056"): the last verdict entry's once completed, the provisional
+   * one while running. Null for the baseline role and when there is none.
+   */
+  delta: deltaView.nullable(),
 });
 export type ConfigurationUsage = z.infer<typeof ConfigurationUsageSchema>;
 

@@ -13,7 +13,9 @@ import { MIN_TASKS_FOR_VERDICT, useFormContext } from './useNewExperimentForm';
 /**
  * Section 2, Suite and tasks (NewExperiment board): the suite select with where the suite
  * was loaded from, then the task checklist with every valid task ticked. With no suite loaded
- * the select is replaced by the way to load one (ExperimentStates › no suite loaded).
+ * the select is replaced by the way to load one (ExperimentStates › no suite loaded). With
+ * fewer than 3 tasks ticked it warns, never blocks: "An experiment on fewer than 3 tasks
+ * cannot reach a verdict." (Phase 5 section 6.4); Launch stays available.
  */
 const props = withDefaults(
   defineProps<{
@@ -115,7 +117,8 @@ const changed = computed(() => (props.changedSince === null ? [] : props.changed
         </svg>
         <div>
           <b class="text-ung-text"
-            >Fewer than {{ MIN_TASKS_FOR_VERDICT }} tasks cannot produce a verdict.</b
+            >An experiment on fewer than {{ MIN_TASKS_FOR_VERDICT }} tasks cannot reach a
+            verdict.</b
           >{{ ' '
           }}<span class="text-text-2"
             >You will get pass rates per configuration but no interval: it resamples the tasks, and

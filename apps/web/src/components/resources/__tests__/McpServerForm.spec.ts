@@ -128,6 +128,34 @@ describe('McpServerForm, create', () => {
     expect(result.text()).toContain('The excluded tools will not be offered to the agent.');
   });
 
+  it('keeps a passing test of the unsaved form on its save (Phase 5 question 14)', async () => {
+    const { store } = await form(null);
+    await nameInput().setValue('invoice-db-copy');
+    await w!.findAll('input.input')[1]!.setValue('npx');
+    await w!.get('[data-testid="test-start"]').trigger('click');
+    await flushPromises();
+    expect(w!.get('[data-testid="mcp-test-result"]').attributes('data-status')).toBe('passed');
+    await w!.get('form').trigger('submit');
+    await flushPromises();
+    const [saved] = w!.emitted('saved')![0] as [McpServerRow];
+    expect(saved.lastTest).toMatchObject({ status: 'passed', startedMs: 1800 });
+    expect(saved.lastTest).not.toHaveProperty('definitionHash');
+    expect(store.mcpServers.byId[saved.id]!.lastTest.status).toBe('passed');
+  });
+
+  it('reads untested after saving a definition other than the one tested', async () => {
+    await form(null);
+    await nameInput().setValue('invoice-db-other');
+    await w!.findAll('input.input')[1]!.setValue('npx');
+    await w!.get('[data-testid="test-start"]').trigger('click');
+    await flushPromises();
+    await w!.findAll('input.input')[1]!.setValue('npx-changed');
+    await w!.get('form').trigger('submit');
+    await flushPromises();
+    const [saved] = w!.emitted('saved')![0] as [McpServerRow];
+    expect(saved.lastTest).toEqual({ status: 'untested' });
+  });
+
   it('shows a failed start with stderr and where to set the variable', async () => {
     await form(null, 'mcp-test-failed');
     await nameInput().setValue('invoice-db-copy');

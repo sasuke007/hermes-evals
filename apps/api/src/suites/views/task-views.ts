@@ -20,6 +20,12 @@ import {
   type VerificationEntryView,
 } from '@hermes-evals/shared';
 import { changedFiles, fileChanges, type FileState, type TaskContent } from './changes.js';
+import {
+  rootFileChanges,
+  rootFileStates,
+  textFileDiffs,
+  type RootFileRecord,
+} from './diff-files.js';
 import { jsonDiff, textDiff } from './diffs.js';
 import { fixtureDisplayPath, isoTime, taskYamlDisplayPath } from './format.js';
 import { limitsOf, type SuiteRow, type TaskFileRow, type TaskRow } from './rows.js';
@@ -217,13 +223,27 @@ export function taskHistory(
     .reverse();
 }
 
-/** The task's changes from `from` (the `against` suite version) to `to`. */
-export function taskDiff(from: PlacedTask, to: PlacedTask): TaskDiff {
+/** What a task diff reads beyond the rows: root-file records and the texts to line-diff. */
+export interface TaskDiffExtras {
+  /** The root files the loader recorded for each side ([] before Phase 5b). */
+  rootFrom?: readonly RootFileRecord[];
+  rootTo?: readonly RootFileRecord[];
+  /** Texts of the changed small task files by sha256 (null: not UTF-8 or gone). */
+  texts?: ReadonlyMap<string, string | null>;
+}
+
+/**
+ * The task's changes from `from` (the `against` suite version) to `to`: the
+ * root files first, then the task files by path, and a line diff of each
+ * changed small text file (./diff-files.ts).
+ */
+export function taskDiff(from: PlacedTask, to: PlacedTask, extras: TaskDiffExtras = {}): TaskDiff {
   const side = (p: PlacedTask) => ({
     suiteId: p.suite.id,
     suiteVersion: p.suite.versionNumber,
     taskVersion: p.task.versionNumber,
   });
+  const files = fileChanges(from.files, to.files);
   return {
     key: to.task.key,
     from: side(from),
@@ -231,6 +251,13 @@ export function taskDiff(from: PlacedTask, to: PlacedTask): TaskDiff {
     prompt: textDiff(from.task.prompt, to.task.prompt),
     taskYaml: textDiff(from.task.taskYaml, to.task.taskYaml),
     reference: jsonDiff(from.task.reference ?? null, to.task.reference ?? null),
-    files: fileChanges(from.files, to.files),
+    files: [
+      ...rootFileChanges(
+        rootFileStates(from.task, extras.rootFrom ?? []),
+        rootFileStates(to.task, extras.rootTo ?? []),
+      ),
+      ...files,
+    ],
+    textFiles: textFileDiffs(files, extras.texts ?? new Map()),
   };
 }

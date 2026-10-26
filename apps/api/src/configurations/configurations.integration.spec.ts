@@ -287,6 +287,9 @@ describe('create', () => {
         name: 'invoice-db',
         version: 2,
         transport: 'stdio',
+        // The names of this very version, for the exposure note (Phase 5 section 6.1).
+        envNames: ['INVOICE_DB_URL'],
+        headers: [],
       },
     ]);
   });

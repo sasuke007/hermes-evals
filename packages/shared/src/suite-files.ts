@@ -21,6 +21,10 @@ import { ARTIFACT_ROOTS, TRAJECTORY_MODES, type ScorerType } from './vocab.js';
  */
 export const DIRECTORY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
+/** What DIRECTORY_KEY_PATTERN asks for, in the authoring pages' words (SA.2, SA.5). */
+export const DIRECTORY_KEY_MESSAGE =
+  'Use letters, digits, ., _ and -, starting with a letter or digit.';
+
 /** Absolute (`/x`) or escaping (`..` as a segment): the task_files path CHECK's rule. */
 const UNSAFE_PATH = /(^\/|(^|\/)\.\.(\/|$))/;
 

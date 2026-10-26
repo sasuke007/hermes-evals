@@ -28,7 +28,7 @@ import { DB } from '../../database/db.provider.js';
 import { skills } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
 import { StorageService } from '../../storage/storage.service.js';
-import { latestConfigurationLinks } from './configuration-links.js';
+import { deleteUnused, latestConfigurationLinks } from './configuration-links.js';
 import { uploadFileName } from './format.js';
 import {
   MAX_SKILL_MD_BYTES,
@@ -285,6 +285,24 @@ export class SkillsService {
     }
     zip.end();
     return { stream: output, filename: `${row.name}-${row.version}.zip` };
+  }
+
+  /**
+   * DELETE /resources/skills/:id: only a skill no configuration version
+   * names (409 with them otherwise). The row goes; the tree under
+   * DATA_DIR/skills stays, since a confirm of the same content may be
+   * reusing it at this moment, and no run can need it any more.
+   */
+  async remove(id: string): Promise<void> {
+    const row = await this.get(id);
+    await deleteUnused(
+      this.db,
+      { column: 'skillIds', id, what: `skill ${row.name} ${row.version}` },
+      async () =>
+        (await this.db.delete(skills).where(eq(skills.id, id)).returning({ id: skills.id }))
+          .length > 0,
+    );
+    this.logger.info({ skillId: id, name: row.name, version: row.version }, 'deleted skill');
   }
 
   /** SKILL.md's metadata, without reading a SKILL.md over the cap. */

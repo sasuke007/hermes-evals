@@ -442,6 +442,44 @@ self_check: { expected_workspace: golden }
     ]);
   });
 
+  it('gives a file_check no second error when the expected workspace is written but unusable', async () => {
+    const yaml = withVerification(`  - { key: answer, type: numeric_tolerance, primary: true }
+  - { key: out, type: file_check, params: { path: out.csv } }
+self_check: { expected_workspace: fixtures/golden }
+`);
+    const task = await analyse(base({ 'task.yaml': yaml }));
+    // One cause, one error (Phase 6 question 8): the folder's own, not self_check_unsupported too.
+    expect(task.issues).toEqual([
+      expect.objectContaining({
+        code: 'schema_invalid',
+        path: 'task.yaml#self_check.expected_workspace',
+      }),
+    ]);
+  });
+
+  it('keeps the root files as read: size, hash and text, a byte-order mark included', async () => {
+    const reference = '\uFEFF{ "total": 3 }\n';
+    const task = await analyse(base({ 'reference.json': reference }));
+    expect(task.rootFiles).toEqual([
+      {
+        path: 'prompt.md',
+        sha256: sha256Hex(PROMPT),
+        size: Buffer.byteLength(PROMPT),
+        text: PROMPT,
+      },
+      {
+        path: 'reference.json',
+        sha256: sha256Hex(reference),
+        size: Buffer.byteLength(reference),
+        text: reference,
+      },
+      expect.objectContaining({ path: 'task.yaml', text: TASK_YAML }),
+    ]);
+    // Postgres text cannot hold NUL: such a file keeps its size and hash, without text.
+    const nul = await analyse(base({ 'prompt.md': `${PROMPT}\0` }));
+    expect(nul.rootFiles.find((f) => f.path === 'prompt.md')).toMatchObject({ text: null });
+  });
+
   it('needs the expected workspace to be its own existing folder', async () => {
     const withExpected = (dir: string) =>
       `${TASK_YAML}self_check: { expected_workspace: ${dir} }\n`;

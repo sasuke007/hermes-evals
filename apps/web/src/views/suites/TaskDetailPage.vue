@@ -10,6 +10,7 @@ import PromptView from '@/components/suites/PromptView.vue';
 import ReferencePanel from '@/components/suites/ReferencePanel.vue';
 import SelfCheckPanel from '@/components/suites/SelfCheckPanel.vue';
 import { taskFolderOf } from '@/components/suites/suiteFormat';
+import { useDraftActions } from '@/components/suites/useDraftActions';
 import TaskDiffView from '@/components/suites/TaskDiffView.vue';
 import TaskUsagePanel from '@/components/suites/TaskUsagePanel.vue';
 import TaskVersionHistory from '@/components/suites/TaskVersionHistory.vue';
@@ -36,6 +37,8 @@ import { taskKeyOf, useSuitesStore } from '@/stores/suites';
  * TaskDiff board instead: this version against the one in that suite version (against its
  * own suite version, the first version's files). A task with home files (Phase 6) adds its
  * home seeds after the fixtures and its expected_home files after the reference answer.
+ * Edit task and Duplicate start the suite's draft; an older version can be restored into it
+ * (Phase 5b). An older version is not duplicated: a duplicate copies the draft's task.
  */
 const props = defineProps<{ suiteId: string; taskKey: string }>();
 
@@ -114,6 +117,13 @@ const changedFiles = computed(
   () => history.value?.find((h) => h.version === task.value?.version)?.changedFiles ?? [],
 );
 const folder = computed(() => (task.value ? taskFolderOf(task.value.path) : ''));
+const actions = useDraftActions(() => task.value?.suite.name ?? '');
+/** What the newest version the experiments ran changed, for the comparability note. */
+const usageChanges = computed(() => {
+  const ran = (task.value?.experiments ?? []).map((e) => e.taskVersion);
+  const newest = ran.length ? Math.max(...ran, task.value?.version ?? 0) : task.value?.version;
+  return history.value?.find((h) => h.version === newest)?.changedFiles ?? [];
+});
 
 const suiteTo = computed(() => ({
   name: ROUTE_NAMES.suite,
@@ -221,7 +231,26 @@ const limits = computed(() => {
             <code class="text-text-3" :title="folder">{{ folder }}</code>
           </template>
           <template #actions>
-            <!-- Phase 5b adds "Edit task" (primary) and "Duplicate" here. -->
+            <template v-if="!isOld">
+              <button
+                type="button"
+                class="btn primary"
+                :disabled="actions.busy.value !== null"
+                data-testid="edit-task"
+                @click="actions.editTask(task.key)"
+              >
+                Edit task
+              </button>
+              <button
+                type="button"
+                class="btn"
+                :disabled="actions.busy.value !== null"
+                data-testid="duplicate-task"
+                @click="actions.duplicateTask(task.key)"
+              >
+                Duplicate
+              </button>
+            </template>
             <CopyButton
               :text="folder"
               variant="button"
@@ -256,11 +285,29 @@ const limits = computed(() => {
               >You are viewing v{{ task.version }} of <code>{{ task.key }}</code
               >. The current version is v{{ current.version }}.</b
             >
-            <span class="text-text-2"> Versions don't change.</span></span
+            <span class="text-text-2">
+              Versions don't change. Restoring copies v{{ task.version }}'s files into the suite's
+              draft, where you can review them before saving.</span
+            ></span
           >
-          <!-- Phase 5b adds "Restore this version into the draft" (primary) here. -->
           <RouterLink class="btn" :to="currentTo">Back to v{{ current.version }}</RouterLink>
+          <button
+            type="button"
+            class="btn primary"
+            :disabled="actions.busy.value !== null"
+            data-testid="restore-task"
+            @click="actions.restoreTask(task.suite.versionNumber, task.key)"
+          >
+            Restore this version into the draft
+          </button>
         </div>
+        <ErrorBanner
+          v-if="actions.error.value"
+          :title="`Could not start a draft of ${task.suite.name}`"
+          :detail="actions.error.value"
+          hint="Nothing on disk changed."
+          data-testid="draft-action-error"
+        />
       </div>
 
       <ErrorBanner
@@ -336,6 +383,8 @@ const limits = computed(() => {
             :experiments="task.experiments"
             :version="task.version"
             :versioned="(history?.length ?? 1) > 1"
+            :valid="task.valid"
+            :changed-files="usageChanges"
           />
         </aside>
       </div>

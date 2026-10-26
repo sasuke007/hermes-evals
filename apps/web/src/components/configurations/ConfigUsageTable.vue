@@ -12,7 +12,8 @@ import { usageRate, usageVerdict } from './configDisplay';
  * Every experiment that used this configuration, with its pass rate there (ConfigDetail ›
  * Used in experiments): final to three decimals once completed, two with the scored count
  * while running or paused; the candidate's verdict against the baseline, "Provisional" while
- * running, or why there is no interval. A completed experiment's chip has no dot, as the board
+ * running, or why there is no interval ("No interval (2 tasks)"), with its Δ whenever there is
+ * one (usageVerdict). A completed experiment's chip has no dot, as the board
  * draws it, and the Pass rate and Verdict cells wrap their captions when the panel is narrow
  * (half the page from 1440px down).
  */

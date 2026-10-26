@@ -6,6 +6,8 @@ const counts = (over: Partial<UsageCounts>): UsageCounts => ({
   experimentId: 'exp_1',
   experimentName: 'Skill vs no skill',
   status: 'completed',
+  taskVersion: 2,
+  suiteVersion: 5,
   baselineVersionId: 'cv_base',
   candidateVersionIds: ['cv_skill'],
   configurationVersionId: 'cv_base',
@@ -18,7 +20,7 @@ const counts = (over: Partial<UsageCounts>): UsageCounts => ({
 });
 
 describe('taskUsageView', () => {
-  it('groups by experiment, baseline first, with the pass rate over finished runs', () => {
+  it('groups by experiment, baseline first, with the versions it ran and the pass rate over finished runs', () => {
     const view = taskUsageView([
       counts({
         configurationVersionId: 'cv_skill',
@@ -31,6 +33,8 @@ describe('taskUsageView', () => {
         experimentId: 'exp_0',
         experimentName: 'First try',
         status: 'running',
+        taskVersion: 1,
+        suiteVersion: 4,
         counted: 0,
         passed: 0,
       }),
@@ -40,6 +44,8 @@ describe('taskUsageView', () => {
         experimentId: 'exp_1',
         experimentName: 'Skill vs no skill',
         status: 'completed',
+        taskVersion: 2,
+        suiteVersion: 5,
         rows: [
           { configuration: 'baseline', role: 'baseline', passRate: 2 / 3, scored: 3, total: 3 },
           { configuration: 'with-skill', role: 'candidate', passRate: 1, scored: 2, total: 3 },
@@ -49,6 +55,8 @@ describe('taskUsageView', () => {
         experimentId: 'exp_0',
         experimentName: 'First try',
         status: 'running',
+        taskVersion: 1,
+        suiteVersion: 4,
         rows: [
           { configuration: 'baseline', role: 'baseline', passRate: null, scored: 0, total: 3 },
         ],

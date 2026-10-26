@@ -27,7 +27,8 @@ describe('CandidateSelect', () => {
     expect(button.attributes('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(list.element);
     const options = w.findAll('[role=option]');
-    expect(options.map((o) => o.text())).toEqual(['with-skillbetter', 'with-mcpprovisional']);
+    // While it runs both chips are provisional, as the API answers (Phase 5 #20).
+    expect(options.map((o) => o.text())).toEqual(['with-skillprovisional', 'with-mcpprovisional']);
     expect(options[0]!.attributes('aria-selected')).toBe('true');
     await list.trigger('keydown', { key: 'ArrowDown' });
     expect(list.attributes('aria-activedescendant')).toBe(options[1]!.attributes('id'));

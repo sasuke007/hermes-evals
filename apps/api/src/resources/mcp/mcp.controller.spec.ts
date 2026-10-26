@@ -425,6 +425,79 @@ describe('Resources endpoints: MCP servers, secrets, counts', () => {
       expect((await http().get('/api/resources/mcp-servers').expect(200)).body).toEqual([]);
     });
 
+    it('names the hash of the definition it tested, the one a save of the form stores', async () => {
+      await insertWorker(t.db, { env: ['INVOICE_DB_URL'] });
+      const tested = McpTestViewSchema.parse(
+        (await http().post('/api/resources/mcp-servers/test').send(INVOICE_DB).expect(200)).body,
+      );
+      expect(tested).toMatchObject({ status: 'passed', definitionHash: expect.any(String) });
+      const created = McpServerRowSchema.parse(
+        (await http().post('/api/resources/mcp-servers').send(INVOICE_DB).expect(201)).body,
+      );
+      const [stored] = await t.db
+        .select({ hash: mcpServerVersions.definitionHash })
+        .from(mcpServerVersions)
+        .where(eq(mcpServerVersions.id, created.versionId));
+      expect(tested.status === 'passed' && tested.definitionHash).toBe(stored!.hash);
+      // Saved right after a passing test, the row keeps that result (Phase 5 question 14).
+      const { definitionHash: _hash, ...result } = tested as Extract<
+        typeof tested,
+        { status: 'passed' }
+      >;
+      expect(created.lastTest).toEqual(result);
+      const [listed] = McpServerRowSchema.array().parse(
+        (await http().get('/api/resources/mcp-servers').expect(200)).body,
+      );
+      expect(listed!.lastTest).toEqual(result);
+    });
+
+    it('keeps an unsaved test only for a save of that same definition', async () => {
+      await insertWorker(t.db, { env: ['INVOICE_DB_URL'] });
+      await http().post('/api/resources/mcp-servers/test').send(INVOICE_DB).expect(200);
+      // Another definition (the timeout differs) is untested.
+      const other = McpServerRowSchema.parse(
+        (
+          await http()
+            .post('/api/resources/mcp-servers')
+            .send({ ...INVOICE_DB, timeoutS: 45 })
+            .expect(201)
+        ).body,
+      );
+      expect(other.lastTest).toEqual({ status: 'untested' });
+      // An in-place edit to the tested definition takes the result.
+      const edited = McpServerRowSchema.parse(
+        (await http().put(`/api/resources/mcp-servers/${other.id}`).send(INVOICE_DB).expect(200))
+          .body,
+      );
+      expect(edited).toMatchObject({ version: 1, lastTest: { status: 'passed' } });
+      // So does the next version of a frozen one, once its form has passed.
+      await useInConfiguration(t.db, 'baseline', [edited.versionId]);
+      const next = { ...INVOICE_DB, exclude: [] };
+      const untestedNext = McpServerRowSchema.parse(
+        (
+          await http()
+            .put(`/api/resources/mcp-servers/${other.id}`)
+            .send({ ...next, timeoutS: 50 })
+            .expect(200)
+        ).body,
+      );
+      expect(untestedNext).toMatchObject({ version: 2, lastTest: { status: 'untested' } });
+      await http().post('/api/resources/mcp-servers/test').send(next).expect(200);
+      const kept = McpServerRowSchema.parse(
+        (await http().put(`/api/resources/mcp-servers/${other.id}`).send(next).expect(200)).body,
+      );
+      expect(kept).toMatchObject({ version: 2, lastTest: { status: 'passed' } });
+    });
+
+    it('never keeps a failed unsaved test', async () => {
+      await insertWorker(t.db);
+      await http().post('/api/resources/mcp-servers/test').send(VENDOR_API).expect(200);
+      const created = McpServerRowSchema.parse(
+        (await http().post('/api/resources/mcp-servers').send(VENDOR_API).expect(201)).body,
+      );
+      expect(created.lastTest).toEqual({ status: 'untested' });
+    });
+
     it('answers running when the test outlasts the wait; the job goes on', async () => {
       await insertWorker(t.db);
       config.mcpTestTimeoutS = 1;

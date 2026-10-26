@@ -13,6 +13,7 @@ import {
   formatRunCost,
   jsonFences,
   lineColumn,
+  memoryEnabledIn,
   networkLine,
   outputNote,
   previewKind,
@@ -206,9 +207,24 @@ describe('attempts, artifacts, evidence', () => {
     expect(
       evidenceSummary({
         ...empty,
-        trajectory: { tool: 'invoice-db.list_invoices', calls: 3, matchedSeqs: [4], mode: null },
+        trajectory: {
+          tool: 'mcp__invoice_db__list_invoices',
+          calls: 3,
+          matchedSeqs: [4],
+          mode: null,
+        },
       }),
-    ).toBe('invoice-db.list_invoices called 3 times');
+    ).toBe('mcp__invoice_db__list_invoices called 3 times');
     expect(evidenceSummary({ ...empty, eventSeqs: [9] })).toBe('1 timeline event');
+  });
+});
+
+describe('memoryEnabledIn', () => {
+  it("reads config.yaml's memory_enabled from the launch record", () => {
+    const yaml = (on: boolean) =>
+      `toolsets: [file, terminal]\nmemory:\n  memory_enabled: ${on}\n  user_profile_enabled: ${on}\n`;
+    expect(memoryEnabledIn({ configYaml: yaml(true) })).toBe(true);
+    expect(memoryEnabledIn({ configYaml: yaml(false) })).toBe(false);
+    expect(memoryEnabledIn(null)).toBeNull();
   });
 });

@@ -157,6 +157,8 @@ export class ConfigurationFormOptionsService {
         name: server.name,
         version: version.version,
         transport: version.transport,
+        envNames: version.envNames,
+        headers: version.headers,
         endpoint: mcpEndpoint(version),
         latest: version.version === server.latestVersion,
       }));

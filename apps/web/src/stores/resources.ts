@@ -7,13 +7,17 @@
  * or a saved MCP server is put into its records at once (in the API's list order) and flashes
  * on its row; the counts are read again; saving an MCP server re-reads the secrets, whose rows
  * come from the names definitions reference. A saved server's Test start records its result
- * on the row. Nothing here streams: the library changes only when the user changes it.
+ * on the row. A deleted skill or document leaves its records at once (Phase 5 section 6.1);
+ * a refusal (409, a configuration version uses it) is thrown to the page, which quotes it.
+ * Nothing here streams: the library changes only when the user changes it.
  */
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
 import {
   checkSecrets as checkSecretsApi,
   confirmSkillUpload,
+  deleteDocument as deleteDocumentApi,
+  deleteSkill as deleteSkillApi,
   getResourceCounts,
   getSkill,
   getSkillFile,
@@ -102,6 +106,14 @@ export const useResourcesStore = defineStore('resources', () => {
     c.ids = rows.map(key);
     c.loaded = true;
     c.error = null;
+  }
+
+  /** Takes a row out, keeping the order of the others. */
+  function remove<T>(c: ResourceCollection<T>, id: string): void {
+    const rest = { ...c.byId };
+    delete rest[id];
+    c.byId = rest;
+    c.ids = c.ids.filter((x) => x !== id);
   }
 
   /** Puts a row in place (same id) or at its place in the API's order (a new id). */
@@ -232,6 +244,17 @@ export const useResourcesStore = defineStore('resources', () => {
     return row;
   }
 
+  /** Deletes a skill no configuration version uses; its row, detail and files leave the store. */
+  async function deleteSkill(id: string): Promise<void> {
+    await deleteSkillApi(id);
+    remove(skills, id);
+    delete skillDetails[id];
+    for (const key of Object.keys(skillFiles)) {
+      if (key.startsWith(`${id}/`)) delete skillFiles[key];
+    }
+    void loadCounts();
+  }
+
   // ── documents ───────────────────────────────────────────────────────────
   async function uploadDocument(file: File): Promise<DocumentRow> {
     const row = await uploadDocumentApi(file);
@@ -239,6 +262,13 @@ export const useResourcesStore = defineStore('resources', () => {
     flash(row.id);
     void loadCounts();
     return row;
+  }
+
+  /** Deletes a document no configuration version uses; its row leaves the store. */
+  async function deleteDocument(id: string): Promise<void> {
+    await deleteDocumentApi(id);
+    remove(documents, id);
+    void loadCounts();
   }
 
   // ── MCP servers ─────────────────────────────────────────────────────────
@@ -292,7 +322,9 @@ export const useResourcesStore = defineStore('resources', () => {
     skillFile,
     validateSkill,
     confirmSkill,
+    deleteSkill,
     uploadDocument,
+    deleteDocument,
     saveMcpServer,
     testMcpServer,
     secretFor,

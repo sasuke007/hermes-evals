@@ -218,8 +218,6 @@ export interface ExperimentSeed {
   spentUsd: number;
   projectedTotalUsd: number | null;
   remainingCostUsd: number | null;
-  /** The verdict chip in the Comparison candidate select while running (multi-candidate board). */
-  candidateChips: Partial<Record<ConfigName, VerdictState>>;
   history: Partial<Record<ConfigName, VerdictHistoryEntry[]>>;
   /** Aggregate values the brief states verbatim, which win over computed ones. */
   aggregateOverrides: Partial<
@@ -523,7 +521,6 @@ const SKILL_VS_NO_SKILL: ExperimentSeed = {
   spentUsd: 1.69,
   projectedTotalUsd: null,
   remainingCostUsd: null,
-  candidateChips: {},
   history: {},
   aggregateOverrides: {
     baseline: { meanScore: 0.671, costUsd: 0.71 },
@@ -597,7 +594,6 @@ const MCP_VS_BASELINE: ExperimentSeed = {
   spentUsd: 1.21,
   projectedTotalUsd: 1.66,
   remainingCostUsd: 0.45,
-  candidateChips: {},
   history: {},
   aggregateOverrides: {},
   runTargets: {},
@@ -675,7 +671,6 @@ const MCP_SMOKE: ExperimentSeed = {
   spentUsd: 1.01,
   projectedTotalUsd: null,
   remainingCostUsd: null,
-  candidateChips: {},
   history: {},
   aggregateOverrides: {},
   runTargets: {},
@@ -688,7 +683,7 @@ const MCP_SMOKE: ExperimentSeed = {
 const ALL_QUEUED = (reps: number): Record<string, string> =>
   Object.fromEntries(TASK_KEYS.map((t) => [t, 'Q'.repeat(reps)]));
 
-/** MCP vs baseline, first try: stopped after 14 consecutive setup errors. */
+/** MCP vs baseline, first try: stopped after 14 failed attempts in a row (setup). */
 const MCP_FIRST_TRY: ExperimentSeed = {
   key: 'mcpFirstTry',
   id: EXPERIMENT_IDS.mcpFirstTry,
@@ -726,7 +721,6 @@ const MCP_FIRST_TRY: ExperimentSeed = {
   spentUsd: 0.02,
   projectedTotalUsd: null,
   remainingCostUsd: null,
-  candidateChips: {},
   history: {},
   aggregateOverrides: {},
   runTargets: {},
@@ -815,7 +809,6 @@ const SKILL_MCP: ExperimentSeed = {
   spentUsd: 0.59,
   projectedTotalUsd: 2.56,
   remainingCostUsd: 1.97,
-  candidateChips: { 'with-skill': 'better', 'with-mcp': 'provisional' },
   history: {},
   aggregateOverrides: {},
   runTargets: {},
@@ -894,7 +887,6 @@ const QUICK_CHECK: ExperimentSeed = {
   spentUsd: 0.12,
   projectedTotalUsd: 0.31,
   remainingCostUsd: 0.19,
-  candidateChips: {},
   history: {},
   aggregateOverrides: {},
   runTargets: {},
@@ -1639,6 +1631,8 @@ export function configurationUsageFixture(
         baselinePassRate: isBaseline
           ? null
           : passRate(runs.filter((r) => r.config === seed.baseline)).rate,
+        taskCount: new Set(runs.map((r) => r.taskKey)).size,
+        delta: summary?.delta ?? null,
       },
     ];
   });
@@ -1657,6 +1651,9 @@ export function taskUsageFixture(
         experimentId: seed.id,
         experimentName: seed.name,
         status: seed.status,
+        // Every fixture experiment ran the suite's v1, where each task is at v1.
+        taskVersion: 1,
+        suiteVersion: SUITE_V1_REF.versionNumber,
         rows: configsOf(seed).map((config) => {
           const mine = runs.filter((r) => r.config === config);
           const rate = passRate(mine);

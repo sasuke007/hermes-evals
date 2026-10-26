@@ -13,6 +13,9 @@
  * Query parameters the pages read:
  *   /experiments/new?from=<experimentId>   duplicate an experiment
  *   /experiments/new?…&repetitions=<n>     start with n repetitions ("Duplicate with 5 repetitions")
+ *   /experiments/new?suite=<suiteId>       start on that suite version ("New experiment on v7")
+ *   /suites/:suite/draft?details=1         the draft with Edit details open
+ *   /suites/:suite/draft/tasks/:key?tab=   the task editor on its Files or task.yaml tab
  *   /configurations/new?from=<id>          duplicate a configuration
  *   /configurations/:id?version=<n>        "view as of this experiment"
  *   any route ?scenario=<name>             fixture scenario (src/fixtures/scenarios.ts)
@@ -24,6 +27,8 @@ import {
   type RouteRecordRaw,
 } from 'vue-router';
 import type { ResourceTab } from '@/api/types/resources';
+import { SUITE_AUTHORING_ROUTE_NAMES, suiteAuthoringRoutes } from '@/views/suites/authoringRoutes';
+import { SUITE_EDITOR_ROUTE_NAMES, suiteEditorRoutes } from '@/views/suites/authoring/editorRoutes';
 import { clearStaleBuildReload, reloadForStaleBuild } from './staleBuild';
 
 export type ShellSection = 'experiments' | 'suites' | 'configurations' | 'resources' | 'system';
@@ -49,6 +54,10 @@ export const ROUTE_NAMES = {
   suites: 'suites',
   suite: 'suite',
   task: 'task',
+  /** Suite authoring (Phase 5b): New suite, Import tasks, Review and save. */
+  ...SUITE_AUTHORING_ROUTE_NAMES,
+  /** Suite authoring (Phase 5b): the draft and the task editor; `:suite` is the folder name. */
+  ...SUITE_EDITOR_ROUTE_NAMES,
   configurations: 'configurations',
   configurationNew: 'configuration-new',
   configurationEdit: 'configuration-edit',
@@ -93,6 +102,7 @@ export const routes: RouteRecordRaw[] = [
       return {
         duplicateOf: query(route, 'from'),
         repetitions: Number.isInteger(repetitions) && repetitions > 0 ? repetitions : undefined,
+        suite: query(route, 'suite'),
       };
     },
     meta: { section: 'experiments', title: 'New experiment' },
@@ -145,6 +155,9 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/suites/SuiteListPage.vue'),
     meta: { section: 'suites', title: 'Suites' },
   },
+  // Before /suites/:id: /suites/new is a page, not a suite id.
+  ...suiteAuthoringRoutes,
+  ...suiteEditorRoutes,
   {
     path: '/suites/:id',
     name: ROUTE_NAMES.suite,

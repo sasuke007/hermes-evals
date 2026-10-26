@@ -22,10 +22,12 @@
  *
  * Not a sandbox: the script runs as the worker's uid, so it can still read
  * the worker's own environment (/proc/1/environ in the container) and use
- * its network. Compose keeps every provider key out of that environment
- * (docker-compose.yml x-no-provider-keys); what remains is DATABASE_URL, the
- * stdio MCP values and anything else `.env` holds, until verifiers run in
- * their own `network: none` container (plan 14, Phase 5b).
+ * its network. So the worker no longer runs scripts this way (Phase 5b, R7):
+ * it installs the container runner (verifier-runner.ts, through
+ * useVerifierRunner), and every verifier it runs, for scoring, load
+ * self-checks and draft self-checks, gets a `network: none` container of its
+ * own through docker-guard (plan 14). runVerifier, the subprocess, stays the
+ * default where nothing is installed: tests, and machines without Docker.
  */
 import { spawn } from 'node:child_process';
 import { lstat, mkdir, writeFile } from 'node:fs/promises';
@@ -34,6 +36,7 @@ import { performance } from 'node:perf_hooks';
 import type { JsonValue, ScoreEvidence, VerifierScriptParams } from '@hermes-evals/shared';
 import { ByteTail, LineSplitter, utf8Tail } from '../sandbox/streams.js';
 import { graded, guardedAsync, scorerError, type ScorerResult } from './result.js';
+import type { VerifierRunner } from './verifier-runner.js';
 
 export type ScriptEvidence = NonNullable<ScoreEvidence['script']>;
 
@@ -41,7 +44,7 @@ export type ScriptEvidence = NonNullable<ScoreEvidence['script']>;
 export const VERIFIER_TAIL_BYTES = 4096;
 
 /** A result line longer than this is cut, and so fails to parse. */
-const MAX_LINE_BYTES = 64 * 1024;
+export const MAX_LINE_BYTES = 64 * 1024;
 
 /** After the deadline or the script's exit, how long its pipes may stay open. */
 const DRAIN_GRACE_MS = 2000;
@@ -51,6 +54,12 @@ const FALLBACK_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/
 export interface VerifierOptions {
   /** The script; its folder is the working directory, so it can import its neighbours. */
   scriptPath: string;
+  /**
+   * The task's verify/ folder, which holds the script: what a runner that
+   * copies the script elsewhere (the container runner) copies whole. The
+   * script's own folder when absent.
+   */
+  verifyDir?: string;
   /** Written to `<scratchDir>/answer.json`; null writes JSON null. */
   answer: JsonValue | null;
   workspaceDir: string;
@@ -73,6 +82,38 @@ export type VerifierOutcome =
 export interface VerifierRun {
   outcome: VerifierOutcome;
   evidence: ScriptEvidence;
+}
+
+/**
+ * The verifier could not be run at all: its container could not be created
+ * or started (docker-guard down or refusing, the image missing), or its
+ * folder could not be prepared. Nothing the script did, so it is never an
+ * outcome: scoreVerifierScript rethrows it, the loader fails the directory
+ * without recording a version, scoring fails the job (pg-boss retries it),
+ * and a draft self-check answers 503.
+ */
+export class VerifierUnavailable extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'VerifierUnavailable';
+  }
+}
+
+/** The runner installed for this process, or null for the subprocess (useVerifierRunner). */
+let installed: VerifierRunner | null = null;
+
+/**
+ * Installs the runner every verifier run of this process uses unless the
+ * caller passes its own (VerifierKeyInput.runner). The worker installs the
+ * container runner at start (SandboxService); null restores the subprocess.
+ */
+export function useVerifierRunner(runner: VerifierRunner | null): void {
+  installed = runner;
+}
+
+/** The runner verifier runs use now: the installed one, else the subprocess. */
+export function currentVerifierRunner(): VerifierRunner {
+  return installed ?? { run: runVerifier };
 }
 
 /** The environment a verifier runs with. Exported so tests can state it exactly. */
@@ -136,6 +177,41 @@ export function parseVerifierLine(line: string | null): VerifierOutcome {
     return { ok: false, error: 'the result line\'s "comment" must be a string', detail: null };
   }
   return { ok: true, score, comment: comment ?? null };
+}
+
+/** What happened to the script, as the outcome rules read it. */
+export interface VerifierExit {
+  timedOut: boolean;
+  /** The exit code; null when a signal ended it (the subprocess) or it never started. */
+  code: number | null;
+  signal: string | null;
+  stderrTail: string;
+  lastLine: string | null;
+  /** Why it was killed when the code alone does not say (the container's memory limit). */
+  killedBy?: string;
+}
+
+/**
+ * The outcome of a script that ran, under the contract above: the deadline,
+ * then a non-zero exit (with the `--home` hint), then the result line.
+ */
+export function verifierOutcome(exit: VerifierExit, timeoutS: number): VerifierOutcome {
+  const stderrLine = lastLineOf(exit.stderrTail);
+  if (exit.timedOut) {
+    return { ok: false, error: `timed out after ${timeoutS} s`, detail: stderrLine };
+  }
+  if (exit.code !== 0) {
+    const how =
+      exit.killedBy !== undefined
+        ? `was killed by ${exit.killedBy}`
+        : exit.code === null
+          ? `was killed by ${exit.signal}`
+          : `exited with code ${exit.code}`;
+    const hint = homeOptionHint(exit.stderrTail);
+    return { ok: false, error: hint ? `${how}: ${hint}` : how, detail: stderrLine };
+  }
+  const outcome = parseVerifierLine(exit.lastLine);
+  return !outcome.ok && outcome.detail === null ? { ...outcome, detail: stderrLine } : outcome;
 }
 
 /** Runs one verifier to completion or its deadline. Never throws for anything the script does. */
@@ -233,25 +309,18 @@ export async function runVerifier(options: VerifierOptions): Promise<VerifierRun
     stdout_tail: stdoutTail.text(),
     stderr_tail: stderrTail.text(),
   };
-  const stderrLine = lastLineOf(evidence.stderr_tail);
-  let outcome: VerifierOutcome;
-  if (ended.spawnError) {
-    outcome = { ok: false, error: `could not start ${python}`, detail: ended.spawnError.message };
-  } else if (timedOut) {
-    outcome = { ok: false, error: `timed out after ${options.timeoutS} s`, detail: stderrLine };
-  } else if (ended.code !== 0) {
-    const how =
-      ended.code === null ? `was killed by ${ended.signal}` : `exited with code ${ended.code}`;
-    const hint = homeOptionHint(evidence.stderr_tail);
-    outcome = {
-      ok: false,
-      error: hint ? `${how}: ${hint}` : how,
-      detail: stderrLine,
-    };
-  } else {
-    outcome = parseVerifierLine(stdout.lastLine);
-    if (!outcome.ok && outcome.detail === null) outcome = { ...outcome, detail: stderrLine };
-  }
+  const outcome: VerifierOutcome = ended.spawnError
+    ? { ok: false, error: `could not start ${python}`, detail: ended.spawnError.message }
+    : verifierOutcome(
+        {
+          timedOut,
+          code: ended.code,
+          signal: ended.signal,
+          stderrTail: evidence.stderr_tail,
+          lastLine: stdout.lastLine,
+        },
+        options.timeoutS,
+      );
   return { outcome, evidence };
 }
 
@@ -273,6 +342,8 @@ export function verifierResult(run: VerifierRun, passAt: number, scriptName: str
 export interface VerifierKeyInput {
   /** The task's `verify/` folder, materialised; params.script is relative to it. */
   verifyDir: string;
+  /** Where the script runs; the process's installed runner when absent (useVerifierRunner). */
+  runner?: VerifierRunner;
   answer: JsonValue | null;
   workspaceDir: string;
   /** The collected home files, as `--home`; absent gives an empty folder (VerifierOptions.homeDir). */
@@ -281,27 +352,41 @@ export interface VerifierKeyInput {
   python?: string;
 }
 
-/** One verifier_script key, end to end. Never throws: a broken setup is `error`. */
-export function scoreVerifierScript(
+/**
+ * One verifier_script key, end to end. A broken setup is `error`; the one
+ * throw is VerifierUnavailable, when the script could not be run at all.
+ */
+export async function scoreVerifierScript(
   params: VerifierScriptParams,
   input: VerifierKeyInput,
 ): Promise<ScorerResult> {
-  return guardedAsync(async () => {
+  // An object, so the closure's write is visible after the await.
+  const thrown: { unavailable?: VerifierUnavailable } = {};
+  const result = await guardedAsync(async () => {
     const scriptPath = join(input.verifyDir, params.script);
     // The script came from the suite, but a link could still point anywhere.
     const stat = await lstat(scriptPath).catch(() => null);
     if (!stat?.isFile()) {
       return scorerError(`verifier ${params.script} is not a regular file in verify/`);
     }
-    const run = await runVerifier({
-      scriptPath,
-      answer: input.answer,
-      workspaceDir: input.workspaceDir,
-      ...(input.homeDir !== undefined ? { homeDir: input.homeDir } : {}),
-      timeoutS: params.timeout_s,
-      scratchDir: input.scratchDir,
-      python: input.python,
-    });
-    return verifierResult(run, params.pass_at, params.script);
+    const runner = input.runner ?? currentVerifierRunner();
+    try {
+      const run = await runner.run({
+        scriptPath,
+        verifyDir: input.verifyDir,
+        answer: input.answer,
+        workspaceDir: input.workspaceDir,
+        ...(input.homeDir !== undefined ? { homeDir: input.homeDir } : {}),
+        timeoutS: params.timeout_s,
+        scratchDir: input.scratchDir,
+        python: input.python,
+      });
+      return verifierResult(run, params.pass_at, params.script);
+    } catch (err) {
+      if (err instanceof VerifierUnavailable) thrown.unavailable = err;
+      throw err;
+    }
   });
+  if (thrown.unavailable) throw thrown.unavailable;
+  return result;
 }

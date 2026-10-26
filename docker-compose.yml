@@ -145,10 +145,13 @@ services:
       TRIAL_SLOTS: hermes-evals-trial-0,hermes-evals-trial-1,hermes-evals-trial-2,hermes-evals-trial-3
       # The provider guard asks nous-login whether Nous Portal is connected.
       NOUS_LOGIN_URL: http://nous-login:8650
-    # Suites load here, at every start and on POST /suites/reload; read-only,
-    # the loader never writes to them.
+    # Suites load here, at every start and on POST /suites/reload. Read-write
+    # for the save of a draft alone (Phase 5b, plan 4.6): it writes through a
+    # dot-named staging folder and a rename, under the folder's lock; the
+    # loader never writes. On Linux, uid 10000 must be able to write ./suites
+    # (README, "Suite authoring").
     volumes:
-      - ./suites:/data/suites:ro
+      - ./suites:/data/suites
       - evaldata:/data
       - trials:/trials
       - guard-sock:/run/guard

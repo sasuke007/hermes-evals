@@ -14,7 +14,8 @@ import { useProvidersStore } from '@/stores/providers';
  * The inspector header's actions (RunInspector, RunInspectorStates): by status,
  *   scored           Same task under <other> (the A/B jump) · Re-score · Copy run id
  *   execution_error  Retry execution · Copy run id
- *   queued, running  Cancel run (confirmed in place) · Copy run id
+ *   queued, running  Cancel run (confirmed in place, in ConfirmInline's columns layout: the
+ *                    title over its long consequence, the buttons right) · Copy run id
  *   otherwise        Copy run id
  * The A/B jump stays in place when its counterpart cannot be opened, disabled, with the
  * reason as tooltip and aria-description. Re-score and Retry are disabled through
@@ -253,8 +254,9 @@ const systemRoute = { name: ROUTE_NAMES.system };
       confirm-label="Cancel run"
       cancel-label="Keep running"
       busy-label="Cancelling…"
-      layout="row"
+      layout="columns"
       button-size="mid"
+      :class="{ 'basis-full': confirming }"
       error-title="Could not cancel. The run goes on."
       :busy="busy === 'cancel'"
       :error="cancelError"

@@ -242,3 +242,12 @@ export function decodeUtf8(content: Buffer): string | null {
     return null;
   }
 }
+
+/** UTF-8 text exactly as stored, a byte-order mark kept (a file written back is the same bytes); null otherwise. */
+export function verbatimUtf8(content: Buffer): string | null {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content);
+  } catch {
+    return null;
+  }
+}

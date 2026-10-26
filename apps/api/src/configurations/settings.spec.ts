@@ -46,6 +46,8 @@ const mcp = (
   name,
   version,
   transport,
+  envNames: [],
+  headers: [],
   definitionHash: hash,
 });
 

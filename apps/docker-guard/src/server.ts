@@ -159,7 +159,7 @@ export function createGuardServer(options: ServerOptions): http.Server {
             deny(res, 400, `invalid create body: ${(err as Error).message}`);
             return;
           }
-          const checked = checkCreateBody(parsed, options);
+          const checked = checkCreateBody(parsed, options, decision.name);
           if (!checked.ok) {
             log({
               at: new Date().toISOString(),
@@ -189,7 +189,9 @@ export function createGuardServer(options: ServerOptions): http.Server {
             method,
             url,
             allow: true,
-            attempt: checked.body.Labels['hermes-evals.attempt'],
+            ...(checked.kind === 'verifier'
+              ? { verifier: checked.body.Labels['hermes-evals.verifier'] }
+              : { attempt: checked.body.Labels['hermes-evals.attempt'] }),
           });
           forward(options, req, res, decision.path, body);
           return;

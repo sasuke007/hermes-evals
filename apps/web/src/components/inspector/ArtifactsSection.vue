@@ -5,7 +5,7 @@ import type { ArtifactView, RunDetail } from '@/api/types/runs';
 import { formatBytes, formatSha256 } from '@/lib/format';
 import ArtifactPreview from './ArtifactPreview.vue';
 import SectionHeading from './SectionHeading.vue';
-import { ORIGIN_LABELS, previewKind } from './inspectorFormat';
+import { memoryEnabledIn, ORIGIN_LABELS, previewKind } from './inspectorFormat';
 
 /**
  * Section 4, Artifacts (RunInspector; RunInspectorStates › Cancelled): the files left in the
@@ -19,7 +19,10 @@ import { ORIGIN_LABELS, previewKind } from './inspectorFormat';
  * Files collected from the agent's home (root `home`: memories/MEMORY.md and USER.md, Phase 6
  * P2) follow in a Memory group of their own, labelled against the task's home seeds (a seed
  * unchanged or modified, or written by the agent). No board draws the group: it repeats the
- * workspace table under a sub-heading set like the launch record's.
+ * workspace table under a sub-heading set like the launch record's. A finished run with
+ * memory on (its config.yaml) and nothing collected from the home keeps the group, saying
+ * "Memory is on; the agent saved nothing" (Phase 6 #11), so an empty memory is a finding
+ * rather than a missing section.
  */
 const props = defineProps<{ detail: RunDetail; sectionId: string }>();
 
@@ -27,9 +30,19 @@ const artifacts = computed(() => props.detail.artifacts);
 const items = computed(() => artifacts.value.items);
 const workspace = computed(() => items.value.filter((a) => a.root === 'workspace'));
 const home = computed(() => items.value.filter((a) => a.root === 'home'));
+const unfinished = computed(() => ['queued', 'running'].includes(props.detail.status));
+/** Memory was on and the run is over, yet nothing came back from the home. */
+const savedNothing = computed(
+  () =>
+    !unfinished.value &&
+    home.value.length === 0 &&
+    memoryEnabledIn(props.detail.launchRecord) === true,
+);
 const groups = computed(() => [
   { root: 'workspace' as const, items: workspace.value },
-  ...(home.value.length ? [{ root: 'home' as const, items: home.value }] : []),
+  ...(home.value.length || savedNothing.value
+    ? [{ root: 'home' as const, items: home.value }]
+    : []),
 ]);
 const open = ref(new Set<string>());
 
@@ -59,7 +72,6 @@ const SKIPPED: Record<NonNullable<ArtifactView['skippedReason']>, string> = {
   over_budget: "not stored: the attempt's collection budget was used up",
 };
 
-const unfinished = computed(() => ['queued', 'running'].includes(props.detail.status));
 /** Nothing was launched (a setup failure before the container): there was no workspace. */
 const neverLaunched = computed(() => !unfinished.value && props.detail.launchRecord === null);
 const note = computed(() => {
@@ -159,6 +171,13 @@ const previews = computed(() => items.value.filter((a) => open.value.has(a.id)))
             </tr>
           </tbody>
         </table>
+        <div
+          v-if="group.root === 'home' && !group.items.length"
+          class="px-16 py-12 text-text-2"
+          data-testid="memory-note"
+        >
+          Memory is on; the agent saved nothing.
+        </div>
         <div
           v-if="group.root === 'workspace' && note"
           class="px-16 text-text-2"

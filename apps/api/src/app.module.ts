@@ -21,6 +21,10 @@ import { SkillsModule } from './resources/skills/skills.module.js';
 import { RunCommandsModule } from './runs/commands/run-commands.module.js';
 import { RunViewsModule } from './runs/views/run-views.module.js';
 import { StorageModule } from './storage/storage.module.js';
+import { SuiteDraftsModule } from './suites/drafts/drafts.module.js';
+import { SuiteDraftsService } from './suites/drafts/drafts.service.js';
+import { SuiteImportModule } from './suites/import/suite-import.module.js';
+import { DraftSaveModule } from './suites/save/draft-save.module.js';
 import { SuitesModule } from './suites/suites.module.js';
 import { SystemEventsModule } from './system/events/system-events.module.js';
 import { SystemModule } from './system/system.module.js';
@@ -36,13 +40,21 @@ const isDev = process.env.NODE_ENV !== 'production';
  * (RequestedWithGuard), and an integrity violation the services did not
  * foresee answers 4xx, not 500 (DatabaseErrorFilter).
  *
- * Order matters for two imports. ProvidersModule brings the global
+ * Order matters for three imports. ProvidersModule brings the global
  * NousLoginModule, which provides PROVIDER_READINESS_DEPS to the commands'
  * ProviderGate. ExperimentCommandsModule comes before ExperimentViewsModule:
  * Express matches routes in registration order, and GET /experiments/:id
  * would otherwise answer /experiments/new-options and /experiments/estimate.
- * ComparisonModule is global, so the views and the live stream share its
- * cache; its route has two segments after /experiments and no order concern.
+ * SuiteDraftsModule comes before SuitesModule for the same reason: GET
+ * /suites/:id would otherwise answer GET /suites/drafts. ComparisonModule is
+ * global, so the views and the live stream share its cache; its route has
+ * two segments after /experiments and no order concern.
+ *
+ * Suite authoring (Phase 5b, plan 4.6) is three modules: the drafts
+ * (SuiteDraftsModule), the CSV, JSONL and zip imports, which add to a draft
+ * through the drafts module's DraftImportPort, and the routes that need the
+ * worker (DraftSaveModule: a draft task's self-check, the save, the rebase).
+ * The API still never reads SUITES_DIR; the worker's save handler writes it.
  */
 @Module({
   imports: [
@@ -67,7 +79,10 @@ const isDev = process.env.NODE_ENV !== 'production';
     QueueModule,
     StorageModule,
     HealthModule,
+    SuiteDraftsModule,
     SuitesModule,
+    SuiteImportModule.withDrafts({ imports: [SuiteDraftsModule], port: SuiteDraftsService }),
+    DraftSaveModule,
     SkillsModule,
     DocumentsModule,
     McpModule,

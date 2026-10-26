@@ -3,11 +3,14 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import ConfigDiffTable from '@/components/configurations/ConfigDiffTable.vue';
 import ConfigListTable from '@/components/configurations/ConfigListTable.vue';
+import { matchesName } from '@/components/configurations/configDisplay';
 import PageContainer from '@/components/layout/PageContainer.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorBanner from '@/components/ui/ErrorBanner.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { errorMessage } from '@/api/client';
 import type { ConfigDiff } from '@/api/types/configurations';
+import { urlString, useUrlState } from '@/composables/useUrlState';
 import { ROUTE_NAMES } from '@/router';
 import { useConfigurationsStore } from '@/stores/configurations';
 import { plural } from '@/lib/format';
@@ -20,6 +23,10 @@ import { plural } from '@/lib/format';
  * rows. A row opens the detail; New configuration opens the form. Loading, empty and load
  * error as LibraryStates draws them. With a long list the comparison opens far below the
  * button, so Compare scrolls it into view.
+ *
+ * A name filter (Phase 5 #18; no board draws it, so it follows the Experiment list's search)
+ * narrows the rows, `?q=` in the URL; picked rows stay picked while the filter hides them,
+ * so Compare still counts them. No sorting: the API's order (creation) stays.
  */
 const store = useConfigurationsStore();
 void store.loadList();
@@ -34,8 +41,12 @@ const diff = ref<ConfigDiff | null>(null);
 const diffLoading = ref(false);
 const diffError = ref<string | null>(null);
 
+const url = useUrlState({ q: urlString('') });
+
 const loading = computed(() => store.listState.loading && !store.listState.loaded);
 const rows = computed(() => store.list);
+const filtered = computed(() => url.q.value.trim() !== '');
+const shown = computed(() => rows.value.filter((r) => matchesName(r.name, url.q.value)));
 /** Picked rows in list order, so the first configuration is the reference column. */
 const picked = computed(() => rows.value.filter((r) => selected.value.includes(r.id)));
 
@@ -122,7 +133,50 @@ watch(rows, (list) => {
         retry-label="Retry"
         @retry="store.loadList()"
       />
-      <ConfigListTable v-model:selected="selected" :rows="rows" :loading="loading" />
+      <div
+        v-if="store.listState.loaded && (rows.length > 0 || filtered)"
+        class="flex flex-wrap items-center gap-12"
+      >
+        <label class="relative flex items-center">
+          <span class="sr-only">Filter configurations by name</span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            aria-hidden="true"
+            class="absolute left-10 text-text-3"
+          >
+            <circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path
+              d="M9.2 9.2L12 12"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+          </svg>
+          <input
+            v-model="url.q.value"
+            class="input w-320 pl-30 max-sm:w-full"
+            type="search"
+            placeholder="Filter by name"
+            data-testid="config-filter"
+          />
+        </label>
+        <span v-if="filtered" class="text-12 text-text-3" data-testid="filter-count"
+          >{{ shown.length }} of {{ plural(rows.length, 'configuration') }}</span
+        >
+      </div>
+      <ConfigListTable v-model:selected="selected" :rows="shown" :loading="loading">
+        <template v-if="filtered && rows.length > 0" #empty>
+          <EmptyState title="No configurations match this filter" :panel="false">
+            <template #actions>
+              <button type="button" class="btn primary" @click="url.q.value = ''">
+                Clear filter
+              </button>
+            </template>
+          </EmptyState>
+        </template>
+      </ConfigListTable>
 
       <ConfigDiffTable
         v-if="showCompare"

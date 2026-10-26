@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -9,8 +10,9 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiParam, ApiTags } from '@nestjs/swagger';
+import { ApiNoContentResponse, ApiNotFoundResponse, ApiParam, ApiTags } from '@nestjs/swagger';
 import {
+  ResourceInUseBodySchema,
   SkillConfirmRequestSchema,
   SkillDetailSchema,
   SkillFileContentSchema,
@@ -74,6 +76,19 @@ export class SkillsController {
   @ApiJsonResponse(SkillDetailSchema, { description: 'The skill, its SKILL.md and its files' })
   detail(@Param('id') id: string): Promise<SkillDetail> {
     return this.skills.detail(id);
+  }
+
+  /** Only a skill no configuration version names (Phase 5 section 6.1). */
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiNotFoundResponse({ description: 'No such skill' })
+  @ApiJsonResponse(ResourceInUseBodySchema, {
+    status: 409,
+    description: 'A configuration version names the skill: the configurations in `usedBy`',
+  })
+  remove(@Param('id') id: string): Promise<void> {
+    return this.skills.remove(id);
   }
 
   /** `path` is one URL-encoded segment, e.g. examples%2Freconcile.py. */

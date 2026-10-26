@@ -6,7 +6,7 @@
  * version and its definition hash, so a test after an in-place edit is a job
  * of its own).
  */
-import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Inject, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, sql } from 'drizzle-orm';
 import { McpTestViewSchema, type McpServerInput, type McpTestView } from '@hermes-evals/shared';
@@ -18,10 +18,11 @@ import { findLiveWorker } from '../../queue/live-worker.js';
 import { QueueService } from '../../queue/queue.service.js';
 import { QUEUES, testMcpServerKey, type TestMcpServerJob } from '../../queue/queues.js';
 import { JobWaitTimeout, sendAndWait, type JobOutcome } from '../../queue/send-and-wait.js';
-import { definitionOf } from './definition.js';
+import { definitionHash, definitionOf } from './definition.js';
 import { latestVersions } from './mcp-reads.js';
 import { mcpServerNotFound } from './mcp-servers.service.js';
 import { readTestRecord, type McpTestRecord } from './test-record.js';
+import { passedRecordOf, UnsavedMcpTests } from './unsaved-tests.js';
 import { toMcpTestView } from './views.js';
 
 const unavailable = (message: string) =>
@@ -33,6 +34,9 @@ export class McpTestsService {
     @Inject(DB) private readonly db: AppDb,
     @Inject(QueueService) private readonly queue: QueueService,
     @Inject(ConfigService) private readonly config: ConfigService<Env, true>,
+    @Optional()
+    @Inject(UnsavedMcpTests)
+    private readonly unsaved: UnsavedMcpTests = new UnsavedMcpTests(),
   ) {}
 
   /** POST /resources/mcp-servers/:id/test: tests the server's latest version and records the result on it. */
@@ -64,11 +68,20 @@ export class McpTestsService {
     });
   }
 
-  /** POST /resources/mcp-servers/test: tests what the form holds; nothing is stored. */
-  testUnsaved(definition: McpServerInput): Promise<McpTestView> {
-    return this.run({ kind: 'unsaved', definition }, definition, {
+  /**
+   * POST /resources/mcp-servers/test: tests what the form holds, nothing is
+   * stored. The answer names the definition's hash, and a passing result is
+   * kept for the save of that very definition (UnsavedMcpTests).
+   */
+  async testUnsaved(definition: McpServerInput): Promise<McpTestView> {
+    const hash = definitionHash(definition);
+    const view = await this.run({ kind: 'unsaved', definition }, definition, {
       onTimeout: async (requestedAt) => ({ status: 'running', requestedAt }),
+      onCompleted: (result, jobId) => {
+        if (result.status === 'passed') this.unsaved.remember(hash, passedRecordOf(result, jobId));
+      },
     });
+    return view.status === 'untested' ? view : { ...view, definitionHash: hash };
   }
 
   private async run(
@@ -78,6 +91,8 @@ export class McpTestsService {
       /** The wait ended first; `jobId` is the job this request sent or joined. */
       onTimeout: (requestedAt: string, jobId: string) => Promise<McpTestView>;
       onJobFailed?: (record: Extract<McpTestRecord, { status: 'failed' }>) => Promise<void>;
+      /** The worker answered with a result; `jobId` is the job that ran it. */
+      onCompleted?: (view: McpTestView, jobId: string) => void;
     },
   ): Promise<McpTestView> {
     if ((await this.queue.ping()) !== 'ok') {
@@ -99,7 +114,10 @@ export class McpTestsService {
     }
     if (outcome.state === 'completed') {
       const view = McpTestViewSchema.safeParse(outcome.output);
-      if (view.success) return view.data;
+      if (view.success) {
+        handlers.onCompleted?.(view.data, outcome.jobId);
+        return view.data;
+      }
     }
     // The handler records its own failures and returns them as output, so
     // this is a job that crashed, expired or was cancelled.

@@ -113,12 +113,14 @@ export async function buildVersions(
         sha256,
       })),
       mcpServers: settings.mcpServers.map(
-        ({ mcpServerId, versionId, name, version, transport }) => ({
+        ({ mcpServerId, versionId, name, version, transport, envNames, headers }) => ({
           mcpServerId,
           versionId,
           name,
           version,
           transport,
+          envNames,
+          headers,
         }),
       ),
       maxTurns: settings.maxTurns,

@@ -65,7 +65,10 @@ const toComparison = (verdict: ExperimentListVerdict) => ({
       :data-verdict="chip.verdict.verdict"
       data-testid="verdict-chip"
     >
-      <span class="font-mono font-medium">{{ chip.verdict.candidate }}</span
+      <span
+        class="inline-block max-w-160 truncate align-bottom font-mono font-medium"
+        :title="chip.verdict.candidate"
+        >{{ chip.verdict.candidate }}</span
       >{{ ' ' }}<span>{{ chip.word }}</span>
     </RouterLink>
     <span v-if="chips.length === 0" class="text-text-3" data-testid="no-verdict">{{

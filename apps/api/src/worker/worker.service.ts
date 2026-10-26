@@ -29,6 +29,7 @@ import { workerJudgeClient } from '../scoring/judge/egress-judge.js';
 import { StorageService } from '../storage/storage.service.js';
 import { registerSuiteLoadHandler } from '../suites/loader/load-suites.handler.js';
 import { SuiteLoaderService } from '../suites/loader/suite-loader.service.js';
+import { registerDraftJobHandlers } from './handlers/draft-jobs.js';
 import { freeSlotSource, type SlotLease } from './handlers/mcp-test-container.js';
 import { RECONCILE_INTERVAL_MS, reconcileStaleMcpTests } from './handlers/stale-mcp-tests.js';
 import { mcpTestSandbox, registerMcpTestHandler } from './handlers/test-mcp-server.js';
@@ -67,15 +68,19 @@ export const SHUTDOWN_RECOVERY_WAIT_MS = 20_000;
  *      it is database work. The provider guard asks this worker's own
  *      egress, live, which keys it holds (readiness.ts);
  *    - evaluate-run and evaluate-run-dead, whatever the sandbox state:
- *      scoring reads stored evidence and runs verifier scripts in this
- *      process, outside any trial (plan 14). The LLM judge's calls go
- *      through egress's admin socket (/judges), which holds the provider
- *      credentials; this process holds none (Phase 3 S2);
+ *      scoring reads stored evidence and runs verifier scripts, each in a
+ *      container of its own through docker-guard, outside any trial (R7,
+ *      plan 14; SandboxService installs that runner for the process). The
+ *      LLM judge's calls go through egress's admin socket (/judges), which
+ *      holds the provider credentials; this process holds none (Phase 3 S2);
  *    - load-suites and test-mcp-server, which register whatever the
- *      self-test found: loading needs no sandbox, and an MCP test on a
+ *      self-test found: loading needs no trial sandbox, and an MCP test on a
  *      worker without proven isolation answers "failed" saying so. An http
  *      test borrows its slot network from the lifecycle's pool, so tests
  *      and trials never share one (E9);
+ *    - self-check-draft and save-suite-draft (Phase 5b), whatever the
+ *      self-test found: their verifiers run in containers through
+ *      docker-guard (R7), and the save is the only writer of SUITES_DIR;
  * 4. the start-up suite load (plan 4.4), in the background, so a slow
  *    verifier does not hold up the handlers. The loader runs one load at a
  *    time in this process, so a reload job waits for it rather than reading
@@ -157,6 +162,12 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
       concurrency,
     );
     await registerSuiteLoadHandler(boss, this.suiteLoader, this.logger);
+    await registerDraftJobHandlers(boss, {
+      db: this.db,
+      blobs: this.storage,
+      suitesDir: this.config.get('SUITES_DIR', { infer: true }),
+      logger: this.logger,
+    });
     await registerMcpTestHandler(
       boss,
       { db: this.db, sandbox: mcpTestSandbox(this.sandbox, () => this.acquireSlot()) },

@@ -1,6 +1,8 @@
 import {
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   Res,
@@ -8,8 +10,8 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
-import { DocumentRowSchema, type DocumentRow } from '@hermes-evals/shared';
+import { ApiNoContentResponse, ApiNotFoundResponse, ApiTags } from '@nestjs/swagger';
+import { DocumentRowSchema, ResourceInUseBodySchema, type DocumentRow } from '@hermes-evals/shared';
 import type { Response } from 'express';
 import { ApiFileResponse, ApiFileUpload, ApiJsonResponse } from '../../openapi/decorators.js';
 import { badRequest, contentDisposition, streamFailure } from '../skills/http.js';
@@ -38,6 +40,19 @@ export class DocumentsController {
   upload(@UploadedFile() file: UploadedFileRef | undefined): Promise<DocumentRow> {
     if (!file) throw badRequest("attach the document as the multipart field 'file'");
     return this.documents.upload(file);
+  }
+
+  /** Only a document no configuration version names (Phase 5 section 6.1). */
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiNotFoundResponse({ description: 'No such document' })
+  @ApiJsonResponse(ResourceInUseBodySchema, {
+    status: 409,
+    description: 'A configuration version names the document: the configurations in `usedBy`',
+  })
+  remove(@Param('id') id: string): Promise<void> {
+    return this.documents.remove(id);
   }
 
   /**

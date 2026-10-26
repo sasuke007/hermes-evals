@@ -1,0 +1,30 @@
+[
+  {
+    "match": "Flow E smoke: add up the `amount` column",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "The unpaid invoices are rows 2 and 3: 80.25 + 19.25 = 99.50.\n\n```json\n{ \"unpaid_total\": 99.5 }\n```"
+      }
+    ]
+  },
+  {
+    "match": "Flow E smoke: read `ledger.csv`",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "printf 'vendor,total\\nAcme,15\\nGlobex,7\\n' > /workspace/summary.csv && cat /workspace/summary.csv"
+        }
+      },
+      {
+        "content": "I wrote summary.csv with one row per vendor.\n\n```json\n{ \"done\": true }\n```"
+      }
+    ]
+  }
+]

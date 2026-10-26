@@ -5,4 +5,5 @@ export * from './env-names.js';
 export * from './health.js';
 export * from './runtime.js';
 export * from './suite-files.js';
+export * from './authoring.js';
 export * from './contracts/index.js';

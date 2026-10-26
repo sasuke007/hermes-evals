@@ -10,6 +10,7 @@ import { isReservedEnvName, reservedEnvNameMessage } from '../env-names.js';
 import { ENV_NAME_PATTERN, McpHeaderSchema } from '../records.js';
 import { MCP_TRANSPORTS } from '../vocab.js';
 import {
+  ApiErrorBodySchema,
   countView,
   HTTP_URL_PATTERN,
   isoTimeView,
@@ -31,6 +32,19 @@ export const ConfigurationLinkSchema = z.object({
   name: z.string(),
 });
 export type ConfigurationLink = z.infer<typeof ConfigurationLinkSchema>;
+
+/**
+ * The 409 of DELETE /resources/skills/:id and DELETE /resources/documents/:id
+ * (Phase 5 section 6.1): only a skill or document no configuration version
+ * uses can be deleted, and `usedBy` names the configurations that still do.
+ * A deletion answers 204; the database refuses deleting one in use too
+ * (migration 0009).
+ */
+export const ResourceInUseBodySchema = ApiErrorBodySchema.extend({
+  statusCode: z.literal(409),
+  usedBy: z.array(ConfigurationLinkSchema).min(1),
+});
+export type ResourceInUseBody = z.infer<typeof ResourceInUseBodySchema>;
 
 // ---------------------------------------------------------------------------
 // Skills
@@ -153,12 +167,22 @@ export const McpToolViewSchema = z.object({
 });
 export type McpToolView = z.infer<typeof McpToolViewSchema>;
 
+/**
+ * The definition a test ran on: the hash of what the form held (the same as
+ * McpServerRow's version's definition hash once saved). POST
+ * /resources/mcp-servers/test always sets it, and a save whose definition
+ * hashes the same keeps that test's result instead of reading "untested"
+ * (Phase 5 question 14). Absent on results read back from a saved version.
+ */
+const definitionHash = sha256View.optional();
+
 /** Result of the last "Test start" of a server definition. Never holds secret values. */
 export const McpTestViewSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('untested') }),
-  z.object({ status: z.literal('running'), requestedAt: isoTimeView }),
+  z.object({ status: z.literal('running'), requestedAt: isoTimeView, definitionHash }),
   z.object({
     status: z.literal('passed'),
+    definitionHash,
     requestedAt: isoTimeView,
     finishedAt: isoTimeView,
     startedMs: countView,
@@ -166,6 +190,7 @@ export const McpTestViewSchema = z.discriminatedUnion('status', [
   }),
   z.object({
     status: z.literal('failed'),
+    definitionHash,
     requestedAt: isoTimeView,
     finishedAt: isoTimeView,
     startedMs: countView.nullable(),

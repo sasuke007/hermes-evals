@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
 import ConfigurationDetailPage from '@/views/configurations/ConfigurationDetailPage.vue';
+import * as configurationsApi from '@/api/configurations';
 import { CONFIG_IDS, CONFIG_VERSION_IDS } from '@/fixtures/configurations';
 import { useConfigurationsStore } from '@/stores/configurations';
 import { useProvidersStore } from '@/stores/providers';
+import { useResourcesStore } from '@/stores/resources';
 import { mountPage, unmountAll } from './mountPage';
 
 afterEach(() => {
   unmountAll();
   useProvidersStore().dispose();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -80,6 +83,29 @@ describe('ConfigurationDetailPage', () => {
     expect(words(row(w, 'skills'))).toBe('Skills No added skills');
   });
 
+  it('names the variables of the very definition version the configuration pins', async () => {
+    // The names come with the version's McpServerRef (Phase 5 section 6.1), not from the
+    // resource library's latest definitions, which this page no longer reads.
+    const real = configurationsApi.getConfiguration;
+    vi.spyOn(configurationsApi, 'getConfiguration').mockImplementation(async (id, version) => {
+      const detail = await real(id, version);
+      const shown = {
+        ...detail.shown,
+        mcpServers: detail.shown.mcpServers.map((m) => ({
+          ...m,
+          envNames: ['INVOICE_DB_URL', 'INVOICE_DB_READONLY_TOKEN'],
+        })),
+      };
+      return { ...detail, shown, latest: shown };
+    });
+    const { w } = await open(CONFIG_IDS['with-mcp']);
+    await flushPromises();
+    expect(norm(row(w, 'mcp_servers').get('[role="note"]').text())).toBe(
+      "invoice-db runs inside the run's container. The agent can read INVOICE_DB_URL and INVOICE_DB_READONLY_TOKEN.",
+    );
+    expect(useResourcesStore().mcpServers.loaded).toBe(false);
+  });
+
   it('version history and every experiment that used it, with pass rate and verdict', async () => {
     const { w } = await open(CONFIG_IDS['with-skill']);
     const history = w.get('table[aria-label="Version history"]');
@@ -98,13 +124,20 @@ describe('ConfigurationDetailPage', () => {
       'Verdict',
     ]);
     expect(used.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => words(td)))).toEqual([
-      ['Skill + MCP, invoices-v1', 'candidate', 'running', '0.85 13 of 60 scored', 'Provisional'],
+      // The candidate's Δ whenever there is one: provisional while running (Phase 5 question 1).
+      [
+        'Skill + MCP, invoices-v1',
+        'candidate',
+        'running',
+        '0.85 13 of 60 scored',
+        'Provisional · Δ +0.208',
+      ],
       [
         'Skill vs no skill, invoices-v1',
         'candidate',
         'completed',
         '0.850',
-        'better vs baseline 0.633',
+        'better Δ +0.217 · vs baseline 0.633',
       ],
       [
         'Skill vs no skill, quick check',

@@ -16,6 +16,7 @@ import {
   SuiteDetailSchema,
   SuiteHistoryEntrySchema,
   SuiteListRowSchema,
+  SuiteReloadProgressSchema,
   SuiteReloadResultSchema,
   TablePreviewSchema,
   TaskDetailSchema,
@@ -40,10 +41,10 @@ interface FakeJob {
   output: unknown;
 }
 
-/** The two pg-boss calls sendAndWait makes, answering with whatever `settle` returns. */
+/** The two pg-boss calls sendAndWait makes, answering with whatever `settle` returns for the job's data. */
 class FakeBoss {
   sent: { queue: string; data: object; singletonKey: string | undefined }[] = [];
-  settle: () => Omit<FakeJob, 'id'> = () => ({ state: 'completed', output: RESULT });
+  settle: (data: object) => Omit<FakeJob, 'id'> = () => ({ state: 'completed', output: RESULT });
 
   async send(queue: string, data: object, options?: { singletonKey?: string }): Promise<string> {
     this.sent.push({ queue, data, singletonKey: options?.singletonKey });
@@ -51,12 +52,14 @@ class FakeBoss {
   }
 
   async findJobs(_queue: string, options: { id?: string }): Promise<FakeJob[]> {
-    return options.id ? [{ id: options.id, ...this.settle() }] : [];
+    const job = options.id ? this.sent[Number(options.id.slice('job_'.length)) - 1] : undefined;
+    return job ? [{ id: options.id!, ...this.settle(job.data) }] : [];
   }
 }
 
+const RESULT_AT = '2026-10-23T15:41:07.000Z';
 const RESULT: SuiteReloadResult = {
-  at: '2026-10-23T15:41:07.000Z',
+  at: RESULT_AT,
   suites: [
     {
       sourcePath: './suites/invoices-v1',
@@ -70,6 +73,15 @@ const RESULT: SuiteReloadResult = {
     },
   ],
 };
+
+/** A Reload all's scan: one directory on disk, nothing missing. */
+const SCAN = { at: RESULT_AT, missing: [], directories: ['invoices-v1'] };
+
+/** The worker's answers to a Reload all: the scan, then each directory's result. */
+const ALL = (data: object) => ({
+  state: 'completed',
+  output: (data as { path: string | null }).path === null ? SCAN : RESULT,
+});
 
 let t: TestDatabase;
 let seed: SeededDirectory;
@@ -252,12 +264,28 @@ describe('POST /api/suites/reload', () => {
       });
     });
 
-    it('sends one load-suites job for every directory and returns its output', async () => {
+    it('scans, then sends one load-suites job per directory, and returns their entries', async () => {
+      boss.settle = ALL;
       const res = await http().post('/api/suites/reload').expect(200);
       expect(SuiteReloadResultSchema.parse(res.body)).toEqual(RESULT);
       expect(boss.sent).toEqual([
         { queue: 'load-suites', data: { path: null }, singletonKey: '*' },
+        { queue: 'load-suites', data: { path: 'invoices-v1' }, singletonKey: 'invoices-v1' },
       ]);
+      const progress = SuiteReloadProgressSchema.parse(
+        (await http().get('/api/suites/reload/progress').expect(200)).body,
+      );
+      expect(progress).toMatchObject({
+        active: false,
+        directories: [
+          {
+            sourcePath: './suites/invoices-v1',
+            state: 'done',
+            entry: RESULT.suites[0],
+            error: null,
+          },
+        ],
+      });
     });
 
     it('reloads one directory named as the list shows it', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory, createRouter } from 'vue-router';
+import { DRAFT_SCENARIO_NAMES } from '@/api/drafts-scenarios';
 import { ROUTE_NAMES, routes } from '@/router';
 import { SCENARIOS, scenarioEntry, scenarioUrl } from '@/fixtures/scenarios';
 import { SYSTEM_SCENARIOS } from '@/fixtures/system';
@@ -40,6 +41,12 @@ const READ_BY_THIS_DATA_LAYER = [
   'stream-offline',
   'memory-files',
   'skills-on-demand',
+  // Suite authoring (Phase 5b).
+  'missing-folders',
+  'draft-invalid-task',
+  'draft-no-changes',
+  'save-failed',
+  ...DRAFT_SCENARIO_NAMES,
 ];
 
 describe('scenario registry', () => {

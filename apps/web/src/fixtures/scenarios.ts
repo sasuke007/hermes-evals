@@ -8,10 +8,12 @@
  * `baseData` scenarios show a state the default fixtures already contain;
  * the entry documents the route where it is drawn.
  */
+import { DRAFT_SCENARIOS } from '@/api/drafts-scenarios';
 import { EXPERIMENT_IDS, SAMPLE_RUN_ID } from './experiments';
 import { runIdOf } from './inspector';
 import { CONFIG_IDS } from './resources';
 import { SUITE_V1_ID, SUITE_V2_ID } from './suites';
+import { SUITE_AUTHORING_SCENARIOS } from './suites-authoring-scenarios';
 
 export type ScenarioDomain =
   'global' | 'experiments' | 'inspector' | 'suites' | 'library' | 'system';
@@ -104,13 +106,13 @@ export const SCENARIOS: ScenarioEntry[] = [
     description:
       'No worker heartbeat since 15:31:04: the AppShell pill turns amber, System lists the worker offline, and MCP vs baseline shows the no-worker banner with 4 in-flight runs marked execution_error · worker_lost.',
     route: exp('mcpVsBaseline'),
-    alsoAt: ['/system'],
+    alsoAt: ['/system', '/suites/invoices-v1/save'],
   },
   {
     name: 'failed',
     domain: 'experiments',
     description:
-      'MCP vs baseline, first try: stopped after 14 consecutive execution errors (setup), invoice-db failed to start, "Error: INVOICE_DB_URL is not set".',
+      'MCP vs baseline, first try: stopped after 14 failed attempts in a row (setup), invoice-db failed to start, "Error: INVOICE_DB_URL is not set".',
     route: exp('mcpFirstTry'),
     baseData: true,
   },
@@ -126,7 +128,7 @@ export const SCENARIOS: ScenarioEntry[] = [
     name: 'multi-candidate',
     domain: 'experiments',
     description:
-      'Skill + MCP, invoices-v1: two candidates, so the Comparison shows the candidate select (with-skill better, with-mcp provisional) and the Overview one VerdictCard each.',
+      'Skill + MCP, invoices-v1: two candidates, so the Comparison shows the candidate select (both provisional while it runs, as the API answers) and the Overview one VerdictCard each.',
     route: exp('skillMcp', '/comparison'),
     baseData: true,
   },
@@ -315,6 +317,9 @@ export const SCENARIOS: ScenarioEntry[] = [
       'Reload fails: "./suites/invoices-v1/vat_split/task.yaml:14:9 · mapping values are not allowed here"; the suite still serves v1 (3f9c2a1).',
     route: '/suites',
   },
+  // Suite authoring (Phase 5b): the pages around the editor, then the draft and the editor.
+  ...SUITE_AUTHORING_SCENARIOS,
+  ...DRAFT_SCENARIOS,
 
   // Library -------------------------------------------------------------------------
   {

@@ -6,19 +6,24 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import type { SegmentOption, SelectOption } from '@/components/ui/types';
 import type { ConfigurationFormOptions } from '@/api/types/configurations';
 import { ROUTE_NAMES } from '@/router';
-import type { McpExposure } from '@/stores/configurations';
 import ProviderNotice from '@/components/model-access/ProviderNotice.vue';
 import ConfigFormRow from './ConfigFormRow.vue';
 import McpExposureNote from './McpExposureNote.vue';
 import ResourcePicker from './ResourcePicker.vue';
 import ToolsetPicker from './ToolsetPicker.vue';
-import { mcpDetail, modelHelp } from './configDisplay';
-import type { ConfigFormField, ConfigFormIssueField, ConfigFormState } from './configForm';
+import { launchToolsets, launchToolsetsNote, mcpDetail, modelHelp } from './configDisplay';
+import {
+  effectiveSkillLoading,
+  type ConfigFormField,
+  type ConfigFormIssueField,
+  type ConfigFormState,
+} from './configForm';
 
 /**
  * The configuration form's panel (ConfigForm board): Name, Model and provider (with the
- * provider notice), Toolsets, Memory, Skills, Documents, MCP servers (with what each one
- * exposes to the run) and Limits, one ConfigFormRow each. The page owns the values and the
+ * provider notice), Toolsets (with what memory on and on-demand skills add at launch, Phase
+ * 6b #12), Memory, Skills, Documents, MCP servers (with what each one exposes to the run) and
+ * Limits, one ConfigFormRow each. The page owns the values and the
  * rules; `errors` holds the sentences to show (fields the user has left), `blur` says which
  * field was left.
  *
@@ -30,10 +35,8 @@ const props = withDefaults(
   defineProps<{
     options: ConfigurationFormOptions;
     errors?: Partial<Record<ConfigFormIssueField, string>>;
-    /** MCP server version id → its env and header names (the resource library). */
-    exposure?: Record<string, McpExposure>;
   }>(),
-  { errors: () => ({}), exposure: () => ({}) },
+  { errors: () => ({}) },
 );
 const state = defineModel<ConfigFormState>({ required: true });
 const emit = defineEmits<{ blur: [field: ConfigFormField] }>();
@@ -53,6 +56,16 @@ function patch(values: Partial<ConfigFormState>): void {
 const help = computed(() => modelHelp(state.value.model, props.options.models));
 const providerOptions = computed<SelectOption<string>[]>(() =>
   props.options.providers.map((p) => ({ value: p.id, label: p.label })),
+);
+/** What memory on and on-demand skills add to the ticked toolsets at launch. */
+const launchNote = computed(() =>
+  launchToolsetsNote(
+    launchToolsets({
+      toolsets: state.value.toolsets,
+      memoryEnabled: state.value.memoryEnabled,
+      skillLoading: effectiveSkillLoading(state.value),
+    }),
+  ),
 );
 const toolsetsLine = computed(() => {
   const on = props.options.toolsets.filter((t) => t.defaultOn).map((t) => t.name);
@@ -246,10 +259,14 @@ const libraryTab = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: {
           :labelledby="ids.toolsets"
           @update:model-value="patch({ toolsets: $event })"
         />
-        <p class="text-12 text-text-3">
-          Loaded from the runtime. <code>skills</code> and <code>memory</code> are toolsets too:
-          turning them off removes the agent's ability to use skills or memory at run time,
-          independent of the Skills and Memory fields below.
+        <p v-if="launchNote" class="text-12 text-text-2" data-testid="launch-toolsets">
+          {{ launchNote }}
+        </p>
+        <p class="text-12 text-text-3" data-testid="toolsets-help">
+          Loaded from the runtime. <code>skills</code> and <code>memory</code> are toolsets too.
+          Memory on adds <code>memory</code> at launch, and skills loaded on demand add
+          <code>skills</code>, ticked here or not. With memory off, Hermes hides the memory tool
+          even when <code>memory</code> is ticked.
         </p>
         <span v-if="errors.toolsets" class="text-12 text-fail-text">{{ errors.toolsets }}</span>
       </div>
@@ -265,8 +282,8 @@ const libraryTab = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: {
         <p class="text-12 text-text-3">
           The Hermes runtime's own default is <b>on</b>. Every run starts in a fresh home, so
           nothing carries between runs either way. This flag only lets the agent write and read
-          memory within one run. Default off, so the two configurations differ only where you
-          intend.
+          memory within one run. On adds the <code>memory</code> toolset at launch, so the agent can
+          save. Default off, so the two configurations differ only where you intend.
         </p>
       </div>
     </ConfigFormRow>
@@ -302,7 +319,7 @@ const libraryTab = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: {
           />
           <p class="basis-full text-12 text-text-3">
             Preload puts the skills in the prompt; on demand installs them for the agent to find,
-            with the <code>skills</code> toolset.
+            with the <code>skills</code> toolset, which it adds at launch.
           </p>
         </div>
         <span v-if="errors.skillLoading" class="text-12 text-fail-text">{{
@@ -338,8 +355,8 @@ const libraryTab = (tab: string) => ({ name: ROUTE_NAMES.resourcesTab, params: {
           <McpExposureNote
             v-if="s.server"
             :server="s.server"
-            :env-names="exposure[s.id]?.envNames ?? null"
-            :headers="exposure[s.id]?.headers ?? null"
+            :env-names="s.server.envNames"
+            :headers="s.server.headers.map((h) => h.header)"
             guidance
           />
         </template>

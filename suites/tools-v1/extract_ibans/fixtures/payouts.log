@@ -1,0 +1,300 @@
+2026-10-05T06:01:08Z INFO  beneficiary saved for account "AT39 5976 1860 6448 4387"
+2026-10-05T06:01:29Z DEBUG mandate id=M-1583 debtor_iban=IT66M5516553182588450135050 scheme=sepa-core
+2026-10-05T06:02:16Z INFO  healthcheck ok latency_ms=51
+2026-10-05T06:02:44Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T06:03:08Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T06:03:34Z DEBUG cache warmed entries=7615
+2026-10-05T06:04:55Z INFO  healthcheck ok latency_ms=28
+2026-10-05T06:05:08Z INFO  payout id=P-24590 iban=IT47Q6189792001381472475709 amount=5923.58 EUR status=sent
+2026-10-05T06:06:36Z INFO  refund id=R-25330 to iban=SE1947008248719137727333 amount=6982.19 EUR
+2026-10-05T06:07:32Z DEBUG rates refreshed source=ecb pairs=35
+2026-10-05T06:07:51Z INFO  payout id=P-88433 amount=5283.96 EUR status=settled
+2026-10-05T06:08:21Z INFO  batch b-6568 started items=382
+2026-10-05T06:08:59Z INFO  batch b-1875 started items=94
+2026-10-05T06:09:42Z INFO  batch b-6393 finished items=27 failed=0
+2026-10-05T06:10:26Z INFO  healthcheck ok latency_ms=23
+2026-10-05T06:10:48Z INFO  payout id=P-96674 amount=8155.89 EUR status=settled
+2026-10-05T06:12:08Z INFO  payout id=P-65133 amount=7314.12 EUR status=settled
+2026-10-05T06:12:36Z DEBUG rates refreshed source=ecb pairs=34
+2026-10-05T06:13:23Z INFO  batch b-1896 started items=386
+2026-10-05T06:13:37Z INFO  payout id=P-94594 amount=933.12 EUR status=settled
+2026-10-05T06:15:02Z INFO  healthcheck ok latency_ms=72
+2026-10-05T06:15:51Z INFO  batch b-2484 started items=75
+2026-10-05T06:16:06Z WARN  manual review: account "AT36 1180 0251 5502 2068" edited by ops
+2026-10-05T06:16:34Z INFO  payout id=P-87134 amount=1513.35 EUR status=settled
+2026-10-05T06:16:41Z INFO  payout id=P-47412 amount=2545.65 EUR status=settled
+2026-10-05T06:17:45Z INFO  refund id=R-27542 to iban=PL13150962913048427308838284 amount=5579.03 EUR
+2026-10-05T06:18:57Z INFO  batch b-7841 finished items=380 failed=3
+2026-10-05T06:20:16Z DEBUG cache warmed entries=3497
+2026-10-05T06:21:34Z DEBUG rates refreshed source=ecb pairs=34
+2026-10-05T06:23:01Z DEBUG rates refreshed source=ecb pairs=23
+2026-10-05T06:24:31Z DEBUG rates refreshed source=ecb pairs=30
+2026-10-05T06:24:41Z DEBUG mandate id=M-6956 debtor_iban=BE33588002993885 scheme=sepa-core
+2026-10-05T06:25:14Z INFO  batch b-5935 finished items=251 failed=3
+2026-10-05T06:26:07Z INFO  batch b-4377 started items=202
+2026-10-05T06:26:53Z INFO  healthcheck ok latency_ms=86
+2026-10-05T06:27:41Z INFO  healthcheck ok latency_ms=37
+2026-10-05T06:27:53Z INFO  refund id=R-26640 to iban=IT20Z6590611760637633044015 amount=7806.91 EUR
+2026-10-05T06:27:56Z INFO  batch b-1581 started items=392
+2026-10-05T06:28:01Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T06:29:23Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T06:29:34Z INFO  payout id=P-30546 amount=2564.32 EUR status=settled
+2026-10-05T06:29:38Z INFO  batch b-7247 finished items=123 failed=0
+2026-10-05T06:29:55Z INFO  batch b-6942 started items=178
+2026-10-05T06:30:41Z INFO  batch b-4121 finished items=234 failed=1
+2026-10-05T06:31:18Z DEBUG rates refreshed source=ecb pairs=30
+2026-10-05T06:31:44Z INFO  batch b-8777 started items=8
+2026-10-05T06:32:22Z INFO  healthcheck ok latency_ms=29
+2026-10-05T06:33:52Z INFO  batch b-9183 started items=158
+2026-10-05T06:35:15Z DEBUG cache warmed entries=7623
+2026-10-05T06:35:51Z DEBUG cache warmed entries=2497
+2026-10-05T06:36:41Z WARN  manual review: account "PL66 9471 6151 5957 3593 7660 6750" edited by ops
+2026-10-05T06:37:58Z INFO  batch b-7909 started items=335
+2026-10-05T06:38:54Z DEBUG mandate id=M-8235 debtor_iban=FR3253436507723315737502539 scheme=sepa-core
+2026-10-05T06:39:41Z INFO  payout id=P-92541 amount=8183.98 EUR status=settled
+2026-10-05T06:40:58Z INFO  refund id=R-90247 to iban=NL30TFMF1683563900 amount=8247.06 EUR
+2026-10-05T06:41:40Z INFO  batch b-3650 finished items=146 failed=2
+2026-10-05T06:42:23Z INFO  batch b-6177 started items=300
+2026-10-05T06:43:32Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T06:44:33Z DEBUG cache warmed entries=8737
+2026-10-05T06:45:24Z DEBUG rates refreshed source=ecb pairs=40
+2026-10-05T06:46:03Z DEBUG rates refreshed source=ecb pairs=25
+2026-10-05T06:47:03Z WARN  webhook retry endpoint=/hooks/payouts attempt=5
+2026-10-05T06:48:23Z INFO  payout id=P-11330 amount=2491.95 EUR status=settled
+2026-10-05T06:48:44Z WARN  manual review: account "ES08 3744 9901 9932 7432 2498" edited by ops
+2026-10-05T06:49:34Z INFO  batch b-8629 finished items=278 failed=2
+2026-10-05T06:50:58Z DEBUG mandate id=M-7193 debtor_iban=NL35OZNP2532052463 scheme=sepa-core
+2026-10-05T06:51:21Z INFO  beneficiary saved for account "DE16 4902 4995 5125 8583 05"
+2026-10-05T06:52:51Z INFO  payout id=P-84846 iban=SE1947008248719137727333 amount=2856.88 EUR status=sent
+2026-10-05T06:54:01Z INFO  batch b-1170 finished items=72 failed=3
+2026-10-05T06:55:13Z INFO  payout id=P-91107 amount=4466.08 EUR status=settled
+2026-10-05T06:56:16Z INFO  beneficiary saved for account "DE16 4902 4995 5125 8583 05"
+2026-10-05T06:57:16Z INFO  refund id=R-81906 to iban=IT96X6195825785878983806831 amount=418.78 EUR
+2026-10-05T06:57:23Z WARN  manual review: account "ES08 3744 9901 9932 7432 2498" edited by ops
+2026-10-05T06:58:39Z INFO  payout id=P-77081 amount=1952.03 EUR status=settled
+2026-10-05T06:59:10Z INFO  payout id=P-16682 iban=FR9253924246843552225884892 amount=146.35 EUR status=sent
+2026-10-05T07:00:23Z DEBUG cache warmed entries=7772
+2026-10-05T07:00:32Z WARN  manual review: account "BE33 4551 7785 2547" edited by ops
+2026-10-05T07:01:34Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T07:02:17Z INFO  batch b-1868 started items=247
+2026-10-05T07:03:23Z INFO  batch b-2155 finished items=143 failed=2
+2026-10-05T07:04:38Z DEBUG rates refreshed source=ecb pairs=39
+2026-10-05T07:05:31Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T07:06:10Z INFO  payout id=P-57335 iban=DE16490249955125858305 amount=2649.29 EUR status=sent
+2026-10-05T07:06:52Z INFO  refund id=R-67016 to iban=IT96X6195825785878983806831 amount=6878.55 EUR
+2026-10-05T07:07:28Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T07:08:11Z INFO  payout id=P-97890 amount=4170.51 EUR status=settled
+2026-10-05T07:09:01Z INFO  healthcheck ok latency_ms=79
+2026-10-05T07:09:54Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T07:11:03Z INFO  batch b-5276 started items=272
+2026-10-05T07:12:27Z INFO  payout id=P-71337 amount=473.04 EUR status=settled
+2026-10-05T07:13:03Z INFO  batch b-5861 finished items=332 failed=0
+2026-10-05T07:13:45Z INFO  healthcheck ok latency_ms=139
+2026-10-05T07:14:36Z INFO  healthcheck ok latency_ms=95
+2026-10-05T07:15:47Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T07:15:56Z DEBUG cache warmed entries=1512
+2026-10-05T07:16:38Z DEBUG cache warmed entries=6146
+2026-10-05T07:17:29Z DEBUG cache warmed entries=5583
+2026-10-05T07:17:49Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T07:17:58Z DEBUG cache warmed entries=7555
+2026-10-05T07:18:24Z DEBUG rates refreshed source=ecb pairs=30
+2026-10-05T07:19:16Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T07:20:15Z INFO  healthcheck ok latency_ms=114
+2026-10-05T07:21:26Z DEBUG cache warmed entries=4834
+2026-10-05T07:21:52Z INFO  payout id=P-81858 amount=4436.67 EUR status=settled
+2026-10-05T07:23:17Z DEBUG rates refreshed source=ecb pairs=37
+2026-10-05T07:23:19Z INFO  payout id=P-40234 iban=BE58528962921152 amount=2734.91 EUR status=sent
+2026-10-05T07:24:32Z INFO  batch b-7173 started items=379
+2026-10-05T07:25:11Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T07:26:41Z INFO  healthcheck ok latency_ms=92
+2026-10-05T07:27:14Z DEBUG mandate id=M-3427 debtor_iban=AT101581453717989126 scheme=sepa-core
+2026-10-05T07:27:32Z INFO  batch b-4270 started items=338
+2026-10-05T07:28:07Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T07:28:24Z WARN  manual review: account "SE21 4246 0558 3887 2516 3092" edited by ops
+2026-10-05T07:28:29Z DEBUG cache warmed entries=5393
+2026-10-05T07:28:58Z DEBUG cache warmed entries=1293
+2026-10-05T07:29:10Z DEBUG cache warmed entries=1279
+2026-10-05T07:29:41Z INFO  batch b-1779 finished items=12 failed=1
+2026-10-05T07:31:08Z DEBUG cache warmed entries=7097
+2026-10-05T07:31:46Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T07:32:45Z DEBUG cache warmed entries=8456
+2026-10-05T07:34:14Z DEBUG rates refreshed source=ecb pairs=39
+2026-10-05T07:35:21Z DEBUG cache warmed entries=2276
+2026-10-05T07:36:33Z INFO  batch b-2490 started items=102
+2026-10-05T07:37:45Z DEBUG cache warmed entries=8437
+2026-10-05T07:37:49Z INFO  beneficiary saved for account "DE88 5309 5622 1310 9611 67"
+2026-10-05T07:37:52Z INFO  healthcheck ok latency_ms=138
+2026-10-05T07:38:32Z INFO  healthcheck ok latency_ms=88
+2026-10-05T07:38:38Z INFO  healthcheck ok latency_ms=37
+2026-10-05T07:38:57Z INFO  healthcheck ok latency_ms=104
+2026-10-05T07:39:59Z INFO  payout id=P-38324 iban=BE58528962921152 amount=4244.43 EUR status=sent
+2026-10-05T07:41:11Z INFO  batch b-6492 finished items=313 failed=2
+2026-10-05T07:42:41Z INFO  batch b-3289 started items=57
+2026-10-05T07:42:43Z DEBUG cache warmed entries=743
+2026-10-05T07:43:13Z INFO  healthcheck ok latency_ms=59
+2026-10-05T07:44:23Z INFO  batch b-4317 started items=349
+2026-10-05T07:45:39Z INFO  refund id=R-90494 to iban=IT66M5516553182588450135050 amount=5715.39 EUR
+2026-10-05T07:45:47Z DEBUG rates refreshed source=ecb pairs=22
+2026-10-05T07:47:16Z INFO  beneficiary saved for account "DE88 5309 5622 1310 9611 67"
+2026-10-05T07:47:33Z INFO  batch b-7975 finished items=70 failed=2
+2026-10-05T07:48:12Z INFO  healthcheck ok latency_ms=100
+2026-10-05T07:49:42Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T07:50:41Z INFO  batch b-9506 finished items=228 failed=1
+2026-10-05T07:51:18Z WARN  manual review: account "AT39 5976 1860 6448 4387" edited by ops
+2026-10-05T07:52:44Z DEBUG rates refreshed source=ecb pairs=25
+2026-10-05T07:53:09Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T07:54:13Z INFO  payout id=P-89089 iban=SE3275789444812966211444 amount=4500.75 EUR status=sent
+2026-10-05T07:54:33Z INFO  batch b-2755 finished items=252 failed=1
+2026-10-05T07:56:00Z INFO  healthcheck ok latency_ms=58
+2026-10-05T07:56:59Z DEBUG cache warmed entries=4152
+2026-10-05T07:57:19Z INFO  payout id=P-92983 iban=FR0360388545779078153243574 amount=3317.63 EUR status=sent
+2026-10-05T07:58:24Z INFO  healthcheck ok latency_ms=105
+2026-10-05T07:58:37Z INFO  payout id=P-57756 amount=7572.29 EUR status=settled
+2026-10-05T07:59:32Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T07:59:38Z DEBUG rates refreshed source=ecb pairs=26
+2026-10-05T07:59:56Z INFO  payout id=P-47905 amount=3136.52 EUR status=settled
+2026-10-05T08:00:18Z DEBUG rates refreshed source=ecb pairs=40
+2026-10-05T08:01:47Z DEBUG rates refreshed source=ecb pairs=21
+2026-10-05T08:02:28Z INFO  healthcheck ok latency_ms=84
+2026-10-05T08:03:26Z INFO  batch b-6190 started items=163
+2026-10-05T08:03:47Z INFO  refund id=R-82046 to iban=GB19NNZX42056449211920 amount=5250.90 EUR
+2026-10-05T08:04:56Z DEBUG rates refreshed source=ecb pairs=34
+2026-10-05T08:06:22Z INFO  batch b-8710 finished items=169 failed=2
+2026-10-05T08:06:33Z INFO  payout id=P-13978 amount=4008.98 EUR status=settled
+2026-10-05T08:07:27Z WARN  webhook retry endpoint=/hooks/payouts attempt=5
+2026-10-05T08:08:31Z DEBUG cache warmed entries=6424
+2026-10-05T08:10:01Z INFO  payout id=P-21593 amount=927.90 EUR status=settled
+2026-10-05T08:10:05Z INFO  batch b-9523 finished items=188 failed=3
+2026-10-05T08:11:00Z INFO  healthcheck ok latency_ms=61
+2026-10-05T08:11:51Z INFO  payout id=P-77534 amount=890.28 EUR status=settled
+2026-10-05T08:13:08Z INFO  batch b-5487 finished items=30 failed=3
+2026-10-05T08:13:31Z INFO  refund id=R-10440 to iban=GB19NNZX42056449211920 amount=3980.66 EUR
+2026-10-05T08:13:51Z INFO  payout id=P-72911 amount=3263.00 EUR status=settled
+2026-10-05T08:14:09Z DEBUG cache warmed entries=267
+2026-10-05T08:15:00Z INFO  batch b-5038 finished items=138 failed=2
+2026-10-05T08:15:05Z INFO  payout id=P-68738 amount=7391.48 EUR status=settled
+2026-10-05T08:15:18Z INFO  payout id=P-43461 amount=2481.85 EUR status=settled
+2026-10-05T08:16:20Z INFO  batch b-3208 started items=319
+2026-10-05T08:17:34Z DEBUG rates refreshed source=ecb pairs=25
+2026-10-05T08:19:01Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T08:19:48Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T08:20:45Z INFO  batch b-2683 finished items=343 failed=0
+2026-10-05T08:21:41Z DEBUG rates refreshed source=ecb pairs=36
+2026-10-05T08:22:29Z DEBUG cache warmed entries=3785
+2026-10-05T08:22:47Z INFO  batch b-1606 started items=250
+2026-10-05T08:23:36Z INFO  batch b-3591 started items=221
+2026-10-05T08:25:02Z DEBUG mandate id=M-1821 debtor_iban=SE3275789444812966211444 scheme=sepa-core
+2026-10-05T08:25:07Z DEBUG mandate id=M-1714 debtor_iban=GB19NNZX42056449211920 scheme=sepa-core
+2026-10-05T08:25:57Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T08:26:11Z DEBUG cache warmed entries=5997
+2026-10-05T08:26:15Z DEBUG cache warmed entries=4093
+2026-10-05T08:27:01Z INFO  batch b-3861 started items=121
+2026-10-05T08:28:31Z INFO  batch b-6311 finished items=106 failed=3
+2026-10-05T08:29:42Z INFO  healthcheck ok latency_ms=93
+2026-10-05T08:30:50Z DEBUG cache warmed entries=7291
+2026-10-05T08:31:25Z INFO  beneficiary saved for account "IT66 M551 6553 1825 8845 0135 050"
+2026-10-05T08:32:08Z INFO  batch b-1187 finished items=76 failed=3
+2026-10-05T08:33:15Z DEBUG rates refreshed source=ecb pairs=39
+2026-10-05T08:34:27Z INFO  batch b-9596 started items=298
+2026-10-05T08:35:00Z WARN  webhook retry endpoint=/hooks/payouts attempt=5
+2026-10-05T08:36:00Z INFO  batch b-9636 finished items=34 failed=0
+2026-10-05T08:36:20Z DEBUG cache warmed entries=5640
+2026-10-05T08:37:17Z INFO  healthcheck ok latency_ms=113
+2026-10-05T08:37:32Z WARN  webhook retry endpoint=/hooks/payouts attempt=5
+2026-10-05T08:38:50Z INFO  payout id=P-78481 amount=379.94 EUR status=settled
+2026-10-05T08:39:12Z INFO  batch b-7181 finished items=245 failed=1
+2026-10-05T08:39:36Z WARN  manual review: account "AT39 5976 1860 6448 4387" edited by ops
+2026-10-05T08:40:04Z DEBUG rates refreshed source=ecb pairs=28
+2026-10-05T08:41:30Z INFO  beneficiary saved for account "BE33 4551 7785 2547"
+2026-10-05T08:42:23Z DEBUG rates refreshed source=ecb pairs=35
+2026-10-05T08:42:35Z DEBUG rates refreshed source=ecb pairs=23
+2026-10-05T08:43:24Z DEBUG mandate id=M-4564 debtor_iban=DE10367940650051028033 scheme=sepa-core
+2026-10-05T08:44:30Z INFO  batch b-8058 started items=109
+2026-10-05T08:46:00Z INFO  batch b-5147 finished items=307 failed=3
+2026-10-05T08:47:18Z INFO  batch b-3332 finished items=75 failed=0
+2026-10-05T08:48:28Z DEBUG cache warmed entries=7835
+2026-10-05T08:48:31Z INFO  beneficiary saved for account "DE88 5309 5622 1310 9611 67"
+2026-10-05T08:49:58Z INFO  healthcheck ok latency_ms=49
+2026-10-05T08:50:49Z INFO  healthcheck ok latency_ms=15
+2026-10-05T08:51:18Z DEBUG rates refreshed source=ecb pairs=39
+2026-10-05T08:52:46Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T08:53:23Z DEBUG rates refreshed source=ecb pairs=30
+2026-10-05T08:54:26Z INFO  payout id=P-61795 amount=8562.06 EUR status=settled
+2026-10-05T08:54:57Z INFO  healthcheck ok latency_ms=43
+2026-10-05T08:55:28Z INFO  payout id=P-15484 amount=2104.09 EUR status=settled
+2026-10-05T08:56:28Z DEBUG mandate id=M-9359 debtor_iban=PL30976479329351037127868309 scheme=sepa-core
+2026-10-05T08:57:50Z DEBUG cache warmed entries=6138
+2026-10-05T08:58:17Z INFO  beneficiary saved for account "DE10 3679 4065 0051 0280 33"
+2026-10-05T08:59:12Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T08:59:27Z INFO  beneficiary saved for account "FR03 6038 8545 7790 7815 3243 574"
+2026-10-05T08:59:43Z INFO  payout id=P-41316 amount=2743.17 EUR status=settled
+2026-10-05T08:59:54Z DEBUG rates refreshed source=ecb pairs=34
+2026-10-05T09:01:24Z INFO  refund id=R-78984 to iban=ES8144365832549118962758 amount=8690.24 EUR
+2026-10-05T09:02:35Z DEBUG cache warmed entries=3555
+2026-10-05T09:03:14Z INFO  batch b-4348 started items=117
+2026-10-05T09:04:36Z DEBUG rates refreshed source=ecb pairs=31
+2026-10-05T09:05:19Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T09:05:37Z INFO  payout id=P-41792 amount=4903.83 EUR status=settled
+2026-10-05T09:05:39Z INFO  payout id=P-68656 amount=7207.22 EUR status=settled
+2026-10-05T09:06:09Z INFO  payout id=P-36979 amount=4020.45 EUR status=settled
+2026-10-05T09:06:52Z DEBUG cache warmed entries=170
+2026-10-05T09:07:15Z DEBUG rates refreshed source=ecb pairs=22
+2026-10-05T09:08:42Z DEBUG rates refreshed source=ecb pairs=28
+2026-10-05T09:09:38Z DEBUG cache warmed entries=1004
+2026-10-05T09:09:52Z DEBUG mandate id=M-7702 debtor_iban=GB17TOGX62196057000345 scheme=sepa-core
+2026-10-05T09:11:01Z DEBUG mandate id=M-3032 debtor_iban=SE1947008248719137727333 scheme=sepa-core
+2026-10-05T09:12:12Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T09:12:44Z INFO  payout id=P-84125 iban=FR9253924246843552225884892 amount=7058.77 EUR status=sent
+2026-10-05T09:13:18Z INFO  payout id=P-53236 amount=5783.72 EUR status=settled
+2026-10-05T09:14:03Z INFO  batch b-7280 finished items=112 failed=0
+2026-10-05T09:14:55Z INFO  payout id=P-13775 amount=7689.91 EUR status=settled
+2026-10-05T09:15:09Z INFO  healthcheck ok latency_ms=67
+2026-10-05T09:15:44Z INFO  payout id=P-10233 amount=6803.91 EUR status=settled
+2026-10-05T09:16:41Z DEBUG cache warmed entries=1144
+2026-10-05T09:18:06Z INFO  payout id=P-53573 iban=BE58528962921152 amount=7416.51 EUR status=sent
+2026-10-05T09:18:54Z DEBUG cache warmed entries=7608
+2026-10-05T09:19:18Z DEBUG mandate id=M-2936 debtor_iban=GB17TOGX62196057000345 scheme=sepa-core
+2026-10-05T09:19:19Z INFO  batch b-5057 finished items=146 failed=1
+2026-10-05T09:20:13Z INFO  beneficiary saved for account "PL30 9764 7932 9351 0371 2786 8309"
+2026-10-05T09:21:04Z DEBUG cache warmed entries=4262
+2026-10-05T09:22:29Z INFO  refund id=R-16856 to iban=IT47Q6189792001381472475709 amount=4357.46 EUR
+2026-10-05T09:23:54Z INFO  healthcheck ok latency_ms=15
+2026-10-05T09:24:03Z INFO  batch b-7236 finished items=36 failed=3
+2026-10-05T09:25:11Z INFO  payout id=P-67978 iban=DE5879141319088402189 amount=6686.63 EUR status=sent
+2026-10-05T09:25:47Z DEBUG rates refreshed source=ecb pairs=20
+2026-10-05T09:27:08Z WARN  manual review: account "FR32 5343 6507 7233 1573 7502 539" edited by ops
+2026-10-05T09:28:14Z WARN  webhook retry endpoint=/hooks/payouts attempt=4
+2026-10-05T09:28:18Z INFO  batch b-5714 finished items=298 failed=1
+2026-10-05T09:28:27Z INFO  batch b-3146 finished items=279 failed=1
+2026-10-05T09:29:49Z INFO  payout id=P-35651 amount=6762.17 EUR status=settled
+2026-10-05T09:30:12Z INFO  payout id=P-18480 amount=8124.01 EUR status=settled
+2026-10-05T09:30:29Z INFO  batch b-3696 finished items=116 failed=2
+2026-10-05T09:31:00Z DEBUG cache warmed entries=1587
+2026-10-05T09:31:47Z DEBUG mandate id=M-2131 debtor_iban=ES3241224640192126763048 scheme=sepa-core
+2026-10-05T09:33:08Z DEBUG cache warmed entries=1980
+2026-10-05T09:33:35Z DEBUG cache warmed entries=8804
+2026-10-05T09:34:13Z INFO  payout id=P-46947 amount=7970.96 EUR status=settled
+2026-10-05T09:35:00Z INFO  refund id=R-52389 to iban=NL35OZNP2532052463 amount=4198.28 EUR
+2026-10-05T09:35:47Z INFO  payout id=P-11197 amount=2255.03 EUR status=settled
+2026-10-05T09:36:45Z INFO  refund id=R-25253 to iban=ES3241224640192126763048 amount=7315.34 EUR
+2026-10-05T09:37:58Z INFO  refund id=R-52469 to iban=ES8144365832549118962758 amount=5385.10 EUR
+2026-10-05T09:38:28Z DEBUG rates refreshed source=ecb pairs=25
+2026-10-05T09:39:45Z WARN  webhook retry endpoint=/hooks/payouts attempt=2
+2026-10-05T09:40:39Z INFO  healthcheck ok latency_ms=79
+2026-10-05T09:41:31Z DEBUG cache warmed entries=6845
+2026-10-05T09:42:35Z INFO  healthcheck ok latency_ms=114
+2026-10-05T09:43:48Z DEBUG rates refreshed source=ecb pairs=31
+2026-10-05T09:45:07Z DEBUG cache warmed entries=4843
+2026-10-05T09:45:48Z INFO  healthcheck ok latency_ms=36
+2026-10-05T09:47:06Z DEBUG cache warmed entries=3596
+2026-10-05T09:47:44Z INFO  batch b-9048 finished items=18 failed=0
+2026-10-05T09:48:18Z INFO  batch b-7773 started items=289
+2026-10-05T09:48:33Z INFO  payout id=P-91952 iban=FR9253924246843552225884892 amount=1101.04 EUR status=sent
+2026-10-05T09:49:10Z INFO  beneficiary saved for account "AT10 1581 4537 1798 9126"
+2026-10-05T09:49:32Z INFO  healthcheck ok latency_ms=72
+2026-10-05T09:50:13Z INFO  healthcheck ok latency_ms=34
+2026-10-05T09:50:36Z INFO  refund id=R-94210 to iban=PL13150962913048427308838284 amount=7439.74 EUR
+2026-10-05T09:51:01Z INFO  healthcheck ok latency_ms=138
+2026-10-05T09:51:34Z DEBUG cache warmed entries=8077
+2026-10-05T09:52:04Z WARN  webhook retry endpoint=/hooks/payouts attempt=3
+2026-10-05T09:52:51Z DEBUG rates refreshed source=ecb pairs=24

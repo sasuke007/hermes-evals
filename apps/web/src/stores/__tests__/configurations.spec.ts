@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { CONFIG_IDS, CONFIG_VERSION_IDS } from '@/fixtures/configurations';
-import { MCP_INVOICE_DB } from '@/fixtures/resources';
 import { detailKey, useConfigurationsStore } from '@/stores/configurations';
 import { useScenario } from './scenarioEnv';
 
@@ -58,16 +57,11 @@ describe('configurations store', () => {
     expect(store.takeSaved(CONFIG_IDS['with-skill'])).toBeNull();
   });
 
-  it('remembers a diff per selection and reads what MCP servers expose', async () => {
+  it('remembers a diff per selection', async () => {
     const store = useConfigurationsStore();
     const ids = [CONFIG_VERSION_IDS.baseline, CONFIG_VERSION_IDS['with-mcp']];
     const first = await store.diff(ids);
     expect(await store.diff(ids)).toBe(first);
     expect(first.differing).toEqual(['mcp_servers']);
-    await store.loadMcpExposure();
-    expect(store.mcpExposure[MCP_INVOICE_DB.versionId]).toEqual({
-      envNames: ['INVOICE_DB_URL'],
-      headers: [],
-    });
   });
 });

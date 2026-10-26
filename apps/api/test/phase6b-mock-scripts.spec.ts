@@ -57,6 +57,7 @@ const OWNERS: Record<string, string> = {
   'phase2-mock-scripts.json': 'phase2',
   'phase3-mock-scripts.json': 'phase3',
   'phase4-mock-scripts.json': 'phase4',
+  'phase5b-mock-scripts.json': 'phase5b',
   'phase6-mock-scripts.json': 'phase6',
   'phase6b-knowledge-v1-mock-scripts.json': 'knowledge-v1',
   'phase6b-mcp-v1-mock-scripts.json': 'mcp-v1',
@@ -194,7 +195,7 @@ const foreign = (suite: Suite) =>
   );
 
 describe('the mock-scripts files', () => {
-  it('are the eight this spec knows, each with its owner', async () => {
+  it('are the nine this spec knows, each with its owner', async () => {
     const onDisk = (await readdir(join(REPO, 'scripts'))).filter((f) =>
       f.endsWith('mock-scripts.json'),
     );

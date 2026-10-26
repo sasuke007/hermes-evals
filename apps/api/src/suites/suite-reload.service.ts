@@ -1,8 +1,17 @@
 /**
- * POST /suites/reload. Suites load in the worker (a load-suites job), which
- * runs verifier self-checks, user code, outside any trial and outside the
- * API. The API sends the job, waits for its output, and returns it: the
- * per-directory SuiteReloadResult.
+ * POST /suites/reload and GET /suites/reload/progress. Suites load in the
+ * worker (load-suites jobs), which runs verifier self-checks, user code,
+ * outside the API. The API sends the jobs, waits for their output, and
+ * returns the per-directory SuiteReloadResult.
+ *
+ * One directory is one job. A Reload all is one job per directory (Phase 4
+ * question 9), so each has the whole self-check budget a job has: a scan
+ * job first marks the vanished directories missing and lists the others,
+ * then each directory gets its own job, and the progress endpoint shows
+ * where each stands (queued, loading, done, failed) while the request
+ * waits. A Reload all that outlasts SUITE_RELOAD_TIMEOUT_S answers 504 and
+ * goes on; the progress shows it to the end. A second Reload all while one
+ * runs joins it.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -11,6 +20,7 @@ import type { PgBoss } from 'pg-boss';
 import {
   DIRECTORY_KEY_PATTERN,
   SuiteReloadResultSchema,
+  type SuiteReloadProgress,
   type SuiteReloadRequest,
   type SuiteReloadResult,
 } from '@hermes-evals/shared';
@@ -19,9 +29,15 @@ import { DB } from '../database/db.provider.js';
 import type { AppDb } from '../database/types.js';
 import { findLiveWorker } from '../queue/live-worker.js';
 import { QueueService } from '../queue/queue.service.js';
-import { QUEUES, loadSuitesKey, type LoadSuitesJob } from '../queue/queues.js';
+import {
+  LOAD_SUITES_EXPIRE_SECONDS,
+  QUEUES,
+  loadSuitesKey,
+  type LoadSuitesJob,
+} from '../queue/queues.js';
 import { JobWaitTimeout, sendAndWait, type JobOutcome } from '../queue/send-and-wait.js';
 import { badRequest, gatewayTimeout, serverError, unavailable } from './http-errors.js';
+import { failureMessage, ReloadAll } from './reload-all.js';
 import { SUITES_DISPLAY_ROOT } from './views/format.js';
 
 export const NO_WORKER_MESSAGE =
@@ -50,8 +66,14 @@ export function reloadDirectory(request: SuiteReloadRequest): string | null {
   return path;
 }
 
+const timeoutMessage = (timeoutS: number): string =>
+  `The reload did not finish within ${timeoutS} s. Suites may still be loading in the ` +
+  'worker: refresh the list in a moment, or reload again.';
+
 @Injectable()
 export class SuiteReloadService {
+  private readonly all: ReloadAll;
+
   constructor(
     @Inject(DB) private readonly db: AppDb,
     @Inject(QueueService) private readonly queue: QueueService,
@@ -59,14 +81,46 @@ export class SuiteReloadService {
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(SuiteReloadService.name);
+    this.all = new ReloadAll({
+      db,
+      boss: () => this.boss(),
+      logger: this.logger,
+      jobTimeoutMs: LOAD_SUITES_EXPIRE_SECONDS * 1000,
+    });
   }
 
   async reload(request: SuiteReloadRequest): Promise<SuiteReloadResult> {
-    const job: LoadSuitesJob = { path: reloadDirectory(request) };
+    const path = reloadDirectory(request);
     // Without a worker the job would sit in the queue until the timeout.
     if (!(await findLiveWorker(this.db))) throw unavailable(NO_WORKER_MESSAGE);
     const timeoutS = this.config.get('SUITE_RELOAD_TIMEOUT_S', { infer: true });
-    const outcome = await this.wait(job, timeoutS);
+    if (path === null) return this.reloadAll(timeoutS);
+    return this.entries(await this.wait({ path }, timeoutS));
+  }
+
+  /** GET /suites/reload/progress: the last Reload all, per directory. */
+  progress(): SuiteReloadProgress {
+    return this.all.progress();
+  }
+
+  private async reloadAll(timeoutS: number): Promise<SuiteReloadResult> {
+    // Joins the Reload all already running; its jobs go on whatever this request does.
+    const running = this.all.run();
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), timeoutS * 1000);
+    });
+    try {
+      const result = await Promise.race([running, late]);
+      if (result === 'timeout') throw gatewayTimeout(timeoutMessage(timeoutS));
+      return result;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** One directory's job output as the result, or the error the request answers with. */
+  private entries(outcome: JobOutcome): SuiteReloadResult {
     if (outcome.state === 'completed') {
       const parsed = SuiteReloadResultSchema.safeParse(outcome.output);
       if (parsed.success) return parsed.data;
@@ -100,10 +154,7 @@ export class SuiteReloadService {
       });
     } catch (err) {
       if (!(err instanceof JobWaitTimeout)) throw err;
-      throw gatewayTimeout(
-        `The reload did not finish within ${timeoutS} s. Suites may still be loading in the ` +
-          'worker: refresh the list in a moment, or reload again.',
-      );
+      throw gatewayTimeout(timeoutMessage(timeoutS));
     }
   }
 
@@ -116,12 +167,4 @@ export class SuiteReloadService {
       );
     }
   }
-}
-
-/** The message of a failed job's output (pg-boss stores the serialised error); never its stack. */
-function failureMessage(output: unknown): string {
-  const message = (output as { message?: unknown } | null)?.message;
-  return typeof message === 'string' && message.trim() !== ''
-    ? message
-    : 'the job failed without a message';
 }

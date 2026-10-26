@@ -367,7 +367,8 @@ export function comparisonFixture(
     candidate: configRef(seed, candidate),
     candidates: seed.candidates.map((c) => ({
       configuration: configRef(seed, c),
-      verdict: seed.candidateChips[c] ?? chipVerdictOf(seed, runs, c),
+      // As the API answers: provisional while running (Phase 5 #20), whatever the board drew.
+      verdict: chipVerdictOf(seed, runs, c),
     })),
     scoreKey: key,
     scoreKeyOptions: [

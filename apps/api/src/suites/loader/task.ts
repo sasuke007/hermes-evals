@@ -35,6 +35,7 @@ import {
   collectTaskFiles,
   decodeUtf8,
   normaliseRelative,
+  verbatimUtf8,
   under,
   type FileLayout,
   type StoredTaskFile,
@@ -56,6 +57,19 @@ export interface SelfCheckPlan {
   negativeControl: boolean;
 }
 
+/**
+ * task.yaml, prompt.md or reference.json as read: what task_root_files keeps
+ * (Phase 5b), so a task diff can show their sizes and hashes and a draft of
+ * the task starts from the exact bytes.
+ */
+export interface RootFileRead {
+  path: string;
+  sha256: string;
+  size: number;
+  /** The text when the bytes are UTF-8 (a byte-order mark kept) without NUL; null otherwise. */
+  text: string | null;
+}
+
 export interface AnalysedTask {
   key: string;
   summary: string | null;
@@ -73,6 +87,8 @@ export interface AnalysedTask {
   hashedFiles: HashedFile[];
   /** contentHash(hashedFiles). */
   contentHash: string;
+  /** The root files read, by path order (RootFileRead). */
+  rootFiles: RootFileRead[];
   plan: SelfCheckPlan | null;
   /**
    * task.yaml was not UTF-8 or did not parse, located in the file (relative
@@ -102,6 +118,7 @@ export function unreadableTask(key: string, issue: LoadIssue): AnalysedTask {
     files: [],
     hashedFiles: [],
     contentHash: contentHash([]),
+    rootFiles: [],
     plan: null,
     yamlError: null,
   };
@@ -114,6 +131,7 @@ export async function analyseTask(
 ): Promise<AnalysedTask> {
   const issues: LoadIssue[] = [];
   const hashed: HashedFile[] = [];
+  const rootFiles: RootFileRead[] = [];
   const byPath = new Map(entries.map((e) => [e.path, e]));
 
   /** A root file's bytes, or null when absent or unsafe (collectTaskFiles reports unsafe ones). */
@@ -133,6 +151,13 @@ export async function analyseTask(
       return null;
     }
     hashed.push({ path: name, sha256: result.sha256 });
+    const text = verbatimUtf8(result.content);
+    rootFiles.push({
+      path: name,
+      sha256: result.sha256,
+      size: result.content.length,
+      text: text !== null && !text.includes('\0') ? text : null,
+    });
     return result.content;
   };
 
@@ -181,7 +206,13 @@ export async function analyseTask(
 
   const prompt = await readPrompt(await rootFile(PROMPT_MD), issues);
   const reference = readReference(await rootFile(REFERENCE_JSON), issues);
-  if (check) checkReferencedFiles(check, layout, files, byPath, issues);
+  const selfCheck = isRecord(raw.self_check) ? raw.self_check : {};
+  // A known-good folder written but unusable has its own error; one cause, one error (Phase 6 #8).
+  const written = {
+    workspace: selfCheck.expected_workspace !== undefined,
+    home: selfCheck.expected_home !== undefined,
+  };
+  if (check) checkReferencedFiles(check, layout, written, files, byPath, issues);
 
   for (const file of files) hashed.push({ path: file.path, sha256: file.sha256 });
   const data = check?.data ?? null;
@@ -200,6 +231,7 @@ export async function analyseTask(
     files: [...files].sort((a, b) => comparePaths(a.path, b.path)),
     hashedFiles,
     contentHash: contentHash(hashedFiles),
+    rootFiles: rootFiles.sort((a, b) => comparePaths(a.path, b.path)),
     plan:
       blocked || data === null || reference === undefined
         ? null
@@ -299,11 +331,14 @@ function readReference(
  * `expected_home`), so its llm_judge key would find no rubric and be `error`
  * on every run (Phase 3 question 12). A file_check needs the known-good
  * folder of its root to be proven on: the expected workspace, or with
- * `root: home` the expected home (Phase 6 P2).
+ * `root: home` the expected home (Phase 6 P2). When task.yaml writes that
+ * folder but it is unusable, the folder's own error says so, and the
+ * file_check gets no second one (Phase 6 question 8).
  */
 function checkReferencedFiles(
   check: TaskYamlCheck,
   layout: FileLayout,
+  written: { workspace: boolean; home: boolean },
   files: readonly StoredTaskFile[],
   byPath: ReadonlyMap<string, SuiteEntry>,
   issues: LoadIssue[],
@@ -352,7 +387,7 @@ function checkReferencedFiles(
     if (entry.type === 'file_check') {
       const home = fileCheckRootOf(entry.params) === 'home';
       const folder = home ? layout.expectedHomeDir : layout.expectedDir;
-      if (folder === null) {
+      if (folder === null && !(home ? written.home : written.workspace)) {
         issues.push({
           severity: 'error',
           code: 'self_check_unsupported',

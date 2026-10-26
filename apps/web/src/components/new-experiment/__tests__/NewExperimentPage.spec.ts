@@ -9,7 +9,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import * as experimentsApi from '@/api/experiments';
-import { EXPERIMENT_IDS } from '@/fixtures/experiments';
+import { EXPERIMENT_IDS, newExperimentOptionsFixture } from '@/fixtures/experiments';
 import { routes } from '@/router';
 import { useScenario } from '@/stores/__tests__/scenarioEnv';
 import { useExperimentsStore } from '@/stores/experiments';
@@ -19,7 +19,11 @@ import NewExperimentPage from '@/views/experiments/NewExperimentPage.vue';
 
 let router: Router;
 
-async function mountPage(duplicateOf?: string, repetitions?: number): Promise<VueWrapper> {
+async function mountPage(
+  duplicateOf?: string,
+  repetitions?: number,
+  suite?: string,
+): Promise<VueWrapper> {
   const pinia = createPinia();
   setActivePinia(pinia);
   router = createRouter({ history: createMemoryHistory(), routes });
@@ -28,7 +32,7 @@ async function mountPage(duplicateOf?: string, repetitions?: number): Promise<Vu
   const ready = Promise.all([useProvidersStore().load(), useSystemStore().load()]);
   if (!pending) await ready;
   const w = mount(NewExperimentPage, {
-    props: { duplicateOf, repetitions },
+    props: { duplicateOf, repetitions, suite },
     global: { plugins: [pinia, router] },
     attachTo: document.body,
   });
@@ -195,9 +199,13 @@ describe('NewExperimentPage', () => {
     await taskRow(w, 'total_due').get('input').setValue(true);
     await taskRow(w, 'vat_split').get('input').setValue(true);
     expect(w.get('[data-testid="task-checklist"]').text()).toContain('2 of 12 tasks selected');
-    expect(w.get('[data-testid="few-tasks-warning"]').text()).toContain(
-      'Fewer than 3 tasks cannot produce a verdict.',
+    const warning = w.get('[data-testid="few-tasks-warning"]');
+    expect(warning.text().replace(/\s+/g, ' ')).toContain(
+      'An experiment on fewer than 3 tasks cannot reach a verdict.',
     );
+    // A warning, not a block: Launch stays available.
+    expect(warning.attributes('role')).toBe('status');
+    expect(w.get('[data-testid="launch"]').attributes('disabled')).toBeUndefined();
   });
 
   it('shows the name error once the field is left empty', async () => {
@@ -255,6 +263,31 @@ describe('NewExperimentPage', () => {
     const w = await mountPage(EXPERIMENT_IDS.quickCheck, 5);
     expect(w.get('#ne-reps').element).toHaveProperty('value', '5');
     expect(w.find('[data-testid="single-rep-warning"]').exists()).toBe(false);
+  });
+
+  it('starts on the suite version the link names (New experiment on v7)', async () => {
+    const options = newExperimentOptionsFixture(() => false);
+    const first = options.suites[0]!;
+    const saved = {
+      ...first,
+      suiteId: 'suite_01JBNEWSAVED',
+      name: 'zz-smoke-new',
+      versionNumber: 1,
+      path: './suites/zz-smoke-new',
+      tasks: first.tasks.slice(0, 2),
+      taskCount: 2,
+      validCount: 2,
+    };
+    const twoSuites = { ...options, suites: [first, saved] };
+    vi.spyOn(experimentsApi, 'getNewExperimentOptions').mockResolvedValue(twoSuites);
+    const w = await mountPage(undefined, undefined, saved.suiteId);
+    expect(w.get('#ne-suite').element).toHaveProperty('value', saved.suiteId);
+    expect(w.get('[data-testid="task-checklist"]').text()).toContain('2 of 2 tasks selected');
+
+    // A suite the options do not list (a stale link) leaves the first suite chosen.
+    w.unmount();
+    const stale = await mountPage(undefined, undefined, 'suite_gone');
+    expect(stale.get('#ne-suite').element).toHaveProperty('value', first.suiteId);
   });
 
   it('marks the tasks that changed since the original', async () => {

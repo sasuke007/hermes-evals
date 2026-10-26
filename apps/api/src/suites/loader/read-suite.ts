@@ -42,6 +42,7 @@ import { analyseTask, unreadableTask, type AnalysedTask } from './task.js';
 import { decodeUtf8, type TaskReader } from './task-files.js';
 import {
   selfCheckTask,
+  SKIPPED_SELF_CHECK,
   suiteSelfCheckSeconds,
   taskSelfCheckSeconds,
   type SelfCheckDeps,
@@ -84,6 +85,14 @@ export type DirectoryRead =
 
 export interface ReadSuiteDeps extends SelfCheckDeps {
   loaderVersion: number;
+  /**
+   * False reads, hashes and analyses without running any self-check: every
+   * task's is SKIPPED_SELF_CHECK. For a content hash alone (a draft save's
+   * conflict check); never recorded as a version.
+   */
+  selfChecks?: boolean;
+  /** Called as each task's self-checks finish, with how many have and of how many (a save's progress). */
+  onSelfCheck?: (done: number, total: number) => void;
   /**
    * Seconds of declared self-checks this read may still use; a suite that
    * declares more is deferred before any self-check runs. Absent: only
@@ -178,10 +187,13 @@ export async function readSuiteDirectory(
   if (deps.selfCheckBudgetS !== undefined && selfCheckSeconds > deps.selfCheckBudgetS) {
     return { ok: false, deferred: true, selfCheckSeconds };
   }
+  let done = 0;
   const tasks = await Promise.all(
     analysed.map((task, position) =>
       limit(async (): Promise<LoadedTask> => {
-        const selfCheck = await selfCheckTask(task, deps);
+        const selfCheck =
+          deps.selfChecks === false ? SKIPPED_SELF_CHECK : await selfCheckTask(task, deps);
+        deps.onSelfCheck?.((done += 1), analysed.length);
         return { ...task, position, selfCheck, ...verdict(task, selfCheck) };
       }),
     ),
@@ -212,6 +224,18 @@ export async function readSuiteDirectory(
       selfCheckSeconds,
     },
   };
+}
+
+/**
+ * The task folder `parent/key` on disk, analysed as a load would analyse it
+ * inside its suite: a draft task written to scratch (self-check-draft) is
+ * judged by the same walk, reader and rules.
+ */
+export async function analyseTaskDir(parent: string, key: string): Promise<AnalysedTask> {
+  const tree = await walkSuiteDir(join(parent, key), SUITE_WALK_LIMITS);
+  const folder: SuiteEntry = { path: key, kind: 'dir', entered: true };
+  const entries = tree.entries.map((e) => ({ ...e, path: `${key}/${e.path}` }));
+  return analyseFolder(parent, key, folder, entries);
 }
 
 async function analyseFolder(

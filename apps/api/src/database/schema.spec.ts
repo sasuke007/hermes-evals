@@ -59,9 +59,13 @@ const TABLES = [
   'runs',
   'scores',
   'skills',
+  'suite_draft_files',
+  'suite_draft_tasks',
+  'suite_drafts',
   'suite_sources',
   'suites',
   'task_files',
+  'task_root_files',
   'tasks',
   'workers',
 ];
@@ -145,6 +149,7 @@ describe('migrations', () => {
       '0006_phase3_scoring',
       '0007_phase4_analysis',
       '0008_phase6_platform',
+      '0009_phase5b_authoring',
     ]);
     const tables = await t.pg.query<{ table_name: string }>(
       "select table_name from information_schema.tables where table_schema = 'public' order by 1",

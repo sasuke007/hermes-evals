@@ -17,6 +17,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import type { McpServerInput, McpServerRow } from '@hermes-evals/shared';
@@ -27,13 +28,30 @@ import type { AppDb, AppTx } from '../../database/types.js';
 import { isFrozenMeanwhile, isNameTaken, mcpNameTaken } from './db-errors.js';
 import { definitionOf, planEdit, versionColumns } from './definition.js';
 import { headerVariableUses, loadMcpServerRows, stdioEnvUses } from './mcp-reads.js';
+import { UnsavedMcpTests } from './unsaved-tests.js';
 
 export const mcpServerNotFound = (id: string): NotFoundException =>
   new NotFoundException({ statusCode: 404, message: `no MCP server ${id}` });
 
 @Injectable()
 export class McpServersService {
-  constructor(@Inject(DB) private readonly db: AppDb) {}
+  constructor(
+    @Inject(DB) private readonly db: AppDb,
+    @Optional()
+    @Inject(UnsavedMcpTests)
+    private readonly unsaved: UnsavedMcpTests = new UnsavedMcpTests(),
+  ) {}
+
+  /**
+   * The columns of a version written from `input`, with the passing Test
+   * start of this very definition from its unsaved form when there is one
+   * (Phase 5 question 14). Without one, `lastTest` is left to the caller.
+   */
+  private columnsOf(input: McpServerInput) {
+    const columns = versionColumns(input);
+    const passed = this.unsaved.passedFor(columns.definitionHash);
+    return passed ? { ...columns, lastTest: passed } : columns;
+  }
 
   list(): Promise<McpServerRow[]> {
     return loadMcpServerRows(this.db);
@@ -51,7 +69,7 @@ export class McpServersService {
         await tx.insert(mcpServers).values({ id: serverId, name: input.name, latestVersion: 1 });
         await tx
           .insert(mcpServerVersions)
-          .values({ id: newId(), mcpServerId: serverId, version: 1, ...versionColumns(input) });
+          .values({ id: newId(), mcpServerId: serverId, version: 1, ...this.columnsOf(input) });
         return serverId;
       });
       return await this.row(id);
@@ -120,8 +138,9 @@ export class McpServersService {
             await tx
               .update(mcpServerVersions)
               .set({
-                ...versionColumns(input),
-                ...(plan.resetTest ? { lastTest: { status: 'untested' as const } } : {}),
+                ...(plan.resetTest
+                  ? { lastTest: { status: 'untested' as const }, ...this.columnsOf(input) }
+                  : versionColumns(input)),
                 updatedAt: sql`now()`,
               })
               .where(eq(mcpServerVersions.id, latest.id));
@@ -132,7 +151,7 @@ export class McpServersService {
               id: newId(),
               mcpServerId: id,
               version: plan.version,
-              ...versionColumns(input),
+              ...this.columnsOf(input),
             });
             await tx
               .update(mcpServers)

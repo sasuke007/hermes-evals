@@ -62,7 +62,7 @@ describe('the configuration form', () => {
     expect(control.findAll('button').map((b) => b.text())).toEqual(['preload', 'on demand']);
     expect(pressed(w)).toEqual(['preload']);
     expect(norm(control.get('p').text())).toBe(
-      'Preload puts the skills in the prompt; on demand installs them for the agent to find, with the skills toolset.',
+      'Preload puts the skills in the prompt; on demand installs them for the agent to find, with the skills toolset, which it adds at launch.',
     );
   });
 

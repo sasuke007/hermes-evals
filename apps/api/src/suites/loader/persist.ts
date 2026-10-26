@@ -12,8 +12,9 @@
  * - Same content hash and check hash as an existing version: that row is
  *   reused, `unchanged` when it is current, `reverted` when it is older and
  *   the pointer moves back to it.
- * - Otherwise a new suites row (v = highest + 1) with its tasks and task
- *   files, inserted in chunks under the bind-parameter limit.
+ * - Otherwise a new suites row (v = highest + 1) with its tasks, task
+ *   files and root files (root-files.ts), inserted in chunks under the
+ *   bind-parameter limit. A reused version gets the root files it lacks.
  * - A task keeps its version number and introducing suite when an earlier
  *   version of this directory had the same key and content hash; otherwise
  *   it takes the key's highest number plus one and is introduced here.
@@ -38,6 +39,7 @@ import type { BlobRef, BlobStore } from '../../storage/blob-store.js';
 import { noChanges, suiteChanges, type TaskState } from './changes.js';
 import { SUITE_LOCK_PREFIX, SUITE_YAML } from './limits.js';
 import type { LoadedSuite } from './read-suite.js';
+import { backfillRootFiles, insertRootFiles } from './root-files.js';
 import { namePosition } from './suite-yaml.js';
 import { locatedError, toStoredError, type LocatedError } from './yaml-source.js';
 
@@ -98,7 +100,7 @@ async function sourceRow(tx: AppTx, path: string): Promise<SourceRow | null> {
 }
 
 /** The other live directory that holds `name`, if any. */
-async function nameHolder(tx: AppTx, name: string, path: string): Promise<string | null> {
+export async function nameHolder(tx: AppTx, name: string, path: string): Promise<string | null> {
   const [row] = await tx
     .select({ path: suiteSources.path })
     .from(suiteSources)
@@ -195,6 +197,8 @@ export async function persistSuite(
 
   let result: ServedOutcome;
   if (existing) {
+    // A version loaded before Phase 5b has no root files yet: the same content hash, the same bytes.
+    await backfillRootFiles(tx, existing.id, suite.tasks);
     const unchanged = existing.id === source?.currentSuiteId;
     result = {
       outcome: unchanged ? 'unchanged' : 'reverted',
@@ -322,6 +326,10 @@ async function insertVersion(
   for (let i = 0; i < taskRows.length; i += INSERT_CHUNK_ROWS) {
     await tx.insert(tasks).values(taskRows.slice(i, i + INSERT_CHUNK_ROWS));
   }
+  await insertRootFiles(
+    tx,
+    suite.tasks.map((task, i) => ({ taskId: taskRows[i]!.id, files: task.rootFiles })),
+  );
 
   const fileRows = suite.tasks.flatMap((task, i) =>
     task.files.map((file) => ({

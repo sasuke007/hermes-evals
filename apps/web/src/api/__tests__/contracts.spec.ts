@@ -144,6 +144,7 @@ import {
   SKILL_INVOICE_METHOD_110_ID,
 } from '@/fixtures/resources';
 import { SCENARIOS } from '@/fixtures/scenarios';
+import { MISSING_FOLDERS } from '@/fixtures/suites-authoring';
 import { resetSystemFixtures } from '@/fixtures/system';
 import { setScenario } from './scenario';
 
@@ -201,7 +202,8 @@ describe('fixtures conform to the shared contracts', { timeout: 120_000 }, () =>
       const rows = await listSuites();
       conforms(SuiteListRowSchema.array(), rows, at('GET /suites'));
       conforms(SuiteReloadResultSchema, await reloadSuites(), at('POST /suites/reload'));
-      for (const row of rows) {
+      // The missing-folders scenario draws the list's rows only, not those suites' pages.
+      for (const row of rows.filter((r) => !MISSING_FOLDERS.includes(r.name))) {
         const current = await getSuite(row.suiteId);
         conforms(SuiteDetailSchema, current, at(`GET /suites/${row.suiteId}`));
         const history = await getSuiteHistory(row.suiteId);

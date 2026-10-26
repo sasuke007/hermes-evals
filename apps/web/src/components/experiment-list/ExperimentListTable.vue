@@ -14,7 +14,9 @@ import { progressLabel, progressTone } from './listText';
  * The Experiment list's table (ExperimentList board): ten columns of comparable numbers, right
  * aligned in tabular figures. A row opens the experiment's Overview; a verdict chip opens its
  * Comparison for that candidate. Only Created sorts (newest first by default). Live rows are
- * patched in place by the store, so they never reorder.
+ * patched in place by the store, so they never reorder. Names longer than their column (Name
+ * 260px, Configurations 240px, a chip's candidate 160px) end in an ellipsis with the whole
+ * name on hover, so the table fits the page (Phase 5 #23).
  */
 withDefaults(
   defineProps<{
@@ -53,6 +55,10 @@ const columns: DataTableColumn<ExperimentListRow>[] = [
     skeleton: 40,
   },
 ];
+
+/** The whole Configurations cell, for the hover of a truncated one. */
+const configurationsTitle = (row: ExperimentListRow): string =>
+  `${row.baseline.name} · ${row.candidates.map((c) => c.name).join(', ')}`;
 
 const overview = (row: ExperimentListRow) => ({
   name: ROUTE_NAMES.experimentOverview,
@@ -109,18 +115,29 @@ function open(row: ExperimentListRow): void {
     </template>
 
     <template #cell-name="{ row }">
-      <RouterLink :to="overview(row)" class="font-medium text-text">{{ row.name }}</RouterLink>
+      <RouterLink
+        :to="overview(row)"
+        class="block max-w-260 truncate font-medium text-text"
+        :title="row.name"
+        data-testid="experiment-name"
+        >{{ row.name }}</RouterLink
+      >
     </template>
     <template #cell-suite="{ row }">
       <span class="font-mono text-12">{{ row.suite.name }}</span
       >{{ ' ' }}<span class="text-12 font-semibold">v{{ row.suite.versionNumber }}</span>
     </template>
     <template #cell-configurations="{ row }">
-      <span class="font-mono text-12 font-semibold">{{ row.baseline.name }}</span
-      ><span class="text-text-3"> · </span
-      ><span class="font-mono text-12 text-text-2">{{
-        row.candidates.map((c) => c.name).join(', ')
-      }}</span>
+      <span
+        class="block max-w-240 truncate"
+        :title="configurationsTitle(row)"
+        data-testid="experiment-configurations"
+        ><span class="font-mono text-12 font-semibold">{{ row.baseline.name }}</span
+        ><span class="text-text-3"> · </span
+        ><span class="font-mono text-12 text-text-2">{{
+          row.candidates.map((c) => c.name).join(', ')
+        }}</span></span
+      >
     </template>
     <template #cell-progress="{ row }">
       <div class="flex items-center gap-10">

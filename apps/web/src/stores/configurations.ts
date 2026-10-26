@@ -18,7 +18,6 @@ import {
   saveConfiguration,
 } from '@/api/configurations';
 import { errorMessage } from '@/api/client';
-import { useResourcesStore } from '@/stores/resources';
 import type {
   ConfigDiff,
   ConfigurationDetail,
@@ -43,12 +42,6 @@ const idle = (): LoadState => ({ loading: false, loaded: false, error: null });
 export const detailKey = (id: string, version?: number | null): string =>
   version === undefined || version === null ? id : `${id}@v${version}`;
 
-/** What an MCP server version exposes to a run: its env names (stdio) or header names (http). */
-export interface McpExposure {
-  envNames: string[];
-  headers: string[];
-}
-
 export const useConfigurationsStore = defineStore('configurations', () => {
   // ── the list ───────────────────────────────────────────────────────────
   const rows = ref<Record<string, ConfigurationListRow>>({});
@@ -66,19 +59,6 @@ export const useConfigurationsStore = defineStore('configurations', () => {
   // ── the form ───────────────────────────────────────────────────────────
   const formOptions = ref<ConfigurationFormOptions | null>(null);
   const optionsState = ref<LoadState>(idle());
-  /**
-   * MCP server version id → what it exposes, read from the resource library's MCP servers
-   * (useResourcesStore), so the form and the Resources tab share one copy.
-   */
-  const resources = useResourcesStore();
-  const mcpExposure = computed<Record<string, McpExposure>>(() =>
-    Object.fromEntries(
-      resources.mcpServerRows.map((s) => [
-        s.versionId,
-        { envNames: [...s.envNames], headers: s.headers.map((h) => h.header) },
-      ]),
-    ),
-  );
 
   /** The last save, for the detail page's "Saved as version 2". */
   const lastSaved = ref<ConfigurationSaveResult | null>(null);
@@ -145,14 +125,6 @@ export const useConfigurationsStore = defineStore('configurations', () => {
     }
   }
 
-  /**
-   * The env and header names each MCP server version exposes, for the exposure notes. Best
-   * effort: the notes fall back to a sentence without names when this fails.
-   */
-  function loadMcpExposure(): Promise<void> {
-    return resources.loadMcpServers();
-  }
-
   /** The form's starting draft: new, edit or duplicate. Not kept: each visit starts fresh. */
   function fetchDraft(mode: ConfigurationDraft['mode'], id?: string): Promise<ConfigurationDraft> {
     return getConfigurationDraft(mode, id);
@@ -203,7 +175,6 @@ export const useConfigurationsStore = defineStore('configurations', () => {
     detailStates,
     formOptions,
     optionsState,
-    mcpExposure,
     lastSaved,
     // getters
     list,
@@ -214,7 +185,6 @@ export const useConfigurationsStore = defineStore('configurations', () => {
     detailState,
     loadDetail,
     loadFormOptions,
-    loadMcpExposure,
     fetchDraft,
     diff,
     save,

@@ -14,6 +14,7 @@ export type {
   McpToolView,
   ResourceCounts,
   ResourceFileKind,
+  ResourceInUseBody,
   SecretExposure,
   SecretReference,
   SecretRow,

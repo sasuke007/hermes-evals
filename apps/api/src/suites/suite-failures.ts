@@ -64,9 +64,11 @@ export async function failuresOf(
   return out;
 }
 
-/** Task files grouped by task id, each group by path. */
-export function groupByTask(files: readonly TaskFileRow[]): Map<string, TaskFileRow[]> {
-  const out = new Map<string, TaskFileRow[]>();
+/** Task files (or root files) grouped by task id, each group in the order given. */
+export function groupByTask<T extends Pick<TaskFileRow, 'taskId'>>(
+  files: readonly T[],
+): Map<string, T[]> {
+  const out = new Map<string, T[]>();
   for (const file of files) {
     const list = out.get(file.taskId) ?? [];
     list.push(file);

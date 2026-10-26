@@ -58,6 +58,7 @@ describe('SuiteDetailPage', () => {
       '300 s',
       '1',
       'valid',
+      'Edit',
     ]);
     expect(w.find('[data-testid="invalid-alert"]').exists()).toBe(false);
     expect(w.find('[data-testid="old-version"]').exists()).toBe(false);

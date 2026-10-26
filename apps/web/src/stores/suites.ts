@@ -10,13 +10,17 @@
  * (details, tasks, histories), so the next read fetches it again.
  *
  * Pages call the loaders and keep their own loading and error state; the list's state lives
- * here because the reload buttons of two pages drive it.
+ * here because the reload buttons of two pages drive it. Reload all sends one load-suites job
+ * per folder (Phase 4 question 9), so while it runs the store polls each folder's progress
+ * (GET /suites/reload/progress) for the list to show. A saved draft changes what a folder
+ * serves too: `invalidate` drops what depends on the current pointer.
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { errorMessage } from '@/api/client';
 import {
   getFixturePreview,
+  getReloadProgress,
   getSuite,
   getSuiteHistory,
   getTask,
@@ -30,6 +34,8 @@ import type {
   SuiteHistoryEntry,
   SuiteListRow,
   SuiteReloadEntry,
+  SuiteReloadProgress,
+  SuiteReloadProgressEntry,
   SuiteReloadResult,
   TablePreview,
   TaskDetail,
@@ -49,6 +55,9 @@ export interface ReloadState {
   /** The directory being reloaded, or null for every directory. */
   path: string | null;
 }
+
+/** How often a running Reload all's progress is read. */
+export const RELOAD_PROGRESS_POLL_MS = 1000;
 
 export const useSuitesStore = defineStore('suites', () => {
   const list = ref<SuiteListRow[]>([]);
@@ -71,6 +80,8 @@ export const useSuitesStore = defineStore('suites', () => {
   const reloadError = ref<string | null>(null);
   /** Which directory the failed reload was for (null: every directory). */
   const reloadErrorPath = ref<string | null>(null);
+  /** Each folder of the running Reload all, from the last progress read; null between reloads. */
+  const reloadProgress = ref<SuiteReloadProgress | null>(null);
 
   const busy = computed(() => reloading.value !== null);
 
@@ -159,22 +170,61 @@ export const useSuitesStore = defineStore('suites', () => {
     reloading.value = { path };
     reloadError.value = null;
     reloadErrorPath.value = null;
+    const stopProgress = path === null ? pollReloadProgress() : () => {};
     try {
       const result = await reloadSuites(path ?? undefined);
       lastReload.value = result;
-      suites.value = {};
-      histories.value = {};
-      tasks.value = {};
-      taskHistories.value = {};
-      await loadList();
+      await invalidate();
       return result;
     } catch (err) {
       reloadError.value = errorMessage(err);
       reloadErrorPath.value = path;
       return null;
     } finally {
+      stopProgress();
+      reloadProgress.value = null;
       reloading.value = null;
     }
+  }
+
+  /**
+   * Reads the running Reload all's progress now and every RELOAD_PROGRESS_POLL_MS until the
+   * returned stop is called; calls never overlap, and a failed read keeps the last one.
+   */
+  function pollReloadProgress(): () => void {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async (): Promise<void> => {
+      try {
+        const progress = await getReloadProgress();
+        if (!stopped && progress.active) reloadProgress.value = progress;
+      } catch {
+        /* the reload's own answer reports a failure; a missed read only delays the rows */
+      }
+      if (!stopped) timer = setTimeout(() => void tick(), RELOAD_PROGRESS_POLL_MS);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }
+
+  /** A running Reload all's row for a folder (`path` as the list shows it). */
+  function progressFor(path: string): SuiteReloadProgressEntry | null {
+    return reloadProgress.value?.directories.find((d) => d.sourcePath === path) ?? null;
+  }
+
+  /**
+   * After something changed what folders serve (a reload, a saved draft): drop details,
+   * tasks and histories, which the next read fetches again, and refresh the list.
+   */
+  async function invalidate(): Promise<void> {
+    suites.value = {};
+    histories.value = {};
+    tasks.value = {};
+    taskHistories.value = {};
+    await loadList();
   }
 
   /** The last reload's line for a directory, if this session reloaded it. */
@@ -208,6 +258,7 @@ export const useSuitesStore = defineStore('suites', () => {
     lastReload,
     reloadError,
     reloadErrorPath,
+    reloadProgress,
     busy,
     loadList,
     loadSuite,
@@ -217,6 +268,8 @@ export const useSuitesStore = defineStore('suites', () => {
     loadDiff,
     loadPreview,
     reload,
+    invalidate,
+    progressFor,
     reloadEntryFor,
     isReloading,
     clearReloadError,

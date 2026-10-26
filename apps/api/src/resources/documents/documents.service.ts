@@ -20,7 +20,7 @@ import { DB } from '../../database/db.provider.js';
 import { documents } from '../../database/schema/index.js';
 import type { AppDb } from '../../database/types.js';
 import { StorageService } from '../../storage/storage.service.js';
-import { latestConfigurationLinks } from '../skills/configuration-links.js';
+import { deleteUnused, latestConfigurationLinks } from '../skills/configuration-links.js';
 import { uploadFileName } from '../skills/format.js';
 import { notFound } from '../skills/http.js';
 import type { UploadedFileRef } from '../skills/multipart-upload.js';
@@ -133,6 +133,28 @@ export class DocumentsService {
       size: row.size,
       disposition: INLINE_TYPES.has(row.mime) ? 'inline' : 'attachment',
     };
+  }
+
+  /**
+   * DELETE /resources/documents/:id: only a document no configuration
+   * version names (409 with them otherwise). The row goes; the blob stays,
+   * since the store is shared by content (another document, a suite file).
+   */
+  async remove(id: string): Promise<void> {
+    const row = await this.get(id);
+    await deleteUnused(
+      this.db,
+      { column: 'documentIds', id, what: `document ${row.filename}` },
+      async () =>
+        (
+          await this.db
+            .delete(documents)
+            .where(eq(documents.id, id))
+            .returning({ id: documents.id })
+        ).length > 0,
+    );
+    this.labels.delete(this.labelKey(row));
+    this.logger.info({ documentId: id, filename: row.filename }, 'deleted document');
   }
 
   private async get(id: string): Promise<DocumentRecord> {

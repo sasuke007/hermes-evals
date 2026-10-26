@@ -8,7 +8,9 @@ import type { McpServerRef } from '@/api/types/configurations';
  * environment variables: the amber caution, information only, never a blocker (ConfigForm ›
  * MCP servers, ConfigDetail › with-mcp). An http server is reached through egress, which adds
  * its headers on the way, so the run never sees their values: a neutral line.
- * `envNames` / `headers` null: not known (the resource library did not answer).
+ * The names are the definition version's own (McpServerRef, the form options), so a
+ * configuration pinned to an older version names what that version reads. `envNames` /
+ * `headers` null: not known, and the note says so without names.
  */
 const props = withDefaults(
   defineProps<{

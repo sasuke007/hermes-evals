@@ -10,9 +10,12 @@
  *
  * The rule is about the sandbox, not about what runs inside it: the command,
  * environment and working directory are free, because any process inside the
- * sandbox is equally confined.
+ * sandbox is equally confined. Verifier containers (Phase 5b, R7) are the
+ * exception: their shape is fixed down to the entrypoint and environment
+ * (verifier-policy.ts), and the container name says which shape applies.
  */
 import { z } from 'zod';
+import { checkVerifierBody, VERIFIER_NAME, type VerifierCreateBody } from './verifier-policy.js';
 
 export interface GuardConfig {
   /** Image reference trials must use, e.g. `hermes-evals/trial:v0.22.4-4d04303`. */
@@ -24,8 +27,12 @@ export interface GuardConfig {
 }
 
 export type Decision =
-  /** `path` is the normalised path and query the guard forwards: never the raw request URL. */
-  | { allow: true; kind: RouteKind; path: string; containerId?: string }
+  /**
+   * `path` is the normalised path and query the guard forwards: never the raw
+   * request URL. `name` is the container a create names, which selects the
+   * body schema (checkCreateBody).
+   */
+  | { allow: true; kind: RouteKind; path: string; containerId?: string; name?: string }
   | { allow: false; status: number; reason: string };
 
 export type RouteKind =
@@ -77,11 +84,15 @@ function paramsAllowed(url: URL, allowed: Record<string, RegExp>): boolean {
 export const TRIAL_LABEL = 'hermes-evals.role';
 export const TRIAL_LABEL_VALUE = 'trial';
 
-/** Container names the worker uses: one per run, or a probe for the isolation self-test. */
-export const CONTAINER_NAME = /^hermes-evals-(run|probe)-[0-9A-HJKMNP-TV-Z]{26}$/;
+/**
+ * Container names the worker uses: one per run, a probe for the isolation
+ * self-test or an MCP test, or one per verifier script run (Phase 5b).
+ */
+export const CONTAINER_NAME = /^hermes-evals-(run|probe|verify)-[0-9A-HJKMNP-TV-Z]{26}$/;
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A full container id or one of the worker's container names; never a short id prefix. */
-export const CONTAINER_REF = /^([0-9a-f]{64}|hermes-evals-(run|probe)-[0-9A-HJKMNP-TV-Z]{26})$/;
+export const CONTAINER_REF =
+  /^([0-9a-f]{64}|hermes-evals-(run|probe|verify)-[0-9A-HJKMNP-TV-Z]{26})$/;
 
 /** Strips the optional `/v1.45` API version prefix. */
 export function stripVersion(path: string): string {
@@ -135,10 +146,12 @@ function decidePath(method: string, rawUrl: string, config: GuardConfig): Decisi
   if (path === '/containers/create' && method === 'POST') {
     const name = url.searchParams.get('name');
     if (!name || !CONTAINER_NAME.test(name))
-      return deny('container name must be hermes-evals-run-<id> or hermes-evals-probe-<id>');
+      return deny(
+        'container name must be hermes-evals-run-<id>, hermes-evals-probe-<id> or hermes-evals-verify-<id>',
+      );
     if ([...url.searchParams.keys()].some((key) => key !== 'name'))
       return deny('unexpected create parameter');
-    return { allow: true, kind: 'container-create', path: forwarded };
+    return { allow: true, kind: 'container-create', path: forwarded, name };
   }
 
   const op = /^\/containers\/([^/]+)(?:\/([a-z]+))?$/.exec(path);
@@ -346,13 +359,27 @@ export function createBodySchema(config: GuardConfig) {
 
 export type TrialCreateBody = z.infer<ReturnType<typeof createBodySchema>>;
 
-/** Validates a create body; returns the parsed body or the reasons it was refused. */
+/**
+ * Validates a create body; returns the parsed body or the reasons it was
+ * refused. The container's name selects the schema: a
+ * `hermes-evals-verify-<id>` container must be exactly a verifier container
+ * (verifier-policy.ts) and any other name a trial; without a name, a trial.
+ */
 export function checkCreateBody(
   body: unknown,
   config: GuardConfig,
-): { ok: true; body: TrialCreateBody } | { ok: false; reasons: string[] } {
+  name?: string,
+):
+  | { ok: true; kind: 'trial'; body: TrialCreateBody }
+  | { ok: true; kind: 'verifier'; body: VerifierCreateBody }
+  | { ok: false; reasons: string[] } {
+  const verifier = name === undefined ? null : VERIFIER_NAME.exec(name);
+  if (verifier) {
+    const checked = checkVerifierBody(body, config, verifier[1]!);
+    return checked.ok ? { ok: true, kind: 'verifier', body: checked.body } : checked;
+  }
   const result = createBodySchema(config).safeParse(body);
-  if (result.success) return { ok: true, body: result.data };
+  if (result.success) return { ok: true, kind: 'trial', body: result.data };
   return {
     ok: false,
     reasons: result.error.issues.map(

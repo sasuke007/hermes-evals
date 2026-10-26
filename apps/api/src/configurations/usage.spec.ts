@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { VerdictEntry } from '@hermes-evals/shared';
 import type { VerdictFigures } from '../experiments/comparison/verdicts.js';
 import type { StatsResult } from '../statistics/contracts.js';
-import { armPassRate, armVerdict, armVerdictOf } from './usage.js';
+import { armDelta, armPassRate, armVerdict, armVerdictOf } from './usage.js';
 
 const arm = (
   scored: number,
@@ -133,5 +133,66 @@ describe('armVerdict', () => {
     expect(
       armVerdict({ ...completed, status: 'running', verdictHistory: [] }, 'v2', 5, figures),
     ).toBe('provisional');
+  });
+});
+
+describe('armDelta', () => {
+  const completed = { status: 'completed' as const, repetitions: 3 };
+  const figuresWith = (stats: Partial<StatsResult>): VerdictFigures => ({
+    resultsRevision: 4,
+    status: 'running',
+    byCandidate: new Map([['v2', stats as StatsResult]]),
+  });
+
+  it("takes a completed experiment's last entry, rounded as the Overview rounds it", () => {
+    const verdictHistory = [
+      { ...entry('v2', 'better'), delta: 0.3 },
+      { ...entry('v2', 'inconclusive'), delta: 0.05555 },
+    ];
+    expect(armDelta({ ...completed, verdictHistory }, 'v2', null)).toBe(0.056);
+    expect(armDelta({ ...completed, verdictHistory }, 'v3', null)).toBeNull();
+  });
+
+  it('keeps the observed Δ when the gate failed for too few tasks', () => {
+    const verdictHistory = [
+      { ...entry('v2', 'not_computable'), reason: 'too_few_tasks' as const, delta: -0.25 },
+    ];
+    expect(armDelta({ ...completed, verdictHistory }, 'v2', null)).toBe(-0.25);
+  });
+
+  it('is the provisional Δ of the figures while the experiment runs', () => {
+    const running = { status: 'running' as const, repetitions: 3, verdictHistory: [] };
+    const figures = figuresWith({ computable: true, observedDelta: 0.1234 } as never);
+    expect(armDelta(running, 'v2', figures)).toBe(0.123);
+    // A running experiment's history (from an earlier completion) does not decide.
+    expect(
+      armDelta(
+        { ...running, verdictHistory: [{ ...entry('v2', 'better'), delta: 0.9 }] },
+        'v2',
+        figures,
+      ),
+    ).toBe(0.123);
+    expect(armDelta(running, 'v2', null)).toBeNull();
+    expect(
+      armDelta(
+        running,
+        'v2',
+        figuresWith({ computable: false, reason: 'nothing_scored', observedDelta: null } as never),
+      ),
+    ).toBeNull();
+  });
+
+  it('has none with one repetition', () => {
+    const figures = figuresWith({ computable: true, observedDelta: 0.2 } as never);
+    expect(
+      armDelta({ status: 'running', repetitions: 1, verdictHistory: [] }, 'v2', figures),
+    ).toBeNull();
+    expect(
+      armDelta(
+        { ...completed, repetitions: 1, verdictHistory: [entry('v2', 'not_computable')] },
+        'v2',
+        null,
+      ),
+    ).toBeNull();
   });
 });

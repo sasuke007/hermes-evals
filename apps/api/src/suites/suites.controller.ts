@@ -17,6 +17,7 @@ import {
   SuiteDetailSchema,
   SuiteHistoryEntrySchema,
   SuiteListRowSchema,
+  SuiteReloadProgressSchema,
   SuiteReloadRequestSchema,
   SuiteReloadResultSchema,
   TablePreviewSchema,
@@ -26,6 +27,7 @@ import {
   type SuiteDetail,
   type SuiteHistoryEntry,
   type SuiteListRow,
+  type SuiteReloadProgress,
   type SuiteReloadRequest,
   type SuiteReloadResult,
   type TaskDetail,
@@ -81,6 +83,15 @@ export class SuitesController {
     @Body(new ZodValidationPipe(ReloadBody)) body: SuiteReloadRequest,
   ): Promise<SuiteReloadResult> {
     return this.reloads.reload(body);
+  }
+
+  @Get('reload/progress')
+  @ApiJsonResponse(SuiteReloadProgressSchema, {
+    description:
+      'Where each directory of the last Reload all stands, one load-suites job each; the suite list polls it',
+  })
+  reloadProgress(): SuiteReloadProgress {
+    return this.reloads.progress();
   }
 
   @Get(':id')

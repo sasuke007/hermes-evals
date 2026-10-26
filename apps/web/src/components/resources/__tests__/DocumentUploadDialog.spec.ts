@@ -28,7 +28,9 @@ describe('Upload document', () => {
     await open();
     expect(text('step-label')).toBe('Step 1 of 2 · choose file');
     expect(text('drop-zone')).toContain('Drop a file here, or choose one');
-    expect(text('drop-zone')).toContain('PDF, Markdown, text or CSV · up to 50 MB');
+    expect(text('drop-zone')).toContain(
+      'PDF, Markdown, text or CSV recommended · any file up to 50 MB',
+    );
     expect(confirmButton().attributes('disabled')).toBeDefined();
   });
 
@@ -72,14 +74,26 @@ describe('Upload document', () => {
     expect(confirmButton().attributes('disabled')).toBeDefined();
   });
 
-  it('refuses a zip archive', async () => {
-    await open();
+  it('accepts any type, as the API does: a zip with a note (Phase 5 question 9)', async () => {
+    const { store } = await open();
     await pickFile(w!, fileOfSize('invoice-scans.zip', 3.2 * 1024 * 1024, 'application/zip'));
-    expect(text('upload-problem')).toBe(
-      'ZIP archives are not accepted as documents. Upload PDF, Markdown, text or CSV. Skills are uploaded as .zip on the Skills tab.',
+    expect(text('upload-lead')).toBe('Valid document · nothing stored yet');
+    expect(w!.find('[data-testid="upload-problem"]').exists()).toBe(false);
+    expect(text('document-note')).toBe(
+      'A ZIP archive is stored as one file: the agent gets the archive, not what is in it. Skills are uploaded as .zip on the Skills tab.',
     );
-    await w!.findAll('[data-testid="dialog-footer"] button')[0]!.trigger('click');
-    expect(text('step-label')).toBe('Step 1 of 2 · choose file');
+    expect(confirmButton().attributes('disabled')).toBeUndefined();
+    await confirmButton().trigger('click');
+    await flushPromises();
+    expect(store.documentRows.map((d) => d.filename)).toEqual(['invoice-scans.zip']);
+  });
+
+  it('accepts a type the hint does not name, with no note', async () => {
+    await open();
+    await pickFile(w!, new File(['<xml/>'], 'rates.xml', { type: 'application/xml' }));
+    expect(text('upload-lead')).toBe('Valid document · nothing stored yet');
+    expect(w!.find('[data-testid="document-note"]').exists()).toBe(false);
+    expect(confirmButton().attributes('disabled')).toBeUndefined();
   });
 
   it('keeps the dialog open with the API refusal', async () => {

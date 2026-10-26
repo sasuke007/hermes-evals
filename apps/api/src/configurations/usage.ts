@@ -183,10 +183,56 @@ export function armVerdictOf(
   return { verdict: 'provisional', reason: null };
 }
 
+/** A Δ as the views round it: three decimals, inside [−1, 1]. */
+const delta3 = (x: number | null | undefined): number | null =>
+  x === null || x === undefined ? null : Math.min(1, Math.max(-1, round3(x)));
+
+/**
+ * The candidate's observed difference from the baseline, for "Δ +0.056"
+ * beside its verdict (Phase 5 question 1), as the Overview's VerdictCard
+ * gives it: once completed, its last verdict entry's; else (or with no
+ * entry) the figures as they stand, provisional while it runs. None with one
+ * repetition, nor before both arms have counted runs on a common task.
+ */
+export function armDelta(
+  experiment: Pick<ExperimentRow, 'status' | 'repetitions' | 'verdictHistory'>,
+  candidateVersionId: string,
+  figures: VerdictFigures | null,
+): number | null {
+  if (experiment.repetitions < 2) return null;
+  if (experiment.status === 'completed') {
+    const last = lastEntryOf(experiment.verdictHistory, candidateVersionId);
+    if (last) return delta3(last.delta);
+  }
+  const stats = figures?.byCandidate.get(candidateVersionId);
+  if (!stats) return null;
+  return !stats.computable && stats.reason === 'single_repetition'
+    ? null
+    : delta3(stats.observedDelta);
+}
+
 /** Completed experiments whose history lacks one of their candidates. */
 const lacksEntries = (e: ExperimentRow): boolean =>
   e.status === 'completed' &&
   e.candidateVersionIds.some((id) => lastEntryOf(e.verdictHistory, id) === undefined);
+
+/**
+ * Experiments whose figures the usage rows read: a completed one lacking an
+ * entry (its verdict and Δ), and one still unsettled in which one of
+ * `versions` is a candidate, with something scored and two repetitions or
+ * more (its provisional Δ). The baseline's row has no Δ, so an experiment
+ * this configuration only baselines needs none.
+ */
+const needsFigures = (
+  e: ExperimentRow,
+  versions: ReadonlyMap<string, number>,
+  scoredInExperiment: number,
+): boolean =>
+  lacksEntries(e) ||
+  (e.status !== 'completed' &&
+    e.repetitions >= 2 &&
+    scoredInExperiment > 0 &&
+    e.candidateVersionIds.some((id) => versions.has(id)));
 
 /**
  * Usage rows for the versions of one configuration, newest experiment first.
@@ -205,20 +251,25 @@ export async function configurationUsage(
   );
   const arm = (experimentId: string, versionId: string) =>
     counts.get(armKey(experimentId, versionId)) ?? EMPTY_ARM;
+  const scoredIn = (e: ExperimentRow) =>
+    [e.baselineVersionId, ...e.candidateVersionIds].reduce((n, v) => n + arm(e.id, v).scored, 0);
   const figures = new Map<string, VerdictFigures | null>();
-  for (const e of used.filter(lacksEntries)) figures.set(e.id, await readVerdictFigures(db, e.id));
+  for (const e of used.filter((x) => needsFigures(x, versions, scoredIn(x)))) {
+    figures.set(e.id, await readVerdictFigures(db, e.id));
+  }
   return used.flatMap((e) => {
     const arms = [e.baselineVersionId, ...e.candidateVersionIds];
-    const scoredInExperiment = arms.reduce((n, v) => n + arm(e.id, v).scored, 0);
+    const scoredInExperiment = scoredIn(e);
     const baselineRate = armPassRate(e.status, arm(e.id, e.baselineVersionId));
     return arms.flatMap((versionId): ConfigurationUsage[] => {
       const version = versions.get(versionId);
       if (version === undefined) return [];
       const isBaseline = versionId === e.baselineVersionId;
       const mine = arm(e.id, versionId);
+      const experimentFigures = figures.get(e.id) ?? null;
       const verdict = isBaseline
         ? null
-        : armVerdictOf(e, versionId, scoredInExperiment, figures.get(e.id) ?? null);
+        : armVerdictOf(e, versionId, scoredInExperiment, experimentFigures);
       return [
         {
           experimentId: e.id,
@@ -233,6 +284,8 @@ export async function configurationUsage(
           verdict: verdict?.verdict ?? null,
           verdictReason: verdict?.reason ?? null,
           baselinePassRate: isBaseline ? null : baselineRate,
+          taskCount: e.taskIds.length,
+          delta: isBaseline ? null : armDelta(e, versionId, experimentFigures),
         },
       ];
     });

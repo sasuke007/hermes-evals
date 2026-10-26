@@ -1,7 +1,8 @@
 /**
  * Runs against a real Postgres 17 server, the version Compose uses, to cover
  * what PGlite cannot: two processes migrating at once under the advisory
- * lock, node-postgres result types, and concurrent job claiming.
+ * lock, node-postgres result types, concurrent job claiming, and a skill
+ * deleted while a configuration version naming it commits (migration 0009).
  *
  *   docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 55433:5432 postgres:17-alpine
  *   TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e
@@ -11,7 +12,7 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { fromDrizzle, PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { finishAttempt, seedExperiment, startAttempt } from '../../test/support/seed.js';
+import { finishAttempt, seedExperiment, sha, startAttempt } from '../../test/support/seed.js';
 import { ensureQueues } from '../queue/queue.service.js';
 import { executeRunKey, QUEUES, type ExecuteRunJob } from '../queue/queues.js';
 import { migrationsInSync, readMigrations, runMigrations } from './migrator.js';
@@ -84,6 +85,57 @@ describe.skipIf(!SERVER_URL)('on Postgres 17', () => {
     expect(file!.size).toBe(2048);
     const [experiment] = await db.select().from(schema.experiments);
     expect(experiment!.spendCeilingUsd).toBe(5);
+  });
+
+  it('never lets a skill delete and a configuration version naming it both commit', async () => {
+    const skill = async (name: string) => {
+      const { rows } = await pool.query<{ id: string }>(
+        `insert into skills (id, name, version, description, content_hash, file_count, size_bytes)
+         values ($1, $2, '1.0.0', 'race', $3, 1, 1) returning id`,
+        [`skill_${name}`, name, sha(name)],
+      );
+      return rows[0]!.id;
+    };
+    /** Opens a transaction that names `skillId` in a new configuration version, left uncommitted. */
+    const nameSkill = async (client: pg.PoolClient, skillId: string, name: string) => {
+      await client.query('begin');
+      await client.query(`insert into configurations (id, name) values ($1, $1)`, [name]);
+      return client.query(
+        `insert into configuration_versions
+           (id, configuration_id, version, model, provider, max_turns, time_budget_s, config_hash, skill_ids)
+         values ($1, $1, 1, 'mock/scripted', 'nous', 20, 300, $2, array[$3])`,
+        [name, sha(name), skillId],
+      );
+    };
+    const settle = (promise: Promise<unknown>) =>
+      promise.then(
+        () => null,
+        (err: { code?: string }) => err.code,
+      );
+    const first = await pool.connect();
+    const second = await pool.connect();
+    try {
+      // The version first: the delete waits for its key share, then sees it.
+      const used = await skill('race-used');
+      await nameSkill(first, used, 'race-first');
+      const deleting = settle(second.query('delete from skills where id = $1', [used]));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await first.query('commit');
+      expect(await deleting).toBe('23503');
+
+      // The delete first: the version waits for the deleted row, then finds it gone.
+      const gone = await skill('race-gone');
+      await second.query('begin');
+      await second.query('delete from skills where id = $1', [gone]);
+      const naming = settle(nameSkill(first, gone, 'race-second'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await second.query('commit');
+      expect(await naming).toBe('23503');
+      await first.query('rollback');
+    } finally {
+      first.release();
+      second.release();
+    }
   });
 
   describe('pg-boss', () => {

@@ -7,6 +7,7 @@ import SkeletonRows from '@/components/ui/SkeletonRows.vue';
 import type { SkeletonColumn } from '@/components/ui/types';
 import { MISSING } from '@/lib/format';
 import { ROUTE_NAMES } from '@/router';
+import ActionMenu, { type ActionMenuItem } from './ActionMenu.vue';
 import SelfCheckFailure from './SelfCheckFailure.vue';
 
 /**
@@ -14,7 +15,9 @@ import SelfCheckFailure from './SelfCheckFailure.vue';
  * colour when this version changed it), summary, check types, limits, fixtures and validity.
  * A task that failed its self-check is tinted, and its "self-check failed" chip expands the
  * row to the check's output; invalid rows start expanded. `reveal(key)` expands a row and
- * moves focus to its chip ("Show late_fees").
+ * moves focus to its chip ("Show late_fees"). On the current version each row has Edit and a
+ * ⋯ menu (Edit, Duplicate, Remove from suite), shown on hover or focus; any of them starts a
+ * draft (Phase 5b), which the page does.
  */
 const props = withDefaults(
   defineProps<{
@@ -24,9 +27,28 @@ const props = withDefaults(
     changedKeys?: string[];
     /** Skeleton rows at the column widths while the suite loads. */
     loading?: boolean;
+    /** The current version: rows can be edited, duplicated or removed through a draft. */
+    editable?: boolean;
   }>(),
-  { changedKeys: () => [], loading: false },
+  { changedKeys: () => [], loading: false, editable: false },
 );
+const emit = defineEmits<{
+  edit: [key: string];
+  duplicate: [key: string];
+  remove: [key: string];
+}>();
+
+const ROW_ACTIONS: ActionMenuItem[] = [
+  { key: 'edit', label: 'Edit' },
+  { key: 'duplicate', label: 'Duplicate' },
+  { key: 'remove', label: 'Remove from suite', tone: 'danger' },
+];
+function act(action: string, key: string): void {
+  if (action === 'edit') emit('edit', key);
+  else if (action === 'duplicate') emit('duplicate', key);
+  else if (action === 'remove') emit('remove', key);
+}
+const columnCount = (): number => (props.editable ? 9 : 8);
 
 const SKELETON: SkeletonColumn[] = [
   { width: 90 },
@@ -84,21 +106,24 @@ const budget = (s: number | null): string => (s === null ? MISSING : `${s} s`);
           <th scope="col" class="text-right">Budget</th>
           <th scope="col" class="text-right">Fixtures</th>
           <th scope="col">Validity</th>
-          <!-- Phase 5b adds an Actions column (Edit, Duplicate, Remove from suite). -->
+          <th v-if="editable" scope="col" class="w-96">
+            <span class="text-12 font-medium">Actions</span>
+          </th>
         </tr>
       </thead>
       <tbody v-if="loading">
-        <SkeletonRows :columns="SKELETON" :rows="6" />
+        <SkeletonRows :columns="editable ? [...SKELETON, { width: 40 }] : SKELETON" :rows="6" />
       </tbody>
       <tbody v-else>
         <tr v-if="tasks.length === 0">
-          <td colspan="8" class="h-96 text-center whitespace-normal text-text-3">
+          <td :colspan="columnCount()" class="h-96 text-center whitespace-normal text-text-3">
             This version has no tasks.
           </td>
         </tr>
         <template v-for="task in tasks" :key="task.key">
           <tr
             :id="rowId(task.key)"
+            class="group/row"
             :class="{ '[&>td]:bg-fail-soft': !task.valid }"
             :data-task="task.key"
             :data-valid="task.valid ? 'true' : 'false'"
@@ -163,17 +188,36 @@ const budget = (s: number | null): string => (s === null ? MISSING : `${s} s`);
                 self-check failed {{ expanded.has(task.key) ? '▴' : '▾' }}
               </button>
             </td>
+            <td v-if="editable" class="relative">
+              <span
+                class="inline-flex items-center gap-4 opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100"
+                data-testid="row-actions"
+              >
+                <button type="button" class="btn sm ghost" @click="emit('edit', task.key)">
+                  Edit
+                </button>
+                <ActionMenu
+                  :items="ROW_ACTIONS"
+                  :label="`More actions for ${task.key}`"
+                  caption="Any of these starts a draft. Nothing on disk changes until you save."
+                  variant="ghost"
+                  @select="act($event, task.key)"
+                />
+              </span>
+            </td>
           </tr>
           <tr
             v-if="!task.valid && expanded.has(task.key)"
             :id="`${rowId(task.key)}-failure`"
             class="[&>td]:bg-fail-soft"
           >
-            <td colspan="8" class="h-auto px-16 pt-12 pb-16 whitespace-normal">
+            <td :colspan="columnCount()" class="h-auto px-16 pt-12 pb-16 whitespace-normal">
               <SelfCheckFailure
                 v-if="task.selfCheckFailure"
                 :failure="task.selfCheckFailure"
                 :task-to="taskTo(task.key)"
+                :editable="editable"
+                @edit="emit('edit', task.key)"
               />
               <p v-else class="text-text-2">
                 This task is invalid.
