@@ -1,0 +1,13 @@
+summary: Total per fee code of a BX-7 statement, where the class of a code is only in codes.md
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: fees_by_code
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: fees_by_code }

@@ -14,6 +14,10 @@
  * The mock plays the n-th step of the first script whose phrase occurs in
  * the request, n being the tool results so far (apps/egress/src/mock-model.ts),
  * so a script listed first takes over once a tool result brings its phrase.
+ * Every phrase here is one only these runs hold: each holds `smoke-phase6`,
+ * which no other suite, sample or mock script holds, so where these scripts
+ * stand in MOCK_SCRIPTS beside other phases' and suites' never matters
+ * (Phase 6 #12, settled for Phase 6b; apps/api/test/phase6-smoke.spec.ts).
  *
  * - codeword (P5): its prompt's script calls skill_view, then answers
  *   "unknown". The skill's body phrase answers "heron" at any step: from the
@@ -23,15 +27,31 @@
  * - currency (P1): the seed phrase is in its USER.md seed; only with memory
  *   on is it in the prompt, and only then is the answer NOK.
  * - remember (P2): its script saves a preference with Hermes's memory tool,
- *   which exists only with memory on (and the `memory` toolset).
+ *   which exists only with memory on (the plan adds the `memory` toolset).
  * - vendors (P4): its script tries the server straight from the trial's
- *   terminal, then calls list_vendors through egress's MCP gateway; an
- *   on-hold vendor's name in that result answers with the on-hold vendors,
- *   computed from the generated directory.
+ *   terminal, calls list_vendors through egress's MCP gateway, then asks
+ *   get_vendor for PROBE_VENDOR, a name the directory does not hold. The
+ *   server's not-found reply echoes the name (`Error executing tool
+ *   get_vendor: no vendor smoke-phase6-probe-vendor`, which Hermes hands
+ *   back as `{"error": ...}`): text only vendor-directory writes, and only
+ *   for this run's call. That reply answers with the on-hold vendors,
+ *   computed from the generated directory. Without the server the calls
+ *   fail with Hermes's own "does not exist", and the answer stays empty.
  * - ledger (P4): its script lists invoice-db's first page, then the second
- *   with the cursor the server's encoding gives; the third page's cursor,
- *   which only the second page's result holds, answers with the invoice
- *   that opens the second page.
+ *   with the cursor the server's encoding gives, then lists the workspace
+ *   (it holds no ledger), then asks get_invoice for PROBE_INVOICE, which
+ *   invoice-db answers with `no invoice smoke-phase6-probe-invoice`; that
+ *   reply answers with the invoice that opens the second page. The terminal
+ *   step keeps the arm without invoice-db going: Hermes ends a run as
+ *   partial after three turns in a row whose only call names a tool it
+ *   lacks (agent/turn_tool_validation.py), and that arm must still answer.
+ *
+ * Why an echo: the mock matches one phrase, so a script that must answer
+ * right only once a server answered needs a phrase only the server can put
+ * in the request. Data the servers serve (vendor names, the ledger's
+ * cursors) is in every run that reads the same data, mcp-v1's included,
+ * and a phrase of it would make the order of MOCK_SCRIPTS decide who
+ * answers; a name only this smoke sends, echoed back, is in no other run.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -54,10 +74,20 @@ export const VENDORS_PHRASE = 'smoke-phase6-vendors';
 /** The sample http MCP server's name, which Hermes's tool names carry. */
 export const VENDOR_SERVER = 'vendor-directory';
 export const LIST_VENDORS_TOOL = `mcp__${VENDOR_SERVER.replaceAll('-', '_')}__list_vendors`;
+export const GET_VENDOR_TOOL = `mcp__${VENDOR_SERVER.replaceAll('-', '_')}__get_vendor`;
+/** A vendor name vendor-directory does not hold: only the vendors script asks for it. */
+export const PROBE_VENDOR = 'smoke-phase6-probe-vendor';
+/** vendor-directory's not-found reply to get_vendor(PROBE_VENDOR) (docker/mcp/vendor-directory/server.py). */
+export const VENDOR_PROBE_REPLY = `no vendor ${PROBE_VENDOR}`;
 export const LEDGER_PHRASE = 'smoke-phase6-ledger';
 /** The sample stdio MCP server's name, which the ledger script's tool name carries. */
 export const INVOICE_SERVER = 'invoice-db';
 export const LIST_INVOICES_TOOL = `mcp__${INVOICE_SERVER.replaceAll('-', '_')}__list_invoices`;
+export const GET_INVOICE_TOOL = `mcp__${INVOICE_SERVER.replaceAll('-', '_')}__get_invoice`;
+/** An invoice number invoice-db does not hold: only the ledger script asks for it. */
+export const PROBE_INVOICE = 'smoke-phase6-probe-invoice';
+/** invoice-db's not-found reply to get_invoice(PROBE_INVOICE) (docker/mcp/invoice-db/server.py). */
+export const INVOICE_PROBE_REPLY = `no invoice ${PROBE_INVOICE}`;
 /** Hermes's memory entry delimiter (tools/memory_tool_store.py ENTRY_DELIMITER). */
 const DELIMITER = '\n§\n';
 
@@ -89,27 +119,34 @@ const answer = (value: Json): string => `\`\`\`json\n${JSON.stringify(value)}\n\
 const REACH_CHECK =
   "curl -sS -m 5 -o /dev/null -w 'direct=%{http_code}\\n' --noproxy '*' http://vendor-directory:8000/mcp; " +
   "curl -sS -m 5 -o /dev/null -w 'proxy=%{http_code}\\n' http://vendor-directory:8000/mcp; echo REACH_DONE";
+/**
+ * Between the ledger's MCP calls: lists the run's own files (none, so its
+ * answer can come only from invoice-db), and keeps the arm without
+ * invoice-db short of three missing tools in a row, after which Hermes
+ * would end it without an answer.
+ */
+export const WORKSPACE_CHECK = 'ls -A /workspace; echo WORKSPACE_LISTED';
 
 export function phase6SmokeScripts(): Json[] {
   const onHold = onHoldVendors();
-  const vendorSteps = (final: Json): Json[] => [
-    { tool: 'terminal', arguments: { command: REACH_CHECK } },
-    { tool: LIST_VENDORS_TOOL, arguments: { status: 'on_hold' } },
-    { content: `The vendors on hold.\n\n${answer(final)}` },
-  ];
-  const ledgerSteps = (final: Json): Json[] => [
-    { tool: LIST_INVOICES_TOOL, arguments: {} },
-    { tool: LIST_INVOICES_TOOL, arguments: { cursor: invoiceCursor(INVOICE_PAGE_SIZE) } },
-    { content: `The second page of the ledger.\n\n${answer(final)}` },
-  ];
+  const vendors = (final: Json) => ({ content: `The vendors on hold.\n\n${answer(final)}` });
+  const ledger = (final: Json) => ({
+    content: `The second page of the ledger.\n\n${answer(final)}`,
+  });
   const heron = { content: `The skill gives the code word.\n\n${answer({ code: 'heron' })}` };
   return [
-    // First: the ledger's pages hold vendor names, which the vendors script below matches.
+    // The servers' replies to the probes: once one is in a request, its run's answer is right.
+    { match: INVOICE_PROBE_REPLY, steps: [ledger({ second_page_first: invoicePage(2)[0]! })] },
     {
-      match: invoiceCursor(2 * INVOICE_PAGE_SIZE),
-      steps: ledgerSteps({ second_page_first: invoicePage(2)[0]! }),
+      match: LEDGER_PHRASE,
+      steps: [
+        { tool: LIST_INVOICES_TOOL, arguments: {} },
+        { tool: LIST_INVOICES_TOOL, arguments: { cursor: invoiceCursor(INVOICE_PAGE_SIZE) } },
+        { tool: 'terminal', arguments: { command: WORKSPACE_CHECK } },
+        { tool: GET_INVOICE_TOOL, arguments: { invoice_no: PROBE_INVOICE } },
+        ledger({ second_page_first: 'unknown' }),
+      ],
     },
-    { match: LEDGER_PHRASE, steps: ledgerSteps({ second_page_first: 'unknown' }) },
     { match: SKILL_BODY_PHRASE, steps: [heron, heron] },
     {
       match: CODEWORD_PHRASE,
@@ -133,9 +170,16 @@ export function phase6SmokeScripts(): Json[] {
         { content: `Noted for next time.\n\n${answer({ saved: true })}` },
       ],
     },
-    // Listed before the prompt's script: it answers once list_vendors' result is in.
-    { match: onHold.at(-1)!, steps: vendorSteps({ on_hold: onHold }) },
-    { match: VENDORS_PHRASE, steps: vendorSteps({ on_hold: [] }) },
+    { match: VENDOR_PROBE_REPLY, steps: [vendors({ on_hold: onHold })] },
+    {
+      match: VENDORS_PHRASE,
+      steps: [
+        { tool: 'terminal', arguments: { command: REACH_CHECK } },
+        { tool: LIST_VENDORS_TOOL, arguments: { status: 'on_hold' } },
+        { tool: GET_VENDOR_TOOL, arguments: { name: PROBE_VENDOR } },
+        vendors({ on_hold: [] }),
+      ],
+    },
   ];
 }
 
@@ -199,18 +243,21 @@ export function smokeSuiteFiles(name: string): Record<string, string> {
       'verification:\n' +
       '  - key: answer\n    type: json_match\n    primary: true\n    params: { path: on_hold, unordered: true }\n' +
       `  - key: through_mcp\n    type: trajectory_match\n    params: { tool: ${LIST_VENDORS_TOOL}, min_calls: 1 }\n`,
-    'vendors/prompt.md': `${VENDORS_PHRASE}. Which vendors are on hold in the vendor directory?\n${reply({ on_hold: [] })}`,
+    'vendors/prompt.md':
+      `${VENDORS_PHRASE}. Which vendors are on hold in the vendor directory? ` +
+      `Then ask it for the vendor ${PROBE_VENDOR}, which it does not hold.\n${reply({ on_hold: [] })}`,
     'vendors/reference.json': json({ on_hold: onHoldVendors() }),
 
     'ledger/task.yaml':
       'summary: The invoice that opens the second page of the invoice database\n' +
-      LIMITS('file') +
+      LIMITS('terminal') +
       FENCED +
       'verification:\n' +
       '  - key: answer\n    type: exact_match\n    primary: true\n    params: { path: second_page_first }\n' +
       `  - key: paged\n    type: trajectory_match\n    params: { tool: ${LIST_INVOICES_TOOL}, args: { cursor: '${invoiceCursor(INVOICE_PAGE_SIZE)}' }, min_calls: 1 }\n`,
     'ledger/prompt.md':
-      `${LEDGER_PHRASE}. List the invoice database page by page. Which invoice opens its second page?\n` +
+      `${LEDGER_PHRASE}. List the invoice database page by page. Which invoice opens its second page? ` +
+      `Then ask it for invoice ${PROBE_INVOICE}, which it does not hold.\n` +
       reply({ second_page_first: '' }),
     'ledger/reference.json': json({ second_page_first: invoicePage(2)[0]! }),
   };

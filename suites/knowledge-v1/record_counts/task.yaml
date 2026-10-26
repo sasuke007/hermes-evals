@@ -1,0 +1,13 @@
+summary: Movement, reversal and record counts of a BX-7 statement with continuation lines
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: record_counts
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: record_counts }

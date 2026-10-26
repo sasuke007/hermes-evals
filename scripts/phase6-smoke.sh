@@ -19,16 +19,21 @@
 #   whose mock scripts answer right only when the addition reaches the run:
 #   codeword (skill loading: preloaded with -s, and on demand with no -s,
 #   the skills toolset and a skill_view call), currency (a seeded USER.md
-#   reaches the prompt only with memory on), remember (the memory file the
-#   agent saves is collected with root home and scored by a file_check with
-#   `root: home`; the model calls are counted, so a background review fork
-#   would show), vendors (vendor-directory answers through egress's MCP
-#   gateway, which adds its header, and the trial cannot reach it itself),
-#   ledger (invoice-db, the stdio sample, pages 20 invoices at a time with a
-#   cursor; the mock's log shows both pages as the model received them);
+#   reaches the prompt only with memory on; memory on brings the `memory`
+#   toolset itself, so both arms configure file and terminal only), remember
+#   (the memory file the agent saves is collected with root home and scored
+#   by a file_check with `root: home`; the model calls are counted, so a
+#   background review fork would show), vendors (vendor-directory answers
+#   through egress's MCP gateway, which adds its header, and the trial
+#   cannot reach it itself), ledger (invoice-db, the stdio sample, pages 20
+#   invoices at a time with a cursor; the mock's log shows both pages as the
+#   model received them). Each MCP run ends by asking its server for a name
+#   it does not hold, and the server's not-found reply, which only it writes
+#   and only for these runs, is what lets the mock answer right;
 # - the launch 409 for an MCP variable that is not set, and New
-#   experiment's options naming it: a stdio variable the worker lacks, and
-#   VENDOR_DIRECTORY_TOKEN with egress recreated without it (then put back).
+#   experiment's options naming it: a stdio variable the worker lacks, and,
+#   with SMOKE_RESTART=1, VENDOR_DIRECTORY_TOKEN with egress recreated
+#   without it (then put back).
 #
 #   scripts/phase6-smoke.sh                                     # http://localhost:3000/api
 #   BASE_URL=http://localhost:8080/api scripts/phase6-smoke.sh  # through nginx
@@ -39,19 +44,23 @@
 # for the vendors checks, the sample http MCP server (profile `samples`)
 # with VENDOR_DIRECTORY_TOKEN (any random string; without it those checks
 # expect the launch 409 instead). Compose reads every one of them from the
-# shell before .env, so no file changes. Put the Phase 6 scripts first and
-# the Phase 4, 3 and 2 ones after them, so the earlier smoke tests pass on
-# the same stack (each script matches a phrase only its own runs hold):
+# shell before .env, so no file changes. Give the mock every
+# scripts/*mock-scripts.json, so the other smoke tests (Phases 2 to 4 and
+# 6b) pass on the same stack; the order does not matter, since each script
+# matches a phrase only its own runs hold (apps/api/test/phase6-smoke.spec.ts
+# checks the Phase 6 smoke's against every scripts/*mock-scripts.json, and
+# phase6b-mock-scripts.spec.ts the suites'):
 #
 #   export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
-#   MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps([s for p in (6, 4, 3, 2) for s in json.load(open("scripts/phase{}-mock-scripts.json".format(p)))]))')" \
+#   MOCK_SCRIPTS="$(python3 -c 'import glob, json; print(json.dumps([s for f in sorted(glob.glob("scripts/*mock-scripts.json")) for s in json.load(open(f))]))')" \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
 #     docker compose --profile test --profile samples up -d --build
 #
-# Run the smoke from a shell with the same VENDOR_DIRECTORY_TOKEN (or none,
-# when .env holds it): the step that recreates egress puts the value back
-# from there, and only after checking, by hash, that it is the one egress
-# has.
+# With SMOKE_RESTART=1, run the smoke from a shell with the same
+# VENDOR_DIRECTORY_TOKEN (or none, when .env holds it): the step that
+# recreates egress puts the value back from there, and only after checking,
+# by hash, that it is the one egress has. Without it that step is skipped,
+# since a smoke test should not recreate a service unless asked.
 #
 # Every configuration uses provider `custom` with base URL
 # http://mock-model:8090/v1 and model mock/scripted, which config/prices.yaml
@@ -75,9 +84,11 @@
 #   SMOKE_DOCKER   auto (default) | 0: also check, read-only through docker, the
 #                  mock's scripts and its request log, migration 0008, egress's stored
 #                  connection log and the sample MCP checks
-#   SMOKE_RESTART  auto (default) | 0: for the 409 of an http header variable, recreate
+#   SMOKE_RESTART  0 (default) | 1: for the 409 of an http header variable, recreate
 #                  egress without VENDOR_DIRECTORY_TOKEN, then with it again (needs the
-#                  docker checks, the token egress has, and no trial running)
+#                  docker checks, the token egress has, and no trial running). It
+#                  checks that the token reaches egress, not egress's token cap. Off,
+#                  the step prints a SKIP line saying how to run it.
 #   RUN_TIMEOUT    seconds the experiments may take together (default 900)
 #   CURL_TIMEOUT   seconds per request (default 120)
 set -uo pipefail
@@ -86,7 +97,7 @@ BASE_URL="${BASE_URL:-http://localhost:3000/api}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUITES_DIR="${SUITES_DIR:-$REPO_DIR/suites}"
 SMOKE_DOCKER="${SMOKE_DOCKER:-auto}"
-SMOKE_RESTART="${SMOKE_RESTART:-auto}"
+SMOKE_RESTART="${SMOKE_RESTART:-0}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-900}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-120}"
 
@@ -103,7 +114,11 @@ UNSET_VAR='SMOKE_PHASE6_UNSET_VALUE'
 # listing (base64url of [offset,null,null], docker/mcp/invoice-db/server.py).
 CURSOR2='WzIwLG51bGwsbnVsbF0'
 CURSOR3='WzQwLG51bGwsbnVsbF0'
-export PREFIX SUITE_NAME SMOKE_SKILL VENDOR_SERVER INVOICE_SERVER UNSET_SERVER UNSET_VAR CURSOR2 CURSOR3
+# The servers' not-found replies to the probes of the vendors and ledger
+# runs (scripts/fixtures/phase6-smoke.ts): the phrases that answer them right.
+VENDOR_REPLY='no vendor smoke-phase6-probe-vendor'
+LEDGER_REPLY='no invoice smoke-phase6-probe-invoice'
+export PREFIX SUITE_NAME SMOKE_SKILL VENDOR_SERVER INVOICE_SERVER UNSET_SERVER UNSET_VAR CURSOR2 CURSOR3 VENDOR_REPLY LEDGER_REPLY
 
 for tool in curl python3 node; do
   command -v "$tool" >/dev/null || { echo "phase6-smoke: $tool is required" >&2; exit 2; }
@@ -471,7 +486,6 @@ create_config() {
   VERSION_ID="$(jv 'd["versionId"]' 2>/dev/null)"
 }
 FT='"file","terminal"'
-FTM='"file","terminal","memory"'
 create_config "$PREFIX-baseline" 'file, terminal' "$FT" false '' preload ''
 BASELINE="$VERSION_ID"
 WITH_SKILL=''
@@ -487,11 +501,12 @@ if need "POST /configurations $PREFIX-preload, $PREFIX-on-demand" "$LOOKUP_SKILL
   create_config "$PREFIX-on-demand" "$SMOKE_SKILL, on demand" "$FT" false "\"$LOOKUP_SKILL\"" on_demand ''
   ON_DEMAND="$VERSION_ID"
 fi
-# Hermes's memory tool is in the `memory` toolset, and hidden while memory is
-# off, so both arms carry it and differ only in memory_enabled.
-create_config "$PREFIX-memory-off" 'memory off, memory toolset' "$FTM" false '' preload ''
+# The arms differ only in memory_enabled: memory on brings Hermes's `memory`
+# toolset, whose tool saves to the stores, at launch (lifecycle/plan.ts
+# plannedToolsets), so neither configuration lists it.
+create_config "$PREFIX-memory-off" 'memory off' "$FT" false '' preload ''
 MEMORY_OFF="$VERSION_ID"
-create_config "$PREFIX-memory-on" 'memory on, memory toolset' "$FTM" true '' preload ''
+create_config "$PREFIX-memory-on" 'memory on' "$FT" true '' preload ''
 MEMORY_ON="$VERSION_ID"
 export BASELINE WITH_SKILL PRELOAD ON_DEMAND MEMORY_OFF MEMORY_ON
 
@@ -776,6 +791,11 @@ if need 'memory experiment' "$MEMORY_EXP" && settles 'memory' "$MEMORY_EXP" 4 "$
       check "  currency, memory $ARM: seed copied in, background review 10/10, 1 model call" 200 \
         '[s["path"] for s in d["launchRecord"]["homeSeeds"]] == ["memories/USER.md"] and d["launchRecord"]["backgroundReview"] == {"memoryNudgeInterval": 10, "skillCreationNudgeInterval": 10} and "nudge_interval: 10" in d["launchRecord"]["configYaml"] and calls(d) == 1' \
         '"seeds {} · {} model calls".format([s["path"] for s in d["launchRecord"]["homeSeeds"]], calls(d))'
+      # The memory toolset comes with memory on alone, in the command and config.yaml alike.
+      WANT_T="$([ "$ARM" = on ] && echo 'file,memory,terminal' || echo 'file,terminal')" \
+        check "  currency, memory $ARM: the launch record's -t list" 200 \
+        '" -t {} ".format(env["WANT_T"]) in d["launchRecord"]["command"] and ("- memory" in d["launchRecord"]["configYaml"]) == ("memory," in env["WANT_T"])' \
+        '"-t " + d["launchRecord"]["command"].split(" -t ")[1].split(" ")[0]'
     fi
   done
   RUN="$(run_of "$WORK/memory.json" remember "$PREFIX-memory-on")"
@@ -828,6 +848,9 @@ elif need 'vendors experiment' "$VENDORS_EXP" && settles 'vendors' "$VENDORS_EXP
     check '  with-vendors: list_vendors through /mcp/vendor-directory, 200' 200 \
       'sc(d, "through_mcp")["status"] == "passed" and any(e["kind"] == "network" and e["network"]["kind"] == "mcp" and e["network"]["server"] == "vendor-directory" and e["network"]["status"] == 200 for e in d["timeline"]["events"])' \
       '", ".join(sorted({"{}:{}".format(e["network"]["kind"], e["network"]["status"]) for e in d["timeline"]["events"] if e["kind"] == "network"}))'
+    check '  with-vendors: get_vendor answered the probe with its not-found reply' 200 \
+      'any(e["kind"] == "tool" and e["title"] == "get_vendor" and env["VENDOR_REPLY"] in (e["output"] or "") for e in d["timeline"]["events"])' \
+      'next(" ".join((e["output"] or "").split())[-120:] for e in d["timeline"]["events"] if e["kind"] == "tool" and e["title"] == "get_vendor")'
     check '  the trial reaches vendor-directory neither directly nor through the proxy' 200 \
       'any("REACH_DONE" in (e["output"] or "") and "direct=" in e["output"] and "=401" not in e["output"] and "=405" not in e["output"] and "=200" not in e["output"] for e in d["timeline"]["events"] if e["kind"] == "tool")' \
       '" ".join(next(e["output"] for e in d["timeline"]["events"] if e["kind"] == "tool" and "REACH_DONE" in (e["output"] or "")).split())'
@@ -855,16 +878,21 @@ elif need 'ledger experiment' "$LEDGER_EXP" && settles 'ledger' "$LEDGER_EXP" 2 
     check '  with-ledger: list_invoices twice on invoice-db, the second with the cursor' 200 \
       '[(e["server"], json.loads(e["input"] or "{}").get("cursor")) for e in d["timeline"]["events"] if e["kind"] == "tool" and e["title"] == "list_invoices"] == [("invoice-db", None), ("invoice-db", env["CURSOR2"])] and sc(d, "paged")["status"] == "passed"' \
       '"; ".join("{} {} chars{}".format(e["title"], e["outputChars"], " (the timeline keeps 5,000)" if e["truncated"] else "") for e in d["timeline"]["events"] if e["kind"] == "tool")'
+    check '  with-ledger: get_invoice answered the probe with its not-found reply' 200 \
+      'any(e["kind"] == "tool" and e["title"] == "get_invoice" and env["LEDGER_REPLY"] in (e["output"] or "") for e in d["timeline"]["events"])' \
+      'next(" ".join((e["output"] or "").split())[-120:] for e in d["timeline"]["events"] if e["kind"] == "tool" and e["title"] == "get_invoice")'
     # A stdio server's values reach it from the worker's environment, by name.
     check '  config.yaml: invoice-db started in the trial, INVOICE_DB_URL by reference' 200 \
       '"command: invoice-db-mcp" in d["launchRecord"]["configYaml"] and "INVOICE_DB_URL: <from env INVOICE_DB_URL>" in d["launchRecord"]["configYaml"] and "file:///" not in d["launchRecord"]["configYaml"]' \
       'next(s["definition"] for s in d["launchRecord"]["container"]["mcpServers"] if s["name"] == "invoice-db").replace("\n", " ")'
   fi
   if [ "$DOCKER" = 1 ] && mock_requests "$WORK/mock.json"; then
-    # The model's last request holds both pages as Hermes handed them over.
+    # The model's last request, the one the probe's reply answered, holds
+    # both pages as Hermes handed them over (beside the terminal's and the
+    # probe's results).
     check_file '  the pages as the model got them: 20 + 20 invoices, the next cursors' "$WORK/mock.json" \
-      '[([i["invoice_no"] for i in p["invoices"]], p["next_cursor"]) for p in [mcp_result(m["content"]) for m in [x for x in d[int(env["MOCK_FROM"]):] if x["script"] == env["CURSOR3"]][-1]["body"]["messages"] if m["role"] == "tool"]] == [(["INV-{}".format(1001 + i) for i in range(20)], env["CURSOR2"]), (["INV-{}".format(1021 + i) for i in range(20)], env["CURSOR3"])]' \
-      '" · ".join("{} invoices {}..{}, next_cursor {}".format(len(p["invoices"]), p["invoices"][0]["invoice_no"], p["invoices"][-1]["invoice_no"], p["next_cursor"]) for p in [mcp_result(m["content"]) for m in [x for x in d[int(env["MOCK_FROM"]):] if x["script"] == env["CURSOR3"]][-1]["body"]["messages"] if m["role"] == "tool"])'
+      '[([i["invoice_no"] for i in p["invoices"]], p["next_cursor"]) for p in [mcp_result(m["content"]) for m in [x for x in d[int(env["MOCK_FROM"]):] if x["script"] == env["LEDGER_REPLY"]][-1]["body"]["messages"] if m["role"] == "tool" and "{\"result\"" in m["content"]]] == [(["INV-{}".format(1001 + i) for i in range(20)], env["CURSOR2"]), (["INV-{}".format(1021 + i) for i in range(20)], env["CURSOR3"])]' \
+      '" · ".join("{} invoices {}..{}, next_cursor {}".format(len(p["invoices"]), p["invoices"][0]["invoice_no"], p["invoices"][-1]["invoice_no"], p["next_cursor"]) for p in [mcp_result(m["content"]) for m in [x for x in d[int(env["MOCK_FROM"]):] if x["script"] == env["LEDGER_REPLY"]][-1]["body"]["messages"] if m["role"] == "tool" and "{\"result\"" in m["content"]])'
   elif [ "$DOCKER" = 1 ]; then
     fail '  the pages as the model got them' 'could not read the mock log'
   fi
@@ -877,7 +905,9 @@ section 'An http header variable egress lacks (S7): egress recreated without VEN
 # Only when egress's token is the one Compose gives it from this shell and
 # .env (compared by hash), so recreating egress puts it back as it was, and
 # when no trial is running, since every trial's traffic goes through egress.
-if [ "$DOCKER" = 1 ] && [ "$SMOKE_RESTART" != 0 ] && [ "$TOKEN_SET" = true ]; then
+if [ "$SMOKE_RESTART" != 1 ]; then
+  skip 'egress without VENDOR_DIRECTORY_TOKEN' 'opt-in, it recreates egress: run with SMOKE_RESTART=1 (and the docker checks) to include it'
+elif [ "$DOCKER" = 1 ] && [ "$TOKEN_SET" = true ]; then
   read -r RUNNING_HASH COMPOSED_HASH <<<"$(token_hashes)"
   request GET /system/workers
   BUSY="$(jv 'sum(w["slotsInUse"] for w in d if w["status"] == "online")' 2>/dev/null || echo '?')"
@@ -922,7 +952,7 @@ if [ "$DOCKER" = 1 ] && [ "$SMOKE_RESTART" != 0 ] && [ "$TOKEN_SET" = true ]; th
 elif [ "$TOKEN_SET" != true ]; then
   skip 'egress without VENDOR_DIRECTORY_TOKEN' 'egress has no token to take away (the vendors 409 above stands in)'
 else
-  skip 'egress without VENDOR_DIRECTORY_TOKEN' 'needs the docker checks and SMOKE_RESTART (recreates egress)'
+  skip 'egress without VENDOR_DIRECTORY_TOKEN' 'needs the docker checks (SMOKE_RESTART=1 is set)'
 fi
 
 # ---------------------------------------------------------------------------

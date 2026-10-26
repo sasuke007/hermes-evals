@@ -1,0 +1,13 @@
+summary: An invoice the database does not hold, which must come back as null
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: record
+verification:
+  - key: answer
+    type: exact_match
+    primary: true
+    params: { path: record }

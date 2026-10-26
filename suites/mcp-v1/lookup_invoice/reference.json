@@ -1,0 +1,12 @@
+{
+  "invoice": {
+    "invoice_no": "INV-1040",
+    "vendor_name": "Harbor Analytics",
+    "invoice_date": "2026-04-16",
+    "due_date": "2026-05-31",
+    "amount": 2111.83,
+    "currency": "USD",
+    "po_number": null,
+    "status": "open"
+  }
+}

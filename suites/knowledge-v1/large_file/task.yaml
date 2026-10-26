@@ -1,0 +1,19 @@
+summary: Closing balance of a 5,000-record BX-7 statement with reversals
+limits:
+  max_turns: 20
+  run_budget_seconds: 600
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: closing_balance
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: closing_balance, abs: 0.01 }
+  # Hermes matches arguments exactly and the agent spells the command, so this
+  # checks that a program read the file (bx7.py, or one the agent wrote), not
+  # which one.
+  - key: runs_program
+    type: trajectory_match
+    params: { tool: terminal, min_calls: 1 }

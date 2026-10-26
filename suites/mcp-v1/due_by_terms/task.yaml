@@ -1,0 +1,13 @@
+summary: Due dates of eight undated invoices from each vendor's payment terms in the vendor directory
+limits:
+  max_turns: 30
+  run_budget_seconds: 600
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: due_dates
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: due_dates }

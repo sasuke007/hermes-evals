@@ -1,0 +1,13 @@
+summary: Money out of a statement named like a BX-6 export whose header says BX07
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: money_out
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: money_out, abs: 0.01 }

@@ -7,3 +7,8 @@ insert_final_newline = true
 indent_style = space
 indent_size = 2
 trim_trailing_whitespace = true
+
+# knowledge-v1's BX statements are fixed-width lines padded with spaces
+# (scripts/fixtures/knowledge-v1.ts writes them; its --check catches a change).
+[*.{bx7,bx}]
+trim_trailing_whitespace = false

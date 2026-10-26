@@ -1,0 +1,18 @@
+summary: One invoice's record, which is billed in USD and cites no purchase order
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: invoice
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: invoice, exclude_keys: [notes] }
+  # With invoice-db, one invoice is one get_invoice call; listing the ledger to
+  # find it fails this key. Without the server (docs-export) it passes by absence.
+  - key: direct_lookup
+    type: trajectory_match
+    params: { tool: mcp__invoice_db__list_invoices, min_calls: 0, max_calls: 0 }

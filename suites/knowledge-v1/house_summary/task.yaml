@@ -1,0 +1,24 @@
+summary: Monthly review of a BX-7 statement written in the house style
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+verification:
+  - key: style
+    type: llm_judge
+    primary: true
+    params: { rubric: rubric.md, pass_at: 0.7 }
+  - key: title_format
+    type: text_match
+    params:
+      path: title
+      pattern: '^Statement review: account ending [0-9]{4}, (January|February|March|April|May|June|July|August|September|October|November|December) [0-9]{4}$'
+      case_sensitive: true
+  - key: date_format
+    type: text_match
+    params:
+      path: summary
+      pattern: '\b[1-9][0-9]? (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4}\b'
+      case_sensitive: true

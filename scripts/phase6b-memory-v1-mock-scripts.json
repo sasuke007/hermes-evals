@@ -1,0 +1,277 @@
+[
+  {
+    "match": "ref mv1-s01",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/rates.json"
+        }
+      },
+      {
+        "content": "You report in EUR, so I converted every unpaid invoice into EUR.\n\n```json\n{\"currency\":\"EUR\",\"total\":61409.62}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s02",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/vendors.csv"
+        }
+      },
+      {
+        "content": "Northmoor Trading Ltd is Brackenfield Paper's other name, so its invoices count there.\n\n```json\n{\"outstanding_by_vendor\":{\"Brackenfield Paper\":32374.36,\"Cindervale Software\":11941.44,\"Dunmore Catering\":13587.04,\"Elmshade Cleaning\":10306.78,\"Fennick Electrical\":10950.8,\"Gorsebank Freight\":1333.12,\"Hollin Print Works\":5235.17}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s03",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "As usual, Quellbrook Labs GmbH is left out: group treasury settles it.\n\n```json\n{\"payables\":{\"Ardent Couriers\":4842.15,\"Brackenfield Paper\":7865.8,\"Cindervale Software\":3173.18,\"Dunmore Catering\":380.69,\"Elmshade Cleaning\":8238.25,\"Fennick Electrical\":9875.11,\"Gorsebank Freight\":3537.03,\"Hollin Print Works\":12988.39}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s04",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/rates.json"
+        }
+      },
+      {
+        "content": "You usually report in EUR, but this figure is for the US auditors, so it is in USD.\n\n```json\n{\"currency\":\"USD\",\"total\":54442.31}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s05",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/vat_rates.json"
+        }
+      },
+      {
+        "content": "My notes say 19 %, but the table puts the rate at 22 % from 2026-01-01, which covers every invoice here.\n\n```json\n{\"vat_total\":14673.34}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s06",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "My notes book Gorsebank Freight to CC-4471.\n\n```json\n{\"cost_centres\":{\"INV-06016\":\"CC-4471\",\"INV-06017\":\"CC-4471\",\"INV-06018\":\"CC-4471\",\"INV-06019\":\"CC-4471\"}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s07",
+    "steps": [
+      {
+        "tool": "memory",
+        "arguments": {
+          "action": "add",
+          "target": "user",
+          "content": "Copy ap-approvals@quellbrook.example on every email drafted to a vendor."
+        }
+      },
+      {
+        "content": "Saved to your profile for future sessions.\n\n```json\n{\"remembered\":\"Copy ap-approvals@quellbrook.example on every email drafted to a vendor.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "ref mv1-s08",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the draft.\n\n```json\n{\"subject\":\"Fennick Electrical: overdue invoices\",\"body\":\"Hello Fennick Electrical accounts team,\\n\\nI hope you are well. Our records show these invoices from you as overdue:\\n\\n- INV-08002, due 2026-08-09, 4514.50 EUR\\n- INV-08001, due 2026-09-07, 1703.76 EUR\\n- INV-08003, due 2026-10-02, 7602.07 EUR\\n\\nTogether they come to 13820.33 EUR. Could you confirm this balance on your side, so we can settle it in our next payment run?\\n\\nThank you, and best regards,\\nInes, Accounts Payable, Quellbrook Instruments\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t01",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/rates.json"
+        }
+      },
+      {
+        "content": "I do not know your usual currency, so here is the total in GBP, the base of the rates.\n\n```json\n{\"currency\":\"GBP\",\"total\":53251.49}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t02",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/vendors.csv"
+        }
+      },
+      {
+        "content": "Northmoor Trading Ltd is in no account of vendors.csv, so it has an entry of its own.\n\n```json\n{\"outstanding_by_vendor\":{\"Brackenfield Paper\":19534.62,\"Cindervale Software\":11941.44,\"Dunmore Catering\":13587.04,\"Elmshade Cleaning\":10306.78,\"Fennick Electrical\":10950.8,\"Gorsebank Freight\":1333.12,\"Hollin Print Works\":5235.17,\"Northmoor Trading Ltd\":12839.74}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t03",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Every vendor with unpaid invoices.\n\n```json\n{\"payables\":{\"Ardent Couriers\":4842.15,\"Brackenfield Paper\":7865.8,\"Cindervale Software\":3173.18,\"Dunmore Catering\":380.69,\"Elmshade Cleaning\":8238.25,\"Fennick Electrical\":9875.11,\"Gorsebank Freight\":3537.03,\"Hollin Print Works\":12988.39,\"Quellbrook Labs GmbH\":11308.64}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t04",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/rates.json"
+        }
+      },
+      {
+        "content": "The total in USD.\n\n```json\n{\"currency\":\"USD\",\"total\":54442.31}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t05",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/vat_rates.json"
+        }
+      },
+      {
+        "content": "Every invoice is from 2026, at 22 %.\n\n```json\n{\"vat_total\":14673.34}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t06",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "The ledger has no cost centres, and I have no note of them.\n\n```json\n{\"cost_centres\":{\"INV-06016\":null,\"INV-06017\":null,\"INV-06018\":null,\"INV-06019\":null}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t07",
+    "steps": [
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/preferences.md",
+          "content": "# Preferences\n\n- Copy ap-approvals@quellbrook.example on every email drafted to a vendor.\n"
+        }
+      },
+      {
+        "content": "I have no memory tool here, so I wrote it to preferences.md.\n\n```json\n{\"remembered\":\"Copy ap-approvals@quellbrook.example on every email drafted to a vendor.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Ticket mv1-t08",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/invoices.csv"
+        }
+      },
+      {
+        "content": "Here is the draft.\n\n```json\n{\"subject\":\"Fennick Electrical: overdue invoices\",\"body\":\"Hello Fennick Electrical accounts team,\\n\\nI hope you are well. Our records show these invoices from you as overdue:\\n\\n- INV-08002, due 2026-08-09, 4514.50 EUR\\n- INV-08001, due 2026-09-07, 1703.76 EUR\\n- INV-08003, due 2026-10-02, 7602.07 EUR\\n\\nTogether they come to 13820.33 EUR. Could you confirm this balance on your side, so we can settle it in our next payment run?\\n\\nThank you, and best regards,\\nAccounts Payable\"}\n```"
+      }
+    ]
+  }
+]

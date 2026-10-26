@@ -1,0 +1,303 @@
+[
+  {
+    "match": "Summary of statement_2026_06.bx7",
+    "steps": [
+      {
+        "content": "{\"score\":0.2,\"comment\":\"The figures are there, but the title, the dates and the amounts ignore the house style.\"}"
+      }
+    ]
+  },
+  {
+    "match": "Statement review: account ending 7700, June 2026",
+    "steps": [
+      {
+        "content": "{\"score\":0.9,\"comment\":\"The title, the dates, the amounts and the layout follow the house style, and the figures match the reference.\"}"
+      }
+    ]
+  },
+  {
+    "match": "What did the team spend on travel in September 2026?",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/expenses.csv"
+        }
+      },
+      {
+        "content": "I added up the September travel claims of expenses.csv.\n\n```json\n{\"travel_september\":1422.24}\n```"
+      }
+    ]
+  },
+  {
+    "match": "file statement_2026_03.bx7: format BX07,",
+    "steps": [
+      {
+        "content": "I read statement_2026_03.bx7 with bx7.py and applied the BX-7 rules.\n\n```json\n{\"closing_balance\":2127.19}\n```"
+      }
+    ]
+  },
+  {
+    "match": "file statement_2026_04.bx7: format BX07,",
+    "steps": [
+      {
+        "content": "I read statement_2026_04.bx7 with bx7.py and applied the BX-7 rules.\n\n```json\n{\"record_counts\":{\"movements\":38,\"reversals\":4,\"records\":45}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "file statement_2026_q2.bx7: format BX07,",
+    "steps": [
+      {
+        "content": "I read statement_2026_q2.bx7 with bx7.py and applied the BX-7 rules.\n\n```json\n{\"closing_balance\":2031264.84}\n```"
+      }
+    ]
+  },
+  {
+    "match": "file treasury_export.bx: format BX07,",
+    "steps": [
+      {
+        "content": "I read treasury_export.bx with bx7.py and applied the BX-7 rules.\n\n```json\n{\"money_out\":36472.2}\n```"
+      }
+    ]
+  },
+  {
+    "match": "file ledger_view_2026_07.bx7: format BX07,",
+    "steps": [
+      {
+        "content": "I read ledger_view_2026_07.bx7 with bx7.py and, as the prompt says, took W as money in and V as money out.\n\n```json\n{\"movements\":{\"money_in\":62631.56,\"money_out\":44551.94}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "kv1-bx7-codes",
+    "steps": [
+      {
+        "content": "I read statement_2026_05.bx7 with bx7.py and looked up the class of each reason code in codes.md.\n\n```json\n{\"fees_by_code\":{\"K52\":43.88,\"K55\":17.4,\"K58\":24.91,\"X84\":24.67}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "kv1-summary-template",
+    "steps": [
+      {
+        "content": "The review follows the house style: its title, the layout of three points and a source line, and the way it writes dates and amounts.\n\n```json\n{\"title\":\"Statement review: account ending 7700, June 2026\",\"summary\":\"- Period 1 Jun 2026 to 30 Jun 2026. Opening balance EUR 34,315.67, closing balance EUR 45,318.78.\\n- Money in EUR 32,987.63 over 8 movements. Money out EUR -21,984.52 over 18 movements.\\n- Largest movement out: EUR -5,455.85 on 25 Jun 2026.\\n\\nSource: statement_2026_06.bx7.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "file statement_2026_05.bx7: format BX07,",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /opt/data/skills/bx7-format/codes.md 2>/dev/null || cat /workspace/docs/codes.md"
+        }
+      }
+    ]
+  },
+  {
+    "match": "file statement_2026_06.bx7: format BX07,",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "cat /opt/data/skills/house-style/templates/summary-template.md 2>/dev/null || cat /workspace/docs/summary-template.md"
+        }
+      }
+    ]
+  },
+  {
+    "match": "kv1-bx7-format",
+    "steps": [
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "python3 /opt/data/skills/bx7-format/scripts/bx7.py /workspace/*.bx* 2>/dev/null || python3 /workspace/docs/bx7.py /workspace/*.bx*"
+        }
+      }
+    ]
+  },
+  {
+    "match": "What is the closing balance of statement_2026_03.bx7?",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/statement_2026_03.bx7"
+        }
+      },
+      {
+        "content": "Here is my reading of statement_2026_03.bx7.\n\n```json\n{\"closing_balance\":15363.31}\n```"
+      }
+    ]
+  },
+  {
+    "match": "How many records does statement_2026_04.bx7 hold?",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/statement_2026_04.bx7"
+        }
+      },
+      {
+        "content": "Here is my reading of statement_2026_04.bx7.\n\n```json\n{\"record_counts\":{\"movements\":46,\"reversals\":5,\"records\":54}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "What is the closing balance of statement_2026_q2.bx7?",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/statement_2026_q2.bx7"
+        }
+      },
+      {
+        "content": "Here is my reading of statement_2026_q2.bx7.\n\n```json\n{\"closing_balance\":2298679.7}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Which fee codes does statement_2026_05.bx7 use, and what is the total of each?",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/statement_2026_05.bx7"
+        }
+      },
+      {
+        "content": "Here is my reading of statement_2026_05.bx7.\n\n```json\n{\"fees_by_code\":{\"K52\":43.88}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "How much money went out of the account in treasury_export.bx?",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/treasury_export.bx"
+        }
+      },
+      {
+        "content": "Here is my reading of treasury_export.bx.\n\n```json\n{\"money_out\":5646.42}\n```"
+      }
+    ]
+  },
+  {
+    "match": "Write the monthly statement review of statement_2026_06.bx7",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/statement_2026_06.bx7"
+        }
+      },
+      {
+        "content": "Here is my reading of statement_2026_06.bx7.\n\n```json\n{\"title\":\"Summary of statement_2026_06.bx7\",\"summary\":\"Account 8245167700, 2026-06-01 to 2026-06-30. Opening balance 34315.67 EUR, closing balance 45318.78 EUR. Money in 32987.63 EUR (8 movements), money out 21984.52 EUR (18 movements). Largest payment 5455.85 EUR on 2026-06-25.\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "How much money arrived in our account over the period of ledger_view_2026_07.bx7, and how much left it?",
+    "steps": [
+      {
+        "tool": "skill_view",
+        "arguments": {
+          "name": "bx7-format"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/bx7-spec.md"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/ledger_view_2026_07.bx7"
+        }
+      },
+      {
+        "content": "Here is my reading of ledger_view_2026_07.bx7.\n\n```json\n{\"movements\":{\"money_in\":44551.94,\"money_out\":62631.56}}\n```"
+      }
+    ]
+  }
+]

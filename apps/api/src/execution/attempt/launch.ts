@@ -13,7 +13,10 @@
  * (materialise.ts). `preload` passes `-s <name>` per skill, so Hermes loads
  * each into the session at start; `on_demand` passes none, and the plan has
  * already added the `skills` toolset (plannedToolsets, lifecycle/plan.ts),
- * so the agent lists and opens them itself.
+ * so the agent lists and opens them itself. With memory on the plan has
+ * added the `memory` toolset the same way, so the agent can save to the
+ * stores memory puts in its prompt. Either toolset shows in the record's
+ * argv (`-t`) and config.yaml (`toolsets`), both built from that one list.
  */
 import type { LaunchContainerRecord, LaunchRecord } from '@hermes-evals/shared';
 import {

@@ -1,0 +1,13 @@
+summary: The distinct valid IBANs mentioned in 300 log lines
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: ibans
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: ibans, unordered: true }

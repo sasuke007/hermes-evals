@@ -9,11 +9,12 @@
  * of the attempt's MAX_COLLECTED_BYTES after the workspace).
  *
  * Each regular file becomes an artifact with root `home` and a path relative
- * to the home (`memories/MEMORY.md`), labelled against the home seeds the way
- * workspace files are labelled against the fixtures: `home_seed_unchanged`,
- * `home_seed_modified`, or `agent` for a file no seed placed. A missing
- * memories/ folder (memory off, nothing written, no seed) is no artifact and
- * no error.
+ * to the home (`memories/MEMORY.md`), except the memory tool's empty `*.lock`
+ * files, which are skipped (collect-files.ts isMemoryLockFile, Phase 6 #2).
+ * Each is labelled against the home seeds the way workspace files are
+ * labelled against the fixtures: `home_seed_unchanged`, `home_seed_modified`,
+ * or `agent` for a file no seed placed. A missing memories/ folder (memory
+ * off, nothing written, no seed) is no artifact and no error.
  */
 import { lstat, readlink } from 'node:fs/promises';
 import { join } from 'node:path';

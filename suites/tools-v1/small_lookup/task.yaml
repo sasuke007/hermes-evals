@@ -1,0 +1,13 @@
+summary: The bin of one product in a small catalog, a control
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: bin
+verification:
+  - key: answer
+    type: exact_match
+    primary: true
+    params: { path: bin }

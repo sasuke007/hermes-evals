@@ -1,0 +1,267 @@
+# Written by scripts/fixtures/tools-v1.ts (tools-v1/reshape.ts), never by hand: the primary
+# file_check's schema holds every SKU's entry, computed from fixtures/inventory.json.
+summary: Reshape a nested stock export into one entry per SKU, written to a file
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+verification:
+  - key: stock_file
+    type: file_check
+    primary: true
+    params:
+      path: stock_by_sku.json
+      format: json
+      json_schema:
+        type: object
+        required:
+          - SKU-10001
+          - SKU-10002
+          - SKU-10003
+          - SKU-10004
+          - SKU-10005
+          - SKU-10006
+          - SKU-10007
+          - SKU-10008
+          - SKU-10009
+          - SKU-10010
+          - SKU-10011
+          - SKU-10012
+          - SKU-10013
+          - SKU-10014
+          - SKU-10015
+          - SKU-10016
+          - SKU-10017
+          - SKU-10018
+          - SKU-10019
+          - SKU-10020
+          - SKU-10021
+          - SKU-10022
+          - SKU-10023
+          - SKU-10024
+          - SKU-10025
+          - SKU-10026
+          - SKU-10027
+          - SKU-10028
+          - SKU-10029
+          - SKU-10030
+          - SKU-10031
+          - SKU-10032
+          - SKU-10033
+          - SKU-10034
+          - SKU-10035
+          - SKU-10036
+          - SKU-10037
+          - SKU-10038
+          - SKU-10039
+          - SKU-10040
+          - SKU-10041
+          - SKU-10042
+          - SKU-10043
+          - SKU-10044
+          - SKU-10045
+          - SKU-10046
+          - SKU-10047
+          - SKU-10048
+          - SKU-10049
+          - SKU-10050
+          - SKU-10051
+          - SKU-10052
+          - SKU-10053
+          - SKU-10054
+          - SKU-10055
+          - SKU-10056
+          - SKU-10057
+          - SKU-10058
+          - SKU-10059
+          - SKU-10060
+          - SKU-10061
+          - SKU-10062
+          - SKU-10063
+          - SKU-10064
+          - SKU-10065
+          - SKU-10066
+          - SKU-10067
+          - SKU-10068
+          - SKU-10069
+          - SKU-10070
+          - SKU-10071
+          - SKU-10072
+          - SKU-10073
+          - SKU-10074
+          - SKU-10075
+          - SKU-10076
+          - SKU-10077
+          - SKU-10078
+          - SKU-10079
+          - SKU-10080
+          - SKU-10081
+          - SKU-10082
+          - SKU-10083
+          - SKU-10084
+          - SKU-10085
+          - SKU-10086
+          - SKU-10087
+          - SKU-10088
+          - SKU-10089
+          - SKU-10090
+          - SKU-10091
+          - SKU-10092
+          - SKU-10093
+          - SKU-10094
+          - SKU-10095
+          - SKU-10096
+          - SKU-10097
+          - SKU-10098
+          - SKU-10099
+          - SKU-10100
+          - SKU-10101
+          - SKU-10102
+          - SKU-10103
+          - SKU-10104
+          - SKU-10105
+          - SKU-10106
+          - SKU-10107
+          - SKU-10108
+          - SKU-10109
+          - SKU-10110
+          - SKU-10111
+          - SKU-10112
+          - SKU-10113
+          - SKU-10114
+          - SKU-10115
+          - SKU-10116
+          - SKU-10117
+          - SKU-10118
+          - SKU-10119
+          - SKU-10120
+        additionalProperties: false
+        properties:
+          SKU-10001: { const: { total: 94, warehouses: { AMS: 53, BCN: 33, DUB: 8 } } }
+          SKU-10002: { const: { total: 106, warehouses: { AMS: 12, BCN: 57, DUB: 37 } } }
+          SKU-10003: { const: { total: 119, warehouses: { AMS: 56, BCN: 29, DUB: 34 } } }
+          SKU-10004: { const: { total: 38, warehouses: { AMS: 30, BCN: 2, DUB: 6 } } }
+          SKU-10005: { const: { total: 126, warehouses: { AMS: 56, BCN: 38, DUB: 32 } } }
+          SKU-10006: { const: { total: 66, warehouses: { AMS: 11, BCN: 18, DUB: 37 } } }
+          SKU-10007: { const: { total: 28, warehouses: { DUB: 28 } } }
+          SKU-10008: { const: { total: 111, warehouses: { AMS: 28, BCN: 40, DUB: 43 } } }
+          SKU-10009: { const: { total: 52, warehouses: { DUB: 52 } } }
+          SKU-10010: { const: { total: 55, warehouses: { AMS: 37, BCN: 17, DUB: 1 } } }
+          SKU-10011: { const: { total: 44, warehouses: { DUB: 44 } } }
+          SKU-10012: { const: { total: 86, warehouses: { AMS: 61, BCN: 11, DUB: 14 } } }
+          SKU-10013: { const: { total: 82, warehouses: { AMS: 10, BCN: 36, DUB: 36 } } }
+          SKU-10014: { const: { total: 43, warehouses: { DUB: 43 } } }
+          SKU-10015: { const: { total: 85, warehouses: { AMS: 44, BCN: 3, DUB: 38 } } }
+          SKU-10016: { const: { total: 75, warehouses: { AMS: 23, BCN: 3, DUB: 49 } } }
+          SKU-10017: { const: { total: 146, warehouses: { AMS: 40, BCN: 72, DUB: 34 } } }
+          SKU-10018: { const: { total: 23, warehouses: { DUB: 23 } } }
+          SKU-10019: { const: { total: 149, warehouses: { AMS: 17, BCN: 62, DUB: 70 } } }
+          SKU-10020: { const: { total: 44, warehouses: { DUB: 44 } } }
+          SKU-10021: { const: { total: 79, warehouses: { AMS: 27, BCN: 36, DUB: 16 } } }
+          SKU-10022: { const: { total: 145, warehouses: { AMS: 48, BCN: 39, DUB: 58 } } }
+          SKU-10023: { const: { total: 107, warehouses: { AMS: 22, BCN: 49, DUB: 36 } } }
+          SKU-10024: { const: { total: 97, warehouses: { AMS: 43, BCN: 49, DUB: 5 } } }
+          SKU-10025: { const: { total: 22, warehouses: { DUB: 22 } } }
+          SKU-10026: { const: { total: 160, warehouses: { AMS: 67, BCN: 71, DUB: 22 } } }
+          SKU-10027: { const: { total: 54, warehouses: { AMS: 21, BCN: 21, DUB: 12 } } }
+          SKU-10028: { const: { total: 98, warehouses: { AMS: 36, BCN: 25, DUB: 37 } } }
+          SKU-10029: { const: { total: 150, warehouses: { AMS: 46, BCN: 41, DUB: 63 } } }
+          SKU-10030: { const: { total: 8, warehouses: { DUB: 8 } } }
+          SKU-10031: { const: { total: 115, warehouses: { AMS: 12, BCN: 34, DUB: 69 } } }
+          SKU-10032: { const: { total: 98, warehouses: { AMS: 61, BCN: 28, DUB: 9 } } }
+          SKU-10033: { const: { total: 126, warehouses: { AMS: 48, BCN: 52, DUB: 26 } } }
+          SKU-10034: { const: { total: 30, warehouses: { AMS: 2, BCN: 15, DUB: 13 } } }
+          SKU-10035: { const: { total: 139, warehouses: { AMS: 55, BCN: 29, DUB: 55 } } }
+          SKU-10036: { const: { total: 73, warehouses: { AMS: 20, BCN: 20, DUB: 33 } } }
+          SKU-10037: { const: { total: 56, warehouses: { AMS: 33, BCN: 11, DUB: 12 } } }
+          SKU-10038: { const: { total: 98, warehouses: { AMS: 49, BCN: 9, DUB: 40 } } }
+          SKU-10039: { const: { total: 52, warehouses: { AMS: 16, BCN: 30, DUB: 6 } } }
+          SKU-10040: { const: { total: 82, warehouses: { AMS: 17, BCN: 34, DUB: 31 } } }
+          SKU-10041: { const: { total: 133, warehouses: { AMS: 24, BCN: 38, DUB: 71 } } }
+          SKU-10042: { const: { total: 50, warehouses: { DUB: 50 } } }
+          SKU-10043: { const: { total: 95, warehouses: { AMS: 25, BCN: 50, DUB: 20 } } }
+          SKU-10044: { const: { total: 124, warehouses: { AMS: 42, BCN: 46, DUB: 36 } } }
+          SKU-10045: { const: { total: 117, warehouses: { AMS: 25, BCN: 35, DUB: 57 } } }
+          SKU-10046: { const: { total: 55, warehouses: { AMS: 33, BCN: 21, DUB: 1 } } }
+          SKU-10047: { const: { total: 10, warehouses: { AMS: 2, BCN: 7, DUB: 1 } } }
+          SKU-10048: { const: { total: 121, warehouses: { AMS: 42, BCN: 55, DUB: 24 } } }
+          SKU-10049: { const: { total: 69, warehouses: { AMS: 37, BCN: 21, DUB: 11 } } }
+          SKU-10050: { const: { total: 87, warehouses: { AMS: 32, BCN: 40, DUB: 15 } } }
+          SKU-10051: { const: { total: 110, warehouses: { AMS: 16, BCN: 32, DUB: 62 } } }
+          SKU-10052: { const: { total: 119, warehouses: { AMS: 41, BCN: 65, DUB: 13 } } }
+          SKU-10053: { const: { total: 64, warehouses: { DUB: 64 } } }
+          SKU-10054: { const: { total: 20, warehouses: { DUB: 20 } } }
+          SKU-10055: { const: { total: 61, warehouses: { AMS: 19, BCN: 38, DUB: 4 } } }
+          SKU-10056: { const: { total: 21, warehouses: { DUB: 21 } } }
+          SKU-10057: { const: { total: 13, warehouses: { DUB: 13 } } }
+          SKU-10058: { const: { total: 149, warehouses: { AMS: 59, BCN: 55, DUB: 35 } } }
+          SKU-10059: { const: { total: 32, warehouses: { DUB: 32 } } }
+          SKU-10060: { const: { total: 130, warehouses: { AMS: 8, BCN: 59, DUB: 63 } } }
+          SKU-10061: { const: { total: 112, warehouses: { AMS: 55, BCN: 22, DUB: 35 } } }
+          SKU-10062: { const: { total: 114, warehouses: { AMS: 18, BCN: 36, DUB: 60 } } }
+          SKU-10063: { const: { total: 100, warehouses: { AMS: 52, BCN: 10, DUB: 38 } } }
+          SKU-10064: { const: { total: 81, warehouses: { AMS: 40, BCN: 7, DUB: 34 } } }
+          SKU-10065: { const: { total: 104, warehouses: { AMS: 34, BCN: 48, DUB: 22 } } }
+          SKU-10066: { const: { total: 34, warehouses: { DUB: 34 } } }
+          SKU-10067: { const: { total: 106, warehouses: { AMS: 31, BCN: 54, DUB: 21 } } }
+          SKU-10068: { const: { total: 86, warehouses: { AMS: 37, BCN: 12, DUB: 37 } } }
+          SKU-10069: { const: { total: 116, warehouses: { AMS: 59, BCN: 33, DUB: 24 } } }
+          SKU-10070: { const: { total: 113, warehouses: { AMS: 37, BCN: 5, DUB: 71 } } }
+          SKU-10071: { const: { total: 84, warehouses: { AMS: 37, BCN: 35, DUB: 12 } } }
+          SKU-10072: { const: { total: 91, warehouses: { AMS: 36, BCN: 18, DUB: 37 } } }
+          SKU-10073: { const: { total: 63, warehouses: { AMS: 26, BCN: 24, DUB: 13 } } }
+          SKU-10074: { const: { total: 100, warehouses: { AMS: 25, BCN: 42, DUB: 33 } } }
+          SKU-10075: { const: { total: 96, warehouses: { AMS: 39, BCN: 27, DUB: 30 } } }
+          SKU-10076: { const: { total: 50, warehouses: { DUB: 50 } } }
+          SKU-10077: { const: { total: 94, warehouses: { AMS: 19, BCN: 49, DUB: 26 } } }
+          SKU-10078: { const: { total: 40, warehouses: { DUB: 40 } } }
+          SKU-10079: { const: { total: 137, warehouses: { AMS: 38, BCN: 40, DUB: 59 } } }
+          SKU-10080: { const: { total: 73, warehouses: { AMS: 19, BCN: 44, DUB: 10 } } }
+          SKU-10081: { const: { total: 49, warehouses: { AMS: 17, BCN: 15, DUB: 17 } } }
+          SKU-10082: { const: { total: 83, warehouses: { AMS: 28, BCN: 34, DUB: 21 } } }
+          SKU-10083: { const: { total: 101, warehouses: { AMS: 10, BCN: 32, DUB: 59 } } }
+          SKU-10084: { const: { total: 59, warehouses: { AMS: 4, BCN: 21, DUB: 34 } } }
+          SKU-10085: { const: { total: 78, warehouses: { AMS: 10, BCN: 35, DUB: 33 } } }
+          SKU-10086: { const: { total: 189, warehouses: { AMS: 51, BCN: 68, DUB: 70 } } }
+          SKU-10087: { const: { total: 62, warehouses: { AMS: 3, BCN: 48, DUB: 11 } } }
+          SKU-10088: { const: { total: 36, warehouses: { DUB: 36 } } }
+          SKU-10089: { const: { total: 70, warehouses: { AMS: 4, BCN: 55, DUB: 11 } } }
+          SKU-10090: { const: { total: 109, warehouses: { AMS: 59, BCN: 26, DUB: 24 } } }
+          SKU-10091: { const: { total: 107, warehouses: { AMS: 31, BCN: 65, DUB: 11 } } }
+          SKU-10092: { const: { total: 71, warehouses: { AMS: 24, BCN: 37, DUB: 10 } } }
+          SKU-10093: { const: { total: 118, warehouses: { AMS: 49, BCN: 44, DUB: 25 } } }
+          SKU-10094: { const: { total: 93, warehouses: { AMS: 39, BCN: 16, DUB: 38 } } }
+          SKU-10095: { const: { total: 51, warehouses: { AMS: 41, BCN: 3, DUB: 7 } } }
+          SKU-10096: { const: { total: 61, warehouses: { AMS: 23, BCN: 37, DUB: 1 } } }
+          SKU-10097: { const: { total: 102, warehouses: { AMS: 21, BCN: 59, DUB: 22 } } }
+          SKU-10098: { const: { total: 58, warehouses: { AMS: 24, BCN: 26, DUB: 8 } } }
+          SKU-10099: { const: { total: 127, warehouses: { AMS: 67, BCN: 33, DUB: 27 } } }
+          SKU-10100: { const: { total: 114, warehouses: { AMS: 26, BCN: 49, DUB: 39 } } }
+          SKU-10101: { const: { total: 55, warehouses: { AMS: 19, BCN: 8, DUB: 28 } } }
+          SKU-10102: { const: { total: 42, warehouses: { AMS: 10, BCN: 10, DUB: 22 } } }
+          SKU-10103: { const: { total: 79, warehouses: { AMS: 46, BCN: 30, DUB: 3 } } }
+          SKU-10104: { const: { total: 93, warehouses: { AMS: 22, BCN: 65, DUB: 6 } } }
+          SKU-10105: { const: { total: 44, warehouses: { AMS: 1, BCN: 24, DUB: 19 } } }
+          SKU-10106: { const: { total: 111, warehouses: { AMS: 60, BCN: 31, DUB: 20 } } }
+          SKU-10107: { const: { total: 95, warehouses: { AMS: 41, BCN: 22, DUB: 32 } } }
+          SKU-10108: { const: { total: 154, warehouses: { AMS: 40, BCN: 53, DUB: 61 } } }
+          SKU-10109: { const: { total: 5, warehouses: { DUB: 5 } } }
+          SKU-10110: { const: { total: 66, warehouses: { AMS: 29, BCN: 29, DUB: 8 } } }
+          SKU-10111: { const: { total: 106, warehouses: { AMS: 25, BCN: 45, DUB: 36 } } }
+          SKU-10112: { const: { total: 96, warehouses: { AMS: 20, BCN: 46, DUB: 30 } } }
+          SKU-10113: { const: { total: 30, warehouses: { DUB: 30 } } }
+          SKU-10114: { const: { total: 130, warehouses: { AMS: 31, BCN: 75, DUB: 24 } } }
+          SKU-10115: { const: { total: 81, warehouses: { AMS: 3, BCN: 20, DUB: 58 } } }
+          SKU-10116: { const: { total: 132, warehouses: { AMS: 28, BCN: 40, DUB: 64 } } }
+          SKU-10117: { const: { total: 67, warehouses: { AMS: 6, BCN: 25, DUB: 36 } } }
+          SKU-10118: { const: { total: 99, warehouses: { AMS: 46, BCN: 50, DUB: 3 } } }
+          SKU-10119: { const: { total: 94, warehouses: { AMS: 32, BCN: 48, DUB: 14 } } }
+          SKU-10120: { const: { total: 69, warehouses: { AMS: 32, BCN: 12, DUB: 25 } } }
+  - key: quantities
+    type: verifier_script
+    params: { script: check_stock.py, timeout_s: 30 }
+self_check:
+  expected_workspace: expected
+  negative_control: true

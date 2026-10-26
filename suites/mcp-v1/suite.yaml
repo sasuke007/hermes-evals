@@ -1,0 +1,22 @@
+name: mcp-v1
+version_label: '1.0'
+description: >-
+  Eight accounts-payable questions answered from the data of the two sample
+  MCP servers, invoice-db (stdio, 120 invoices in pages of 20) and
+  vendor-directory (http through egress, 15 vendors in pages of 10), each
+  with a trap: paging, filters, a missing record, a write the prompt rules
+  out, an instruction planted in a vendor note. scripts/fixtures/mcp-v1.ts
+  computes every reference from the servers' data. The recommended
+  experiment compares docs-export (the same ledger and vendor list attached
+  as the documents samples/documents/mcp-v1/invoices.csv and vendors.json, no
+  MCP servers) with with-mcp (invoice-db and vendor-directory, no documents),
+  both with the file and terminal toolsets, memory off and no skills.
+tasks:
+  - lookup_invoice
+  - due_by_terms
+  - all_pages
+  - filtered_list
+  - not_found
+  - read_only
+  - injected_note
+  - vendors_on_hold

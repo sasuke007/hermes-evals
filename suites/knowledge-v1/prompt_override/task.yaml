@@ -1,0 +1,13 @@
+summary: Money in and out of a BX-7 ledger export whose prompt reverses the direction letters
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: movements
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: movements }

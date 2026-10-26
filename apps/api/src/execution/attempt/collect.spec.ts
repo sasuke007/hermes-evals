@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, open, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MAX_ARTIFACT_BYTES } from '../../sandbox/trial-files.js';
 import { BlobStore } from '../../storage/blob-store.js';
-import { collectWorkspace } from './collect.js';
+import { isMemoryLockFile } from './collect-files.js';
+import { collectTrialFiles, collectWorkspace } from './collect.js';
 import type { InputFile } from './materialise.js';
 
 const sha = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
@@ -185,5 +186,81 @@ describe('collectWorkspace', () => {
       },
     ]);
     expect(event.payload).toMatchObject({ stored_bytes: fixture.length, new_bytes: 0 });
+  });
+});
+
+describe('collectTrialFiles: the memory tool’s lock files (Phase 6 #2)', () => {
+  const SEED = 'Works in Lisbon.';
+  const SAVED = `${SEED}\n§\nPrefers reports in EUR.`;
+
+  it('skips *.lock under memories/ and keeps every other file, *.bak.* included', async () => {
+    const home = join(dir, 'home');
+    const memories = join(home, 'memories');
+    await mkdir(join(memories, 'archive'), { recursive: true });
+    await writeFile(join(memories, 'USER.md'), SAVED);
+    // What Hermes's memory tool leaves beside the stores it wrote, and its drift snapshot.
+    await writeFile(join(memories, 'USER.md.lock'), '');
+    await writeFile(join(memories, 'MEMORY.md.lock'), '');
+    await writeFile(join(memories, 'USER.md.bak.1761400000'), SEED);
+    await writeFile(join(memories, 'archive', 'old.lock'), 'not empty, still a lock file');
+    await writeFile(join(memories, 'notes.lock.md'), 'a note, not a lock');
+    await symlink(join(memories, 'USER.md'), join(memories, 'link.lock'));
+    // The rule is the home's: a workspace file of the same kind and path is an artifact.
+    await mkdir(join(workspace, 'memories'), { recursive: true });
+    await writeFile(join(workspace, 'memories', 'build.lock'), '');
+
+    const { artifacts, event } = await collectTrialFiles({
+      workspace,
+      home,
+      manifest: new Map(),
+      homeSeeds: [{ path: 'memories/USER.md', sha256: sha(SEED), size: SEED.length }],
+      blobs,
+    });
+    expect(artifacts.map((a) => [a.root, a.path, a.origin])).toEqual([
+      ['workspace', 'memories/build.lock', 'agent'],
+      ['home', 'memories/USER.md', 'home_seed_modified'],
+      ['home', 'memories/USER.md.bak.1761400000', 'agent'],
+      ['home', 'memories/notes.lock.md', 'agent'],
+    ]);
+    expect(event.payload).toMatchObject({
+      files: 1,
+      home_files: 3,
+      home_agent_files: 2,
+      // A link is never collected, whatever its name: it stays listed.
+      home_not_collected: [{ path: 'home/memories/link.lock', kind: 'symlink' }],
+      home_not_collected_count: 1,
+      deleted_home_seeds: [],
+    });
+  });
+
+  it('collects nothing from a memories/ folder that holds only lock files', async () => {
+    const home = join(dir, 'home');
+    await mkdir(join(home, 'memories'), { recursive: true });
+    await writeFile(join(home, 'memories', 'USER.md.lock'), '');
+    const { artifacts, event } = await collectTrialFiles({
+      workspace,
+      home,
+      manifest: new Map(),
+      homeSeeds: [],
+      blobs,
+    });
+    expect(artifacts).toEqual([]);
+    expect(event.payload).toMatchObject({ home_files: 0, home_not_collected: [] });
+  });
+
+  it('names a lock file by its .lock ending, under memories/ only', () => {
+    expect(isMemoryLockFile('memories/USER.md.lock')).toBe(true);
+    expect(isMemoryLockFile('memories/a/b.lock')).toBe(true);
+    for (const kept of [
+      'memories/USER.md',
+      'memories/USER.md.bak.1761400000',
+      'memories/USER.lock.md',
+      'memories/lock',
+      'memories/USER.md.LOCK',
+      'skills/x.lock',
+      'USER.md.lock',
+    ]) {
+      expect(isMemoryLockFile(kept), kept).toBe(false);
+    }
   });
 });

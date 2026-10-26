@@ -1,0 +1,19 @@
+summary: One vendor's unpaid invoices, open and disputed alike
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: unpaid
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: unpaid, unordered: true }
+  # With invoice-db, the vendor_name filter answers in one or two listings;
+  # paging the whole ledger takes six, the status filter alone four. Without
+  # the server (docs-export) it passes by absence.
+  - key: used_filter
+    type: trajectory_match
+    params: { tool: mcp__invoice_db__list_invoices, min_calls: 0, max_calls: 3 }

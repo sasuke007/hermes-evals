@@ -1,0 +1,20 @@
+name: knowledge-v1
+version_label: '1.0'
+description: >-
+  Eight tasks that need knowledge no model has: seven about bank statements
+  in BX-7, an invented fixed-width format, read against a house style and
+  beside the older BX-6 decoy, and one plain CSV sum as a control. The
+  fixtures are generated with a fixed seed by scripts/fixtures/knowledge-v1.ts,
+  which also computes every reference. The recommended experiment compares
+  four configurations that differ only in how the same knowledge arrives: none;
+  the documents of samples/documents/knowledge-v1; the skills bx7-format,
+  house-style and bx6-format preloaded; and the same skills on demand.
+tasks:
+  - closing_balance
+  - record_counts
+  - large_file
+  - reason_codes
+  - pick_version
+  - house_summary
+  - prompt_override
+  - unrelated

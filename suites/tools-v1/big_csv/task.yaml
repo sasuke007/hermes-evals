@@ -1,0 +1,13 @@
+summary: Total of the settled transactions in a 20,000-row CSV
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: settled_total
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: settled_total, abs: 0.01 }

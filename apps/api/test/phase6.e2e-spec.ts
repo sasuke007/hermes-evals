@@ -16,8 +16,9 @@
  *   the `skills` toolset, the skill still installed in the home.
  * - Unset MCP variables (decision #13 of phase-5.md 6.4): launch answers 409
  *   naming each, and New experiment's options show them.
- * - invoices-v1 (the repository's copy) loads 12 of 12 valid through the
- *   worker's loader, beside the e2e suite.
+ * - The repository's five suites (invoices-v1, and Phase 6b's mcp-v1,
+ *   memory-v1, knowledge-v1 and tools-v1) load valid through the worker's
+ *   loader at start, beside the e2e suite: 42 tasks.
  *
  *   TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e
  */
@@ -64,6 +65,8 @@ import {
 
 const SERVER_URL = process.env.TEST_DATABASE_URL;
 const REPO = join(import.meta.dirname, '..', '..', '..');
+/** The repository's suites (plan 18.1 and 18.3). */
+const REPO_SUITES = ['invoices-v1', 'mcp-v1', 'memory-v1', 'knowledge-v1', 'tools-v1'];
 const { artifacts, experiments, taskFiles, tasks } = schema;
 
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -109,10 +112,10 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
     delete process.env['PHASE6_E2E_LEDGER_URL'];
     delete process.env['VENDOR_DIRECTORY_TOKEN'];
     await world.start();
-    // The repository's invoices-v1 beside the e2e suite: the worker loads both at start.
-    await cp(join(REPO, 'suites', 'invoices-v1'), join(world.suitesDir, 'invoices-v1'), {
-      recursive: true,
-    });
+    // The repository's suites beside the e2e suite: the worker loads them all at start.
+    for (const name of REPO_SUITES) {
+      await cp(join(REPO, 'suites', name), join(world.suitesDir, name), { recursive: true });
+    }
     await world.startWorker();
   }, 180_000);
 
@@ -133,12 +136,16 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
 
   const scoreOf = (run: RunDetail, key: string) => run.scores.find((s) => s.key === key);
 
-  it("loads the e2e suite and invoices-v1 through the worker's loader", async () => {
+  it("loads the e2e suite and the repository's five suites through the worker's loader", async () => {
     const list = await world.read('/suites', z.array(SuiteListRowSchema));
     const counts = list.map((s) => [s.name, s.taskCount, s.validCount] as const);
     expect(counts.sort((a, b) => a[0].localeCompare(b[0]))).toEqual([
       ['invoices-v1', 12, 12],
+      ['knowledge-v1', 8, 8],
+      ['mcp-v1', 8, 8],
+      ['memory-v1', 8, 8],
       ['phase6', 1, 1],
+      ['tools-v1', 6, 6],
     ]);
     const invoices = list.find((s) => s.name === 'invoices-v1')!;
     const detail = await world.read(`/suites/${invoices.suiteId}`, SuiteDetailSchema);
@@ -302,6 +309,10 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
     ] as const) {
       const seen = trials.of(run.id)!;
       expect(seen.memoryEnabled).toBe(memoryEnabled);
+      // Phase 6 #1: memory on adds the memory toolset at launch, once.
+      expect(toolsetsOf(seen.argv)).toEqual(
+        memoryEnabled ? ['file', 'memory', 'terminal'] : ['file', 'terminal'],
+      );
       expect(seen.memories).toEqual(SEEDS);
       expect(run.launchRecord?.homeSeeds).toEqual([
         { path: 'memories/MEMORY.md', sha256: sha(SEEDS['memories/MEMORY.md']) },

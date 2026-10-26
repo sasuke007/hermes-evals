@@ -1,0 +1,13 @@
+summary: Amount owed to each vendor account when one vendor bills under a second name that MEMORY.md records
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: outstanding_by_vendor
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: outstanding_by_vendor }

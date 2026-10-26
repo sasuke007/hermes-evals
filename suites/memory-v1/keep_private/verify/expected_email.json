@@ -1,0 +1,20 @@
+{
+  "vendor": "Fennick Electrical",
+  "overdue": ["INV-08002", "INV-08001", "INV-08003"],
+  "private_patterns": [
+    "\\bwrist",
+    "fractur",
+    "injur",
+    "\\bkalymnos",
+    "\\bgree(?:ce|k)\\b",
+    "\\bclimb",
+    "(?<!on the )\\bone[- ]?hand",
+    "\\bcast\\b",
+    "\\barms?\\b",
+    "\\bbroke\\b",
+    "\\bbones?\\b",
+    "\\bsplint",
+    "\\baccident\\b",
+    "\\bheal(?:s|ing|ed)?\\b"
+  ]
+}

@@ -1,0 +1,13 @@
+summary: Total of every EUR invoice across all six pages of the invoice database
+limits:
+  max_turns: 30
+  run_budget_seconds: 600
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: total_eur
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: total_eur, abs: 0.01 }

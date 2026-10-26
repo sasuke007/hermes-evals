@@ -289,7 +289,14 @@ describe('skill loading (Phase 6 P5)', () => {
     );
 
   it('preloads each skill with -s and adds no toolset', () => {
-    const p = plan({ skills, toolsets: plannedToolsets(['terminal', 'file'], 'preload') });
+    const p = plan({
+      skills,
+      memoryEnabled: false,
+      toolsets: plannedToolsets(['terminal', 'file'], {
+        skillLoading: 'preload',
+        memoryEnabled: false,
+      }),
+    });
     const cmd = hermesChatCmd(p);
     expect(argOf(cmd, '-t')).toBe('file,terminal,invoice-db,vendor');
     expect(cmd.filter((_, i) => cmd[i - 1] === '-s')).toEqual(['invoice-method', 'vendor-terms']);
@@ -297,12 +304,13 @@ describe('skill loading (Phase 6 P5)', () => {
   });
 
   it('on demand passes no -s and lists the skills toolset once, in -t and config.yaml alike', () => {
-    const toolsets = plannedToolsets(['terminal', 'file'], 'on_demand');
+    const onDemand = { skillLoading: 'on_demand', memoryEnabled: false } as const;
+    const toolsets = plannedToolsets(['terminal', 'file'], onDemand);
     expect(toolsets).toEqual(['file', 'skills', 'terminal']);
     // A version that already enables the toolset gets it once.
-    expect(plannedToolsets(['skills', 'file', 'skills'], 'on_demand')).toEqual(['file', 'skills']);
+    expect(plannedToolsets(['skills', 'file', 'skills'], onDemand)).toEqual(['file', 'skills']);
 
-    const p = plan({ skills, skillLoading: 'on_demand', toolsets });
+    const p = plan({ skills, skillLoading: 'on_demand', memoryEnabled: false, toolsets });
     const cmd = hermesChatCmd(p);
     expect(cmd).not.toContain('-s');
     expect(argOf(cmd, '-t')).toBe('file,skills,terminal,invoice-db,vendor');
@@ -334,5 +342,47 @@ describe('skill loading (Phase 6 P5)', () => {
         record.background_review!.skill_creation_nudge_interval,
       ]);
     }
+  });
+});
+
+describe('the memory toolset (Phase 6 #1)', () => {
+  const argOf = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
+  /** The launch of a plan whose toolsets the plan derived from these settings, as buildAttemptPlan does. */
+  const launchWith = (memoryEnabled: boolean, stored = ['terminal', 'file']) => {
+    const p = plan({
+      memoryEnabled,
+      mcpServers: [],
+      toolsets: plannedToolsets(stored, { skillLoading: 'preload', memoryEnabled }),
+    });
+    const launch = buildTrialLaunch(
+      p,
+      { configYaml: configYaml(attemptConfig(p)), inputs: [], values: {} },
+      SETTINGS,
+    );
+    return { cmd: hermesChatCmd(p), record: LaunchRecordSchema.parse(launch.record) };
+  };
+  const configOf = (yaml: string) =>
+    parse(yaml) as { toolsets: string[]; memory: { memory_enabled: boolean } };
+
+  it('memory on: the record shows the memory toolset in argv and config.yaml, with memory enabled', () => {
+    const { cmd, record } = launchWith(true);
+    expect(argOf(cmd, '-t')).toBe('file,memory,terminal');
+    expect(argOf(record.argv, '-t')).toBe('file,memory,terminal');
+    const config = configOf(record.config_yaml);
+    expect(config.toolsets).toEqual(['file', 'memory', 'terminal']);
+    expect(config.memory.memory_enabled).toBe(true);
+    // Listed by the version already: still once.
+    expect(argOf(launchWith(true, ['memory', 'file', 'terminal']).cmd, '-t')).toBe(
+      'file,memory,terminal',
+    );
+  });
+
+  it('memory off: no memory toolset added, in argv or config.yaml', () => {
+    const { cmd, record } = launchWith(false);
+    expect(argOf(cmd, '-t')).toBe('file,terminal');
+    expect(argOf(record.argv, '-t')).toBe('file,terminal');
+    const config = configOf(record.config_yaml);
+    expect(config.toolsets).toEqual(['file', 'terminal']);
+    expect(config.memory.memory_enabled).toBe(false);
   });
 });

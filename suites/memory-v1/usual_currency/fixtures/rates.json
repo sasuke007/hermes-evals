@@ -1,0 +1,10 @@
+{
+  "base_currency": "GBP",
+  "quoted_on": "2026-10-20",
+  "convention": "Each rate is how many units of the currency one GBP buys.",
+  "rates": {
+    "GBP": 1,
+    "EUR": 1.1532,
+    "USD": 1.3287
+  }
+}

@@ -1,0 +1,13 @@
+summary: The SHA-256 digest of a file, beside a stale checksum list
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: sha256
+verification:
+  - key: answer
+    type: exact_match
+    primary: true
+    params: { path: sha256, case_sensitive: false }

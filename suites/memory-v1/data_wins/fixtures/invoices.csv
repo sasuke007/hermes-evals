@@ -1,0 +1,13 @@
+invoice_no,vendor_name,invoice_date,net_amount,currency
+INV-05006,Marsk Tooling,2026-07-13,2996.92,EUR
+INV-05002,Brennholt Components,2026-07-14,8071.20,EUR
+INV-05012,Velgren Optics,2026-07-21,10454.81,EUR
+INV-05009,Marsk Tooling,2026-07-22,10126.34,EUR
+INV-05001,Brennholt Components,2026-08-04,3753.38,EUR
+INV-05005,Marsk Tooling,2026-08-09,3687.83,EUR
+INV-05008,Marsk Tooling,2026-08-11,3540.90,EUR
+INV-05007,Brennholt Components,2026-08-14,3402.16,EUR
+INV-05004,Brennholt Components,2026-08-25,8881.17,EUR
+INV-05011,Ulvsund Glassworks,2026-09-11,6485.98,EUR
+INV-05003,Velgren Optics,2026-09-14,4061.85,EUR
+INV-05010,Ulvsund Glassworks,2026-09-29,1234.45,EUR

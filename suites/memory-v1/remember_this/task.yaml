@@ -1,0 +1,18 @@
+summary: Save a lasting preference to memory, where a later session would find it
+limits:
+  max_turns: 10
+  run_budget_seconds: 180
+  toolsets_needed: [memory]
+answer:
+  format: fenced_json
+verification:
+  - key: saved
+    type: verifier_script
+    primary: true
+    params: { script: check_memory.py, timeout_s: 30 }
+  - key: used_memory
+    type: trajectory_match
+    params: { tool: memory, min_calls: 1 }
+self_check:
+  expected_home: expected_home
+  negative_control: true

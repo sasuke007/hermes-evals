@@ -1,0 +1,32 @@
+invoice_no,vendor_name,invoice_date,due_date,amount,currency,status
+INV-03020,Elmshade Cleaning,2026-07-05,2026-08-04,2240.14,EUR,open
+INV-03010,Quellbrook Labs GmbH,2026-07-06,2026-08-05,5959.69,EUR,open
+INV-03030,Hollin Print Works,2026-07-16,2026-08-15,5614.44,EUR,open
+INV-03029,Dunmore Catering,2026-07-20,2026-08-19,8039.72,EUR,paid
+INV-03007,Fennick Electrical,2026-07-21,2026-08-20,7818.89,EUR,open
+INV-03027,Dunmore Catering,2026-07-23,2026-08-22,4468.61,EUR,paid
+INV-03018,Elmshade Cleaning,2026-07-24,2026-08-23,4555.22,EUR,paid
+INV-03023,Cindervale Software,2026-07-25,2026-08-24,3173.18,EUR,open
+INV-03001,Brackenfield Paper,2026-08-08,2026-09-07,7865.80,EUR,open
+INV-03013,Ardent Couriers,2026-08-10,2026-09-09,4842.15,EUR,open
+INV-03026,Gorsebank Freight,2026-08-13,2026-09-12,2008.10,EUR,paid
+INV-03009,Quellbrook Labs GmbH,2026-08-16,2026-09-15,691.46,EUR,open
+INV-03003,Brackenfield Paper,2026-08-17,2026-09-16,6376.44,EUR,paid
+INV-03022,Cindervale Software,2026-08-17,2026-09-16,2792.47,EUR,paid
+INV-03019,Elmshade Cleaning,2026-08-25,2026-09-24,5998.11,EUR,open
+INV-03028,Dunmore Catering,2026-08-30,2026-09-29,380.69,EUR,open
+INV-03012,Quellbrook Labs GmbH,2026-08-31,2026-09-30,4578.11,EUR,paid
+INV-03014,Ardent Couriers,2026-09-03,2026-10-03,5249.01,EUR,paid
+INV-03017,Elmshade Cleaning,2026-09-06,2026-10-06,1925.73,EUR,paid
+INV-03004,Brackenfield Paper,2026-09-08,2026-10-08,5361.07,EUR,paid
+INV-03015,Ardent Couriers,2026-09-10,2026-10-10,6937.57,EUR,paid
+INV-03011,Quellbrook Labs GmbH,2026-09-13,2026-10-13,4657.49,EUR,open
+INV-03006,Fennick Electrical,2026-09-22,2026-10-22,2784.36,EUR,paid
+INV-03002,Brackenfield Paper,2026-09-23,2026-10-23,3798.28,EUR,paid
+INV-03005,Fennick Electrical,2026-09-24,2026-10-24,2056.22,EUR,open
+INV-03024,Gorsebank Freight,2026-09-26,2026-10-26,3537.03,EUR,open
+INV-03031,Hollin Print Works,2026-09-26,2026-10-26,7373.95,EUR,open
+INV-03021,Cindervale Software,2026-09-30,2026-10-30,6510.03,EUR,paid
+INV-03025,Gorsebank Freight,2026-10-02,2026-11-01,7851.75,EUR,paid
+INV-03008,Fennick Electrical,2026-10-03,2026-11-02,2957.86,EUR,paid
+INV-03016,Ardent Couriers,2026-10-09,2026-11-08,7683.68,EUR,paid

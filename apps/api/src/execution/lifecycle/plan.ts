@@ -55,21 +55,41 @@ const FIXTURES_PREFIX = 'fixtures/';
 
 /** The Hermes toolset whose tools (skills_list, skill_view) find installed skills. */
 export const SKILLS_TOOLSET = 'skills';
+/** The Hermes toolset whose `memory` tool saves entries to MEMORY.md and USER.md. */
+export const MEMORY_TOOLSET = 'memory';
+
+/** The settings of a configuration version that add a toolset at launch. */
+export interface ToolsetSettings {
+  skillLoading: SkillLoadingMode;
+  memoryEnabled: boolean;
+}
 
 /**
  * The toolsets a trial runs with: the version's, sorted and de-duplicated,
- * plus `skills` when its skills load on demand (Phase 6 P5), once even if the
- * version already enables it. With no `-s`, the skills toolset is how the
- * agent finds them: Hermes indexes home/skills/ in the prompt only when one
- * of its tools is on (agent/system_prompt.py _skills_prompt), and opens one
- * with skill_view. The `-t` list and config.yaml's `toolsets` are both built
- * from this list, so the two agree.
+ * plus each toolset a setting needs, once even if the version already
+ * enables it. The `-t` list and config.yaml's `toolsets` are both built from
+ * this list, so the two agree, and the launch record shows it in both.
+ *
+ * - `skills` when the skills load on demand (Phase 6 P5). With no `-s`, the
+ *   skills toolset is how the agent finds them: Hermes indexes home/skills/
+ *   in the prompt only when one of its tools is on
+ *   (agent/system_prompt.py _skills_prompt), and opens one with skill_view.
+ * - `memory` when memory is on (Phase 6 #1, settled for Phase 6b). Memory on
+ *   puts the stores in the prompt, but Hermes's `memory` tool, the only way
+ *   to save to them, is in the `memory` toolset, so without it the agent
+ *   reads its memory and cannot write it (docs/phases/phase-6.md 2.5, 5.5).
+ *   Memory off adds nothing and removes nothing: Hermes hides the tool while
+ *   memory is off whatever `-t` lists.
+ *
+ * Both are derived here, at launch, from settings the version already
+ * stores, so the configuration hash (configurations/settings.ts configHash,
+ * over the stored toolsets) is unchanged by them.
  */
-export function plannedToolsets(
-  toolsets: readonly string[],
-  skillLoading: SkillLoadingMode,
-): string[] {
-  const extra = skillLoading === 'on_demand' ? [SKILLS_TOOLSET] : [];
+export function plannedToolsets(toolsets: readonly string[], settings: ToolsetSettings): string[] {
+  const extra = [
+    ...(settings.skillLoading === 'on_demand' ? [SKILLS_TOOLSET] : []),
+    ...(settings.memoryEnabled ? [MEMORY_TOOLSET] : []),
+  ];
   return [...new Set([...toolsets, ...extra])].sort();
 }
 
@@ -224,7 +244,7 @@ export async function buildAttemptPlan(
       model: cv.model,
       provider: cv.provider,
       baseUrl: cv.baseUrl,
-      toolsets: plannedToolsets(cv.toolsets, cv.skillLoading),
+      toolsets: plannedToolsets(cv.toolsets, cv),
       memoryEnabled: cv.memoryEnabled,
       skills: inOrderOf(cv.skillIds, skillRows),
       // The CHECKs keep on_demand to versions with skills (migration 0008).

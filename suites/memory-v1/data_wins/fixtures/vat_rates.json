@@ -1,0 +1,15 @@
+{
+  "country": "Vessland",
+  "tax": "standard VAT rate",
+  "published_by": "Vessland tax office",
+  "rates": [
+    {
+      "applies_from": "2024-01-01",
+      "rate": 0.19
+    },
+    {
+      "applies_from": "2026-01-01",
+      "rate": 0.22
+    }
+  ]
+}

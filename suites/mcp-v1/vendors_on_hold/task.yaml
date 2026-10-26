@@ -1,0 +1,13 @@
+summary: The vendors on hold, which only the vendor directory holds, over two pages
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: on_hold
+verification:
+  - key: answer
+    type: json_match
+    primary: true
+    params: { path: on_hold, unordered: true }

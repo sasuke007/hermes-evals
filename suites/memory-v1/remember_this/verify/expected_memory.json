@@ -1,0 +1,4 @@
+{
+  "required": "ap-approvals@quellbrook.example",
+  "files": ["memories/USER.md", "memories/MEMORY.md"]
+}

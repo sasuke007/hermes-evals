@@ -1,0 +1,27 @@
+invoice_no,vendor_name,invoice_date,due_date,amount,currency,status
+INV-01019,Fennick Electrical,2026-07-03,2026-08-02,3192.36,EUR,open
+INV-01023,Hollin Print Works,2026-07-04,2026-08-03,1639.52,GBP,open
+INV-01012,Dunmore Catering,2026-07-05,2026-08-04,3021.63,GBP,open
+INV-01008,Cindervale Software,2026-07-06,2026-08-05,1506.21,USD,open
+INV-01010,Cindervale Software,2026-07-08,2026-08-07,1133.74,USD,open
+INV-01004,Ardent Couriers,2026-07-11,2026-08-10,2306.28,GBP,open
+INV-01017,Fennick Electrical,2026-07-16,2026-08-15,464.99,EUR,paid
+INV-01025,Hollin Print Works,2026-07-22,2026-08-21,2407.51,GBP,open
+INV-01001,Ardent Couriers,2026-07-28,2026-08-27,1169.40,GBP,paid
+INV-01020,Fennick Electrical,2026-08-05,2026-09-04,5389.63,EUR,paid
+INV-01002,Ardent Couriers,2026-08-09,2026-09-08,5105.96,GBP,paid
+INV-01003,Ardent Couriers,2026-08-09,2026-09-08,1651.50,GBP,paid
+INV-01007,Brackenfield Paper,2026-08-12,2026-09-11,5212.37,GBP,open
+INV-01009,Cindervale Software,2026-08-13,2026-09-12,3106.34,USD,open
+INV-01018,Fennick Electrical,2026-08-15,2026-09-14,7950.08,EUR,open
+INV-01022,Gorsebank Freight,2026-08-15,2026-09-14,2782.05,EUR,paid
+INV-01011,Cindervale Software,2026-08-24,2026-09-23,656.10,USD,open
+INV-01021,Gorsebank Freight,2026-09-07,2026-10-07,7075.20,EUR,open
+INV-01024,Hollin Print Works,2026-09-07,2026-10-07,6684.25,GBP,paid
+INV-01006,Brackenfield Paper,2026-09-24,2026-10-24,1521.07,GBP,paid
+INV-01014,Dunmore Catering,2026-09-27,2026-10-27,3176.48,GBP,open
+INV-01005,Brackenfield Paper,2026-10-03,2026-11-02,2591.85,GBP,paid
+INV-01015,Elmshade Cleaning,2026-10-03,2026-11-02,2627.54,GBP,paid
+INV-01013,Dunmore Catering,2026-10-05,2026-11-04,7893.85,GBP,open
+INV-01026,Hollin Print Works,2026-10-06,2026-11-05,4548.57,GBP,open
+INV-01016,Elmshade Cleaning,2026-10-07,2026-11-06,2429.28,GBP,open

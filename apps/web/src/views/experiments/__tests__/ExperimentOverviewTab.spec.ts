@@ -32,6 +32,9 @@ function words(w: VueWrapper, selector: string): string {
 
 describe('Overview · running (OverviewRunning)', () => {
   it('draws the header, the progress, the configurations and the feed', async () => {
+    // The elapsed clock counts on from the fetch: a stopped clock keeps it at the record's value
+    // however long the mount takes under load.
+    vi.useFakeTimers({ toFake: ['Date'] });
     const { wrapper: w } = await open(MVB);
     expect(w.get('h1').text()).toBe('MCP vs baseline, invoices-v1');
     expect(w.get('[data-testid=experiment-status]').attributes('data-status')).toBe('running');

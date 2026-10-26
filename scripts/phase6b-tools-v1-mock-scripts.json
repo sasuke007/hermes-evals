@@ -1,0 +1,259 @@
+[
+  {
+    "match": "tv1-big_csv-code=19957845.03",
+    "steps": [
+      {
+        "content": "I computed it with execute_code over the whole input.\n\n```json\n{\"settled_total\":19957845.03}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-big_csv-term=19957845.03",
+    "steps": [
+      {
+        "content": "I computed it in the terminal over the whole input.\n\n```json\n{\"settled_total\":19957845.03}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-extract_ibans-code=24:fe006fdc3e8c9947",
+    "steps": [
+      {
+        "content": "I computed it with execute_code over the whole input.\n\n```json\n{\"ibans\":[\"AT101581453717989126\",\"AT361180025155022068\",\"AT395976186064484387\",\"BE33455177852547\",\"BE33588002993885\",\"BE58528962921152\",\"DE10367940650051028033\",\"DE16490249955125858305\",\"DE88530956221310961167\",\"ES0837449901993274322498\",\"ES3241224640192126763048\",\"ES8144365832549118962758\",\"FR3253436507723315737502539\",\"FR9253924246843552225884892\",\"GB17TOGX62196057000345\",\"GB19NNZX42056449211920\",\"IT66M5516553182588450135050\",\"IT96X6195825785878983806831\",\"NL30TFMF1683563900\",\"NL35OZNP2532052463\",\"PL13150962913048427308838284\",\"PL66947161515957359376606750\",\"SE1947008248719137727333\",\"SE2142460558388725163092\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-extract_ibans-term=24:fe006fdc3e8c9947",
+    "steps": [
+      {
+        "content": "I computed it in the terminal over the whole input.\n\n```json\n{\"ibans\":[\"AT101581453717989126\",\"AT361180025155022068\",\"AT395976186064484387\",\"BE33455177852547\",\"BE33588002993885\",\"BE58528962921152\",\"DE10367940650051028033\",\"DE16490249955125858305\",\"DE88530956221310961167\",\"ES0837449901993274322498\",\"ES3241224640192126763048\",\"ES8144365832549118962758\",\"FR3253436507723315737502539\",\"FR9253924246843552225884892\",\"GB17TOGX62196057000345\",\"GB19NNZX42056449211920\",\"IT66M5516553182588450135050\",\"IT96X6195825785878983806831\",\"NL30TFMF1683563900\",\"NL35OZNP2532052463\",\"PL13150962913048427308838284\",\"PL66947161515957359376606750\",\"SE1947008248719137727333\",\"SE2142460558388725163092\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-reshape_json-code=120:10121",
+    "steps": [
+      {
+        "content": "I computed it with execute_code over the whole input.\n\n```json\n{\"stock_file\":\"stock_by_sku.json\",\"skus\":120}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-reshape_json-term=120:10121",
+    "steps": [
+      {
+        "content": "I computed it in the terminal over the whole input.\n\n```json\n{\"stock_file\":\"stock_by_sku.json\",\"skus\":120}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-checksum-code=c4761170f27d77e45e3fda38c9642b1602ede374d1f678638734b9a897c94f3f",
+    "steps": [
+      {
+        "content": "I computed it with execute_code over the whole input.\n\n```json\n{\"sha256\":\"c4761170f27d77e45e3fda38c9642b1602ede374d1f678638734b9a897c94f3f\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-checksum-term=c4761170f27d77e45e3fda38c9642b1602ede374d1f678638734b9a897c94f3f",
+    "steps": [
+      {
+        "content": "I computed it in the terminal over the whole input.\n\n```json\n{\"sha256\":\"c4761170f27d77e45e3fda38c9642b1602ede374d1f678638734b9a897c94f3f\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-join_three-code=488000.01",
+    "steps": [
+      {
+        "content": "I computed it with execute_code over the whole input.\n\n```json\n{\"total_eur\":488000.01}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-join_three-term=488000.01",
+    "steps": [
+      {
+        "content": "I computed it in the terminal over the whole input.\n\n```json\n{\"total_eur\":488000.01}\n```"
+      }
+    ]
+  },
+  {
+    "match": "PX-9326,Label printer,box of 5,B-16-3",
+    "steps": [
+      {
+        "content": "catalog.csv lists the product on this row.\n\n```json\n{\"bin\":\"B-16-3\"}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-big_csv.",
+    "steps": [
+      {
+        "tool": "execute_code",
+        "arguments": {
+          "code": "import csv\nwith open('/workspace/transactions.csv', newline='') as f:\n    cents = sum(round(float(r['amount']) * 100) for r in csv.DictReader(f) if r['status'] == 'settled')\nprint('tv1-big_csv-code=%d.%02d' % divmod(cents, 100))"
+        }
+      },
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "awk -F, 'NR > 1 && $4 == \"settled\" { s += $3 } END { printf \"tv1-big_csv-term=%.2f\\n\", s }' /workspace/transactions.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/transactions.csv"
+        }
+      },
+      {
+        "content": "I read transactions.csv with read_file and added up the settled rows it showed.\n\n```json\n{\"settled_total\":1977864.23}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-extract_ibans.",
+    "steps": [
+      {
+        "tool": "execute_code",
+        "arguments": {
+          "code": "import hashlib, re\nLENGTHS = {'AT': 20, 'BE': 16, 'DE': 22, 'ES': 24, 'FR': 27, 'GB': 22, 'IT': 27, 'NL': 18, 'PL': 28, 'SE': 24}\ntext = open('/workspace/payouts.log', encoding='utf-8').read()\nfound = set(re.findall(r'\\b[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}\\b', text))\nfound |= {m.replace(' ', '') for m in re.findall(r'\"([A-Z]{2}[0-9]{2}(?: [A-Z0-9]{1,4})+)\"', text)}\ndef valid(iban):\n    if LENGTHS.get(iban[:2]) != len(iban):\n        return False\n    return int(''.join(str(int(c, 36)) for c in iban[4:] + iban[:4])) % 97 == 1\nibans = sorted(i for i in found if valid(i))\nprint('tv1-extract_ibans-code=%d:%s' % (len(ibans), hashlib.sha256(','.join(ibans).encode()).hexdigest()[:16]))"
+        }
+      },
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "python3 - <<'PY'\nimport hashlib, re\nLENGTHS = {'AT': 20, 'BE': 16, 'DE': 22, 'ES': 24, 'FR': 27, 'GB': 22, 'IT': 27, 'NL': 18, 'PL': 28, 'SE': 24}\ntext = open('/workspace/payouts.log', encoding='utf-8').read()\nfound = set(re.findall(r'\\b[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}\\b', text))\nfound |= {m.replace(' ', '') for m in re.findall(r'\"([A-Z]{2}[0-9]{2}(?: [A-Z0-9]{1,4})+)\"', text)}\ndef valid(iban):\n    if LENGTHS.get(iban[:2]) != len(iban):\n        return False\n    return int(''.join(str(int(c, 36)) for c in iban[4:] + iban[:4])) % 97 == 1\nibans = sorted(i for i in found if valid(i))\nprint('tv1-extract_ibans-term=%d:%s' % (len(ibans), hashlib.sha256(','.join(ibans).encode()).hexdigest()[:16]))\nPY"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/payouts.log"
+        }
+      },
+      {
+        "content": "I listed every IBAN the log mentions; I had no way to run the mod-97 test on them.\n\n```json\n{\"ibans\":[\"AT101581453717989126\",\"AT361180025155022068\",\"AT395976186064484387\",\"BE33455177852547\",\"BE33588002993885\",\"BE58528962921152\",\"DE10367940650051028033\",\"DE16490249955125858305\",\"DE5879141319088402189\",\"DE88530956221310961167\",\"ES0837449901993274322498\",\"ES3241224640192126763048\",\"ES8144365832549118962758\",\"FR0360388545779078153243574\",\"FR3253436507723315737502539\",\"FR9253924246843552225884892\",\"GB17TOGX62196057000345\",\"GB19NNZX42056449211920\",\"IT20Z6590611760637633044015\",\"IT47Q6189792001381472475709\",\"IT66M5516553182588450135050\",\"IT96X6195825785878983806831\",\"NL30TFMF1683563900\",\"NL35OZNP2532052463\",\"PL13150962913048427308838284\",\"PL30976479329351037127868309\",\"PL66947161515957359376606750\",\"SE1947008248719137727333\",\"SE2142460558388725163092\",\"SE3275789444812966211444\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-reshape_json.",
+    "steps": [
+      {
+        "tool": "execute_code",
+        "arguments": {
+          "code": "import json\nwith open('/workspace/inventory.json') as f:\n    export = json.load(f)\nstock = {}\nfor warehouse in export['warehouses']:\n    for b in warehouse['bins']:\n        for item in b['items']:\n            entry = stock.setdefault(item['sku'], {'total': 0, 'warehouses': {}})\n            entry['total'] += item['qty']\n            held = entry['warehouses']\n            held[warehouse['code']] = held.get(warehouse['code'], 0) + item['qty']\nwith open('/workspace/stock_by_sku.json', 'w') as f:\n    json.dump(dict(sorted(stock.items())), f, indent=2)\nprint('tv1-reshape_json-code=%d:%d' % (len(stock), sum(e['total'] for e in stock.values())))"
+        }
+      },
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "python3 - <<'PY'\nimport json\nwith open('/workspace/inventory.json') as f:\n    export = json.load(f)\nstock = {}\nfor warehouse in export['warehouses']:\n    for b in warehouse['bins']:\n        for item in b['items']:\n            entry = stock.setdefault(item['sku'], {'total': 0, 'warehouses': {}})\n            entry['total'] += item['qty']\n            held = entry['warehouses']\n            held[warehouse['code']] = held.get(warehouse['code'], 0) + item['qty']\nwith open('/workspace/stock_by_sku.json', 'w') as f:\n    json.dump(dict(sorted(stock.items())), f, indent=2)\nprint('tv1-reshape_json-term=%d:%d' % (len(stock), sum(e['total'] for e in stock.values())))\nPY"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/inventory.json"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "/workspace/stock_by_sku.json",
+          "content": "{\"SKU-10001\":{\"total\":94,\"warehouses\":{\"AMS\":53,\"BCN\":33,\"DUB\":8}},\"SKU-10002\":{\"total\":99,\"warehouses\":{\"AMS\":12,\"BCN\":57,\"DUB\":30}},\"SKU-10003\":{\"total\":108,\"warehouses\":{\"AMS\":56,\"BCN\":29,\"DUB\":23}},\"SKU-10004\":{\"total\":38,\"warehouses\":{\"AMS\":30,\"BCN\":2,\"DUB\":6}},\"SKU-10005\":{\"total\":126,\"warehouses\":{\"AMS\":56,\"BCN\":38,\"DUB\":32}},\"SKU-10006\":{\"total\":66,\"warehouses\":{\"AMS\":11,\"BCN\":18,\"DUB\":37}},\"SKU-10008\":{\"total\":76,\"warehouses\":{\"AMS\":28,\"BCN\":40,\"DUB\":8}},\"SKU-10010\":{\"total\":55,\"warehouses\":{\"AMS\":37,\"BCN\":17,\"DUB\":1}},\"SKU-10012\":{\"total\":86,\"warehouses\":{\"AMS\":61,\"BCN\":11,\"DUB\":14}},\"SKU-10013\":{\"total\":82,\"warehouses\":{\"AMS\":10,\"BCN\":36,\"DUB\":36}},\"SKU-10015\":{\"total\":78,\"warehouses\":{\"AMS\":44,\"BCN\":3,\"DUB\":31}},\"SKU-10016\":{\"total\":47,\"warehouses\":{\"AMS\":23,\"BCN\":3,\"DUB\":21}},\"SKU-10017\":{\"total\":146,\"warehouses\":{\"AMS\":40,\"BCN\":72,\"DUB\":34}},\"SKU-10019\":{\"total\":149,\"warehouses\":{\"AMS\":17,\"BCN\":62,\"DUB\":70}},\"SKU-10021\":{\"total\":79,\"warehouses\":{\"AMS\":27,\"BCN\":36,\"DUB\":16}},\"SKU-10022\":{\"total\":106,\"warehouses\":{\"AMS\":48,\"BCN\":39,\"DUB\":19}},\"SKU-10023\":{\"total\":107,\"warehouses\":{\"AMS\":22,\"BCN\":49,\"DUB\":36}},\"SKU-10024\":{\"total\":97,\"warehouses\":{\"AMS\":43,\"BCN\":49,\"DUB\":5}},\"SKU-10026\":{\"total\":160,\"warehouses\":{\"AMS\":67,\"BCN\":71,\"DUB\":22}},\"SKU-10027\":{\"total\":54,\"warehouses\":{\"AMS\":21,\"BCN\":21,\"DUB\":12}},\"SKU-10028\":{\"total\":98,\"warehouses\":{\"AMS\":36,\"BCN\":25,\"DUB\":37}},\"SKU-10029\":{\"total\":124,\"warehouses\":{\"AMS\":46,\"BCN\":41,\"DUB\":37}},\"SKU-10031\":{\"total\":115,\"warehouses\":{\"AMS\":12,\"BCN\":34,\"DUB\":69}},\"SKU-10032\":{\"total\":97,\"warehouses\":{\"AMS\":61,\"BCN\":28,\"DUB\":8}},\"SKU-10033\":{\"total\":126,\"warehouses\":{\"AMS\":48,\"BCN\":52,\"DUB\":26}},\"SKU-10034\":{\"total\":30,\"warehouses\":{\"AMS\":2,\"BCN\":15,\"DUB\":13}},\"SKU-10035\":{\"total\":139,\"warehouses\":{\"AMS\":55,\"BCN\":29,\"DUB\":55}},\"SKU-10036\":{\"total\":73,\"warehouses\":{\"AMS\":20,\"BCN\":20,\"DUB\":33}},\"SKU-10037\":{\"total\":56,\"warehouses\":{\"AMS\":33,\"BCN\":11,\"DUB\":12}},\"SKU-10038\":{\"total\":98,\"warehouses\":{\"AMS\":49,\"BCN\":9,\"DUB\":40}},\"SKU-10039\":{\"total\":52,\"warehouses\":{\"AMS\":16,\"BCN\":30,\"DUB\":6}},\"SKU-10040\":{\"total\":82,\"warehouses\":{\"AMS\":17,\"BCN\":34,\"DUB\":31}},\"SKU-10041\":{\"total\":95,\"warehouses\":{\"AMS\":24,\"BCN\":38,\"DUB\":33}},\"SKU-10043\":{\"total\":90,\"warehouses\":{\"AMS\":25,\"BCN\":50,\"DUB\":15}},\"SKU-10044\":{\"total\":124,\"warehouses\":{\"AMS\":42,\"BCN\":46,\"DUB\":36}},\"SKU-10045\":{\"total\":89,\"warehouses\":{\"AMS\":25,\"BCN\":35,\"DUB\":29}},\"SKU-10046\":{\"total\":55,\"warehouses\":{\"AMS\":33,\"BCN\":21,\"DUB\":1}},\"SKU-10047\":{\"total\":10,\"warehouses\":{\"AMS\":2,\"BCN\":7,\"DUB\":1}},\"SKU-10048\":{\"total\":121,\"warehouses\":{\"AMS\":42,\"BCN\":55,\"DUB\":24}},\"SKU-10049\":{\"total\":69,\"warehouses\":{\"AMS\":37,\"BCN\":21,\"DUB\":11}},\"SKU-10050\":{\"total\":87,\"warehouses\":{\"AMS\":32,\"BCN\":40,\"DUB\":15}},\"SKU-10051\":{\"total\":82,\"warehouses\":{\"AMS\":16,\"BCN\":32,\"DUB\":34}},\"SKU-10052\":{\"total\":119,\"warehouses\":{\"AMS\":41,\"BCN\":65,\"DUB\":13}},\"SKU-10055\":{\"total\":61,\"warehouses\":{\"AMS\":19,\"BCN\":38,\"DUB\":4}},\"SKU-10058\":{\"total\":137,\"warehouses\":{\"AMS\":59,\"BCN\":55,\"DUB\":23}},\"SKU-10060\":{\"total\":102,\"warehouses\":{\"AMS\":8,\"BCN\":59,\"DUB\":35}},\"SKU-10061\":{\"total\":112,\"warehouses\":{\"AMS\":55,\"BCN\":22,\"DUB\":35}},\"SKU-10062\":{\"total\":90,\"warehouses\":{\"AMS\":18,\"BCN\":36,\"DUB\":36}},\"SKU-10063\":{\"total\":90,\"warehouses\":{\"AMS\":52,\"BCN\":10,\"DUB\":28}},\"SKU-10064\":{\"total\":81,\"warehouses\":{\"AMS\":40,\"BCN\":7,\"DUB\":34}},\"SKU-10065\":{\"total\":104,\"warehouses\":{\"AMS\":34,\"BCN\":48,\"DUB\":22}},\"SKU-10067\":{\"total\":106,\"warehouses\":{\"AMS\":31,\"BCN\":54,\"DUB\":21}},\"SKU-10068\":{\"total\":86,\"warehouses\":{\"AMS\":37,\"BCN\":12,\"DUB\":37}},\"SKU-10069\":{\"total\":115,\"warehouses\":{\"AMS\":59,\"BCN\":33,\"DUB\":23}},\"SKU-10070\":{\"total\":78,\"warehouses\":{\"AMS\":37,\"BCN\":5,\"DUB\":36}},\"SKU-10071\":{\"total\":84,\"warehouses\":{\"AMS\":37,\"BCN\":35,\"DUB\":12}},\"SKU-10072\":{\"total\":80,\"warehouses\":{\"AMS\":36,\"BCN\":18,\"DUB\":26}},\"SKU-10073\":{\"total\":63,\"warehouses\":{\"AMS\":26,\"BCN\":24,\"DUB\":13}},\"SKU-10074\":{\"total\":76,\"warehouses\":{\"AMS\":25,\"BCN\":42,\"DUB\":9}},\"SKU-10075\":{\"total\":96,\"warehouses\":{\"AMS\":39,\"BCN\":27,\"DUB\":30}},\"SKU-10077\":{\"total\":94,\"warehouses\":{\"AMS\":19,\"BCN\":49,\"DUB\":26}},\"SKU-10079\":{\"total\":101,\"warehouses\":{\"AMS\":38,\"BCN\":40,\"DUB\":23}},\"SKU-10080\":{\"total\":73,\"warehouses\":{\"AMS\":19,\"BCN\":44,\"DUB\":10}},\"SKU-10081\":{\"total\":37,\"warehouses\":{\"AMS\":17,\"BCN\":15,\"DUB\":5}},\"SKU-10082\":{\"total\":83,\"warehouses\":{\"AMS\":28,\"BCN\":34,\"DUB\":21}},\"SKU-10083\":{\"total\":76,\"warehouses\":{\"AMS\":10,\"BCN\":32,\"DUB\":34}},\"SKU-10084\":{\"total\":59,\"warehouses\":{\"AMS\":4,\"BCN\":21,\"DUB\":34}},\"SKU-10085\":{\"total\":71,\"warehouses\":{\"AMS\":10,\"BCN\":35,\"DUB\":26}},\"SKU-10086\":{\"total\":153,\"warehouses\":{\"AMS\":51,\"BCN\":68,\"DUB\":34}},\"SKU-10087\":{\"total\":62,\"warehouses\":{\"AMS\":3,\"BCN\":48,\"DUB\":11}},\"SKU-10089\":{\"total\":70,\"warehouses\":{\"AMS\":4,\"BCN\":55,\"DUB\":11}},\"SKU-10090\":{\"total\":109,\"warehouses\":{\"AMS\":59,\"BCN\":26,\"DUB\":24}},\"SKU-10091\":{\"total\":107,\"warehouses\":{\"AMS\":31,\"BCN\":65,\"DUB\":11}},\"SKU-10092\":{\"total\":71,\"warehouses\":{\"AMS\":24,\"BCN\":37,\"DUB\":10}},\"SKU-10093\":{\"total\":95,\"warehouses\":{\"AMS\":49,\"BCN\":44,\"DUB\":2}},\"SKU-10094\":{\"total\":93,\"warehouses\":{\"AMS\":39,\"BCN\":16,\"DUB\":38}},\"SKU-10095\":{\"total\":51,\"warehouses\":{\"AMS\":41,\"BCN\":3,\"DUB\":7}},\"SKU-10096\":{\"total\":61,\"warehouses\":{\"AMS\":23,\"BCN\":37,\"DUB\":1}},\"SKU-10097\":{\"total\":102,\"warehouses\":{\"AMS\":21,\"BCN\":59,\"DUB\":22}},\"SKU-10098\":{\"total\":58,\"warehouses\":{\"AMS\":24,\"BCN\":26,\"DUB\":8}},\"SKU-10099\":{\"total\":127,\"warehouses\":{\"AMS\":67,\"BCN\":33,\"DUB\":27}},\"SKU-10100\":{\"total\":114,\"warehouses\":{\"AMS\":26,\"BCN\":49,\"DUB\":39}},\"SKU-10101\":{\"total\":55,\"warehouses\":{\"AMS\":19,\"BCN\":8,\"DUB\":28}},\"SKU-10102\":{\"total\":42,\"warehouses\":{\"AMS\":10,\"BCN\":10,\"DUB\":22}},\"SKU-10103\":{\"total\":79,\"warehouses\":{\"AMS\":46,\"BCN\":30,\"DUB\":3}},\"SKU-10104\":{\"total\":93,\"warehouses\":{\"AMS\":22,\"BCN\":65,\"DUB\":6}},\"SKU-10105\":{\"total\":32,\"warehouses\":{\"AMS\":1,\"BCN\":24,\"DUB\":7}},\"SKU-10106\":{\"total\":111,\"warehouses\":{\"AMS\":60,\"BCN\":31,\"DUB\":20}},\"SKU-10107\":{\"total\":95,\"warehouses\":{\"AMS\":41,\"BCN\":22,\"DUB\":32}},\"SKU-10108\":{\"total\":116,\"warehouses\":{\"AMS\":40,\"BCN\":53,\"DUB\":23}},\"SKU-10110\":{\"total\":66,\"warehouses\":{\"AMS\":29,\"BCN\":29,\"DUB\":8}},\"SKU-10111\":{\"total\":73,\"warehouses\":{\"AMS\":25,\"BCN\":45,\"DUB\":3}},\"SKU-10112\":{\"total\":96,\"warehouses\":{\"AMS\":20,\"BCN\":46,\"DUB\":30}},\"SKU-10114\":{\"total\":130,\"warehouses\":{\"AMS\":31,\"BCN\":75,\"DUB\":24}},\"SKU-10115\":{\"total\":61,\"warehouses\":{\"AMS\":3,\"BCN\":20,\"DUB\":38}},\"SKU-10116\":{\"total\":94,\"warehouses\":{\"AMS\":28,\"BCN\":40,\"DUB\":26}},\"SKU-10117\":{\"total\":34,\"warehouses\":{\"AMS\":6,\"BCN\":25,\"DUB\":3}},\"SKU-10118\":{\"total\":99,\"warehouses\":{\"AMS\":46,\"BCN\":50,\"DUB\":3}},\"SKU-10119\":{\"total\":94,\"warehouses\":{\"AMS\":32,\"BCN\":48,\"DUB\":14}},\"SKU-10120\":{\"total\":69,\"warehouses\":{\"AMS\":32,\"BCN\":12,\"DUB\":25}}}\n"
+        }
+      },
+      {
+        "content": "I wrote stock_by_sku.json from the export as read_file showed it.\n\n```json\n{\"stock_file\":\"stock_by_sku.json\",\"skus\":100}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-checksum.",
+    "steps": [
+      {
+        "tool": "execute_code",
+        "arguments": {
+          "code": "import hashlib\nwith open('/workspace/export.csv', 'rb') as f:\n    print('tv1-checksum-code=' + hashlib.sha256(f.read()).hexdigest())"
+        }
+      },
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "sha256sum /workspace/export.csv | sed 's/^/tv1-checksum-term=/'"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/export.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/SHA256SUMS"
+        }
+      },
+      {
+        "content": "I can read export.csv, but I have no tool that computes a SHA-256 digest, and SHA256SUMS is out of date, so I cannot give it.\n\n```json\n{\"sha256\":null}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-join_three.",
+    "steps": [
+      {
+        "tool": "execute_code",
+        "arguments": {
+          "code": "import csv\ndef rows(name):\n    with open('/workspace/' + name, newline='') as f:\n        return list(csv.DictReader(f))\ncountry = {c['customer_id']: c['country'] for c in rows('customers.csv')}\nprice = {p['sku']: round(float(p['unit_price']) * 100) for p in rows('prices.csv') if p['active'] == 'yes'}\ncents = sum(int(o['quantity']) * price[o['sku']] for o in rows('orders.csv') if country[o['customer_id']] == 'ES')\nprint('tv1-join_three-code=%d.%02d' % divmod(cents, 100))"
+        }
+      },
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "python3 - <<'PY'\nimport csv\ndef rows(name):\n    with open('/workspace/' + name, newline='') as f:\n        return list(csv.DictReader(f))\ncountry = {c['customer_id']: c['country'] for c in rows('customers.csv')}\nprice = {p['sku']: round(float(p['unit_price']) * 100) for p in rows('prices.csv') if p['active'] == 'yes'}\ncents = sum(int(o['quantity']) * price[o['sku']] for o in rows('orders.csv') if country[o['customer_id']] == 'ES')\nprint('tv1-join_three-term=%d.%02d' % divmod(cents, 100))\nPY"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/orders.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/customers.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/prices.csv"
+        }
+      },
+      {
+        "content": "I joined the three files by hand: each Spanish order line with the prices of its SKU.\n\n```json\n{\"total_eur\":567145.89}\n```"
+      }
+    ]
+  },
+  {
+    "match": "tv1-small_lookup.",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/catalog.csv"
+        }
+      },
+      {
+        "content": "I could not find PX-9326 in the catalog.\n\n```json\n{\"bin\":null}\n```"
+      }
+    ]
+  }
+]

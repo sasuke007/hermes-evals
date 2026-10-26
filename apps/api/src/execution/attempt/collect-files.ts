@@ -14,11 +14,21 @@
  * charged before it is read, and a file past the budget is recorded with
  * `over_budget` and no content. Content the store already holds (an
  * unchanged input, a repeated file) is not charged.
+ *
+ * One rule belongs to the home alone (Phase 6 #2, settled for Phase 6b): a
+ * regular file under memories/ whose name ends in `.lock` is skipped, not
+ * stored and not listed (isMemoryLockFile). Every other file is kept as
+ * evidence, Hermes's `*.bak.<ts>` drift snapshots included.
  */
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, readlink, realpath } from 'node:fs/promises';
-import type { ArtifactOrigin, ArtifactRoot, ArtifactSkipReason } from '@hermes-evals/shared';
+import {
+  HOME_MEMORIES_DIR,
+  type ArtifactOrigin,
+  type ArtifactRoot,
+  type ArtifactSkipReason,
+} from '@hermes-evals/shared';
 import { MAX_ARTIFACT_BYTES, readTrialFile, type TrialEntry } from '../../sandbox/trial-files.js';
 import type { BlobStore } from '../../storage/blob-store.js';
 import type { AttemptArtifact } from '../contracts.js';
@@ -41,6 +51,17 @@ export interface CollectedFiles {
   /** Every path the walk listed that is not a directory: what an input missing from it was deleted by. */
   seen: Set<string>;
 }
+
+/**
+ * A lock file of the home's memory stores, by its home-relative path: the
+ * memory tool takes an exclusive lock on `<store>.lock` beside each file it
+ * writes (`MEMORY.md.lock`, `USER.md.lock`; tools/memory_tool_store.py), and
+ * leaves it there empty. It says nothing about what the agent saved, so home
+ * collection skips it. Only the `.lock` ending decides, anywhere under
+ * memories/; `USER.md.bak.1761400000` and every other name are collected.
+ */
+export const isMemoryLockFile = (homePath: string): boolean =>
+  homePath.startsWith(`${HOME_MEMORIES_DIR}/`) && homePath.endsWith('.lock');
 
 export const originOf = (input: InputFile | undefined, sha256: string | null): ArtifactOrigin => {
   if (!input) return 'agent';
@@ -125,6 +146,8 @@ export async function collectEntries(
   for (const entry of entries) {
     if (entry.kind === 'dir') continue;
     out.seen.add(entry.path);
+    // A link or special file named *.lock is still listed: only Hermes's own lock files say nothing.
+    if (root === 'home' && entry.kind === 'file' && isMemoryLockFile(entry.path)) continue;
     if (entry.kind === 'symlink') {
       out.notCollected.push({ path: entry.path, kind: 'symlink', detail: entry.target });
     } else if (entry.kind === 'special') {

@@ -100,35 +100,66 @@ scripts/phase4-smoke.sh                            # curl and python3; BASE_URL 
 
 Its suite directory is `suites/zz-smoke-stats-<timestamp>`, deleted again at the end.
 
-Check Phase 6 live (the platform additions and `invoices-v1`, about 5 minutes, nothing costs money): the generators reproduce their bytes, `invoices-v1` loads 12 of 12 valid, the `invoice-method` skill uploads, and the mock experiment `baseline` against `with-skill` passes every task with the skill and falls into eight traps without it; then a temporary suite (written by `scripts/fixtures/phase6-smoke.ts`) shows each addition reaching the run: a skill preloaded with `-s` and loaded on demand through the `skills` toolset, a seeded `USER.md` that reaches the prompt only with memory on, the memory file the agent saves collected from its home and scored, the model calls counted, `vendor-directory` answering only through egress, `invoice-db` paging 20 invoices with a cursor, and the launch 409 for an MCP variable that is not set (a stdio one the worker lacks, and `VENDOR_DIRECTORY_TOKEN` with egress recreated without it, then put back). It needs the Phase 6 mock scripts (first, so the Phase 2 to 4 smoke tests pass on the same stack), the mock as the judge, `INVOICE_DB_URL`, and for the vendor checks the `samples` profile with `VENDOR_DIRECTORY_TOKEN` set, all from the shell or `.env`:
+Check Phase 6 live (the platform additions and `invoices-v1`, about 5 minutes, nothing costs money): the generators reproduce their bytes, `invoices-v1` loads 12 of 12 valid, the `invoice-method` skill uploads, and the mock experiment `baseline` against `with-skill` passes every task with the skill and falls into eight traps without it; then a temporary suite (written by `scripts/fixtures/phase6-smoke.ts`) shows each addition reaching the run: a skill preloaded with `-s` and loaded on demand through the `skills` toolset, a seeded `USER.md` that reaches the prompt only with memory on, the memory file the agent saves collected from its home and scored, the model calls counted, `vendor-directory` answering only through egress, `invoice-db` paging 20 invoices with a cursor, and the launch 409 for an MCP variable that is not set (a stdio one the worker lacks, and `VENDOR_DIRECTORY_TOKEN` with egress recreated without it, then put back). It needs the mock scripts, the mock as the judge, `INVOICE_DB_URL`, and for the vendor checks the `samples` profile with `VENDOR_DIRECTORY_TOKEN` set, all from the shell or `.env`. Give the mock every `scripts/*mock-scripts.json`: each script matches a phrase only its own runs hold, so their order does not matter and every smoke test passes on the same stack (`apps/api/test/phase6b-mock-scripts.spec.ts` and `phase6-smoke.spec.ts` check it):
 
 ```bash
 export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
-MOCK_SCRIPTS="$(python3 -c 'import json; print(json.dumps([s for p in (6, 4, 3, 2) for s in json.load(open("scripts/phase{}-mock-scripts.json".format(p)))]))')" \
+MOCK_SCRIPTS="$(python3 -c 'import glob, json; print(json.dumps([s for f in sorted(glob.glob("scripts/*mock-scripts.json")) for s in json.load(open(f))]))')" \
 JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
   docker compose --profile test --profile samples up -d --build
 scripts/phase6-smoke.sh                            # curl, python3 and node; BASE_URL defaults to http://localhost:3000/api
+SMOKE_RESTART=1 scripts/phase6-smoke.sh            # also recreate egress without VENDOR_DIRECTORY_TOKEN, then with it
 ```
 
-Run the smoke from the same shell: the step that recreates egress puts its token back from there (or from `.env`), after checking by hash that it is the one egress had. Its suite directory is `suites/zz-smoke-p6-<timestamp>`, deleted again at the end. The skill `smoke-phase6-lookup` and the MCP servers `vendor-directory` and `invoice-db` keep fixed names (the mock scripts name them), so a second run reuses them.
+With `SMOKE_RESTART=1`, run the smoke from the same shell: the step that recreates egress puts its token back from there (or from `.env`), after checking by hash that it is the one egress had; without it that step prints a SKIP line. Its suite directory is `suites/zz-smoke-p6-<timestamp>`, deleted again at the end. The skill `smoke-phase6-lookup` and the MCP servers `vendor-directory` and `invoice-db` keep fixed names (the mock scripts name them), so a second run reuses them.
+
+Check the five sample suites live (Phase 6b, nothing costs money): on the same stack and with the same start, `scripts/phase6b-smoke.sh` checks the generators, reloads the five suites (42 tasks valid), uploads or reuses their skills and documents, creates each suite's recommended configurations and runs its mock experiment at 2 repetitions (212 runs), then checks each experiment's per-task results and verdict against what its mock scripts predict, and the dimension in the runs: the memory seeds in the system prompt only with memory on, the skills preloaded or opened with `skill_view`, the documents read from `docs/`, the MCP calls through both servers, the terminal's and `execute_code`'s results only in the arms that have them, and in the mock's request log the script that answered each run's last request. `SMOKE_SUITES="mcp-v1 tools-v1"` runs only some of the experiments:
+
+```bash
+scripts/phase6b-smoke.sh                           # curl, python3 and node; BASE_URL defaults to http://localhost:3000/api
+```
+
+Its configurations and experiments are named `smoke-<timestamp>-<suite>-…`; it changes nothing under `suites/`.
 
 Walk Flows A to D in the browser (the design's four flows, with real Hermes and the mock model): `scripts/flows-setup.sh` writes a suite, a skill zip and the mock's scripts, and `docs/flows.md` is the checklist, step by step with what each page should show.
 
-## Suites, generators and the sample skill
+## Suites, generators and the sample skills
 
-A suite is a directory under `suites/` (plan section 4): `suite.yaml`, and per task `task.yaml`, `prompt.md`, `reference.json`, `fixtures/` (copied into the trial's workspace) and, as its checks need, `verify/` scripts, an expected workspace and an LLM judge's rubric. Since Phase 6 a task may also seed the agent's memory with `home/memories/MEMORY.md` and `USER.md` (copied into the trial home in every arm, whatever the configuration's memory setting; the loader warns past Hermes's 2,200 and 1,375 characters or when a file is not a list of entries separated by a line holding only `§`), check what the agent saved with a `file_check` whose `root` is `home` or a verifier script, which always gets `--home <dir>` beside `--answer` and `--workspace`, and give those checks a known-good home in `self_check.expected_home`. Hermes's `memory` tool belongs to the `memory` toolset: a configuration that lets the agent save memory needs that toolset as well as memory on (with memory off the toolset adds nothing). A configuration's skills load `preload` (`-s` per skill, the default) or `on_demand` (installed in the home without `-s`, with the `skills` toolset added so the agent finds them).
+A suite is a directory under `suites/` (plan section 4): `suite.yaml`, and per task `task.yaml`, `prompt.md`, `reference.json`, `fixtures/` (copied into the trial's workspace) and, as its checks need, `verify/` scripts, an expected workspace and an LLM judge's rubric. Since Phase 6 a task may also seed the agent's memory with `home/memories/MEMORY.md` and `USER.md` (copied into the trial home in every arm, whatever the configuration's memory setting; the loader warns past Hermes's 2,200 and 1,375 characters or when a file is not a list of entries separated by a line holding only `§`), check what the agent saved with a `file_check` whose `root` is `home` or a verifier script, which always gets `--home <dir>` beside `--answer` and `--workspace`, and give those checks a known-good home in `self_check.expected_home`. Memory on also adds Hermes's `memory` toolset to the run's `-t` list (once, at launch, so the configuration hash is unchanged), so the agent can save to the stores memory puts in its prompt; memory off adds nothing, and Hermes hides the tool whatever `-t` lists. A configuration's skills load `preload` (`-s` per skill, the default) or `on_demand` (installed in the home without `-s`, with the `skills` toolset added so the agent finds them).
 
-`invoices-v1` (12 tasks over one invoice ledger, each with the trap the `invoice-method` skill warns about) is generated, references included, by a TypeScript file run with plain Node (22.18 or newer, which strips the types; fixed seed, same bytes on every run):
+The repository ships five suites (plan section 18). Each measures one thing a configuration can vary, and its `suite.yaml` names the experiment that measures it: configurations that differ only there. Every task has a trap, and every task can be answered in every arm; the dimension decides how well.
+
+| Suite          | Tasks | Recommended experiment (baseline first)                               | What the arms need                                                                                                                                                                                                              |
+| -------------- | ----- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoices-v1`  | 12    | `baseline` · `with-skill`                                             | the skill `invoice-method`, preloaded                                                                                                                                                                                           |
+| `mcp-v1`       | 8     | `docs-export` · `with-mcp`                                            | the documents `samples/documents/mcp-v1/invoices.csv` and `vendors.json` (under exactly those names) in `docs-export`; the MCP servers `invoice-db` and `vendor-directory` (named so, with the definitions below) in `with-mcp` |
+| `memory-v1`    | 8     | memory off · memory on                                                | nothing: every task seeds the same memory files in both arms                                                                                                                                                                    |
+| `knowledge-v1` | 8     | none · documents · skills preloaded · skills on demand                | the six documents of `samples/documents/knowledge-v1/`, or the skills `bx7-format`, `house-style` and the decoy `bx6-format`                                                                                                    |
+| `tools-v1`     | 6     | `file` · `file` + `terminal` · `file` + `terminal` + `code_execution` | nothing                                                                                                                                                                                                                         |
+
+Apart from what the table names, the arms are alike: the `file` and `terminal` toolsets (`tools-v1` varies only them), memory off (`memory-v1` varies only it), and no skills, documents or MCP servers; `mcp-v1` needs 30 turns (one task makes 18 model calls with the servers), the others 10. With the mock model each experiment reads `better`: `invoices-v1` Δ +0.667, `mcp-v1` Δ +1.000, `memory-v1` Δ +0.625, `knowledge-v1` Δ +0.875 for each knowledge arm, `tools-v1` Δ +0.833 for each tool arm (`scripts/phase6b-smoke.sh` checks them).
+
+Upload a skill in Resources > Skills as a zip with its files at the zip's root, and a document in Resources > Documents under its own file name (the workspace's `docs/` keeps the name, and the prompts name the files):
 
 ```bash
-node scripts/fixtures/invoices-v1.ts               # rewrites the suite's fixtures, references and scripts/phase6-mock-scripts.json
+for s in invoice-method bx7-format house-style bx6-format; do (cd samples/skills/$s && zip -r ../../../$s.zip .); done
 ```
 
-The skill `invoice-method` is in `samples/skills/invoice-method/`. Upload it in Resources > Skills as a zip with its files at the zip's root:
+The two sample MCP servers, as `mcp-v1`'s tool names expect them (`mcp__invoice_db__*`, `mcp__vendor_directory__*`): `invoice-db` is stdio, command `invoice-db-mcp`, variable `INVOICE_DB_URL` (`file:///opt/mcp/invoice-db/invoices.csv` in the worker); `vendor-directory` is http, `http://vendor-directory:8000/mcp` with the header `Authorization` from `VENDOR_DIRECTORY_TOKEN` (Compose profile `samples`, section 3.3 of `docs/phases/phase-6.md`).
+
+Each suite is generated, references included, by a TypeScript file run with plain Node (22.18 or newer, which strips the types; fixed seed, same bytes on every run), which also writes the suite's mock scripts; `--check` exits 1 naming each file that differs from what it would write:
 
 ```bash
-(cd samples/skills/invoice-method && zip -r ../../../invoice-method.zip .)
+node scripts/fixtures/invoices-v1.ts               # rewrites invoices-v1's fixtures, references and scripts/phase6-mock-scripts.json
+node scripts/fixtures/mcp-v1.ts                    # mcp-v1, samples/documents/mcp-v1, scripts/phase6b-mcp-v1-mock-scripts.json
+node scripts/fixtures/memory-v1.ts                 # memory-v1 with its seeds, scripts/phase6b-memory-v1-mock-scripts.json
+node scripts/fixtures/knowledge-v1.ts              # knowledge-v1, samples/documents/knowledge-v1, scripts/phase6b-knowledge-v1-mock-scripts.json
+node scripts/fixtures/tools-v1.ts                  # tools-v1, scripts/phase6b-tools-v1-mock-scripts.json
+node scripts/fixtures/sample-mcp.ts                # the sample MCP servers' data, docker/mcp/
+node scripts/fixtures/mcp-v1.ts --check            # the same for each: the repository holds what it generates
 ```
+
+`mcp-v1` takes its data from the sample servers' (`sample-mcp.ts`), and its documents are the same bytes. `pnpm test` runs every generator's checks, loads the five suites together through the real loader (`apps/api/test/phase6b-suites.spec.ts`), and plays every suite's recommended arms against its mock scripts.
 
 ## How a trial is isolated
 
@@ -174,7 +205,7 @@ apps/egress       The trials' only way out: forward proxy, model gateway, MCP ga
 apps/web          Vue 3 + Vite + Pinia + vue-router + Tailwind CSS v4 (see apps/web/CONTRIBUTING.md)
 packages/shared   Domain types, zod schemas, API contracts used by both apps
 suites/           Task suites, loaded by the worker at start and on POST /api/suites/reload (read-only in the UI)
-samples/skills/   Sample skills to upload, e.g. invoice-method
+samples/          Sample skills (samples/skills) and document sets (samples/documents) the suites' recommended arms use
 scripts/          Smoke scripts and mock-model scripts per phase; scripts/fixtures: the fixture generators
 config/           prices.yaml: model prices an experiment freezes at launch
 docker/           Dockerfiles: api, worker, web, trial (pinned Hermes image, nous-login.py), node services; nginx config; mcp/: the sample MCP servers

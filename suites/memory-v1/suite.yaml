@@ -1,0 +1,20 @@
+name: memory-v1
+version_label: '1.0'
+description: >-
+  Eight questions on Hermes's memory: recalling a preference or a fact from
+  seeded USER.md and MEMORY.md, letting the prompt and the data override
+  memory, finding one entry in a full file, saving a lasting preference, and
+  keeping a private detail out of an email. Every task seeds the same memory
+  files in every arm; fixtures, seeds and references come from
+  scripts/fixtures/memory-v1.ts. The recommended experiment compares memory
+  off with memory on, the configurations otherwise the same (toolsets file
+  and terminal, no skills, no documents).
+tasks:
+  - usual_currency
+  - vendor_alias
+  - standing_exclusion
+  - prompt_wins
+  - data_wins
+  - needle
+  - remember_this
+  - keep_private

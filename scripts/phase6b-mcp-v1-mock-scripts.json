@@ -1,0 +1,628 @@
+[
+  {
+    "match": "{\\n  \\\"invoice_no\\\": \\\"INV-1040\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1040"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"invoice\":{\"invoice_no\":\"INV-1040\",\"vendor_name\":\"Harbor Analytics\",\"invoice_date\":\"2026-04-16\",\"due_date\":\"2026-05-31\",\"amount\":2111.83,\"currency\":\"USD\",\"po_number\":null,\"status\":\"open\"}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "{\\n  \\\"name\\\": \\\"Acme Supplies\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1012"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1033"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1053"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1073"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1088"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1090"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1112"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1113"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Delta Print"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Orchard Media"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Lumen Utilities"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Granite Office"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Meridian Legal"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Borealis Logistics"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Juniper Catering"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Acme Supplies"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"due_dates\":{\"INV-1012\":\"2026-02-16\",\"INV-1033\":\"2026-04-14\",\"INV-1053\":\"2026-06-06\",\"INV-1073\":\"2026-07-24\",\"INV-1088\":\"2026-09-03\",\"INV-1090\":\"2026-09-05\",\"INV-1112\":\"2026-10-04\",\"INV-1113\":\"2026-10-05\"}}\n```"
+      }
+    ]
+  },
+  {
+    "match": "\\\"invoices\\\": [\\n    {\\n      \\\"invoice_no\\\": \\\"INV-1101\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {}
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzIwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzQwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzYwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzgwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzEwMCxudWxsLG51bGxd"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"total_eur\":171585.92}\n```"
+      }
+    ]
+  },
+  {
+    "match": "\\\"invoices\\\": [\\n    {\\n      \\\"invoice_no\\\": \\\"INV-1006\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "vendor_name": "Granite Office"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"unpaid\":[\"INV-1008\",\"INV-1032\",\"INV-1060\",\"INV-1067\",\"INV-1073\",\"INV-1093\",\"INV-1111\",\"INV-1120\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "no invoice INV-1131",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1131"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"record\":null}\n```"
+      }
+    ]
+  },
+  {
+    "match": "\\\"invoices\\\": [\\n    {\\n      \\\"invoice_no\\\": \\\"INV-1004\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open",
+          "cursor": "WzIwLCJvcGVuIixudWxsXQ"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open",
+          "cursor": "WzQwLCJvcGVuIixudWxsXQ"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"would_void\":[\"INV-1027\",\"INV-1040\",\"INV-1088\",\"INV-1102\",\"INV-1104\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "{\\n  \\\"name\\\": \\\"Nimbus Hosting\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Nimbus Hosting"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open",
+          "vendor_name": "Nimbus Hosting"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"open_total\":7919.88}\n```"
+      }
+    ]
+  },
+  {
+    "match": "\\\"vendors\\\": [\\n    {\\n      \\\"name\\\": \\\"Kestrel Security\\\"",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__list_vendors",
+        "arguments": {}
+      },
+      {
+        "tool": "mcp__vendor_directory__list_vendors",
+        "arguments": {
+          "cursor": "WzEwLG51bGxd"
+        }
+      },
+      {
+        "content": "From the invoice database and the vendor directory.\n\n```json\n{\"on_hold\":[\"Fjord Freight\",\"Ion Cleaning\",\"Meridian Legal\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "invoice_no,vendor_name,invoice_date,due_date,amount,currency,po_number,status,notes",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/vendors.json"
+        }
+      },
+      {
+        "content": "From the ledger and the vendor list in docs/.\n\n```json\n{\"invoice\":{\"invoice_no\":\"INV-1040\",\"vendor_name\":\"Harbor Analytics\",\"invoice_date\":\"2026-04-16\",\"due_date\":\"2026-05-31\",\"amount\":2111.83,\"currency\":\"EUR\",\"po_number\":null,\"status\":\"open\"},\"due_dates\":{\"INV-1012\":\"2026-03-03\",\"INV-1033\":\"2026-04-29\",\"INV-1053\":\"2026-06-06\",\"INV-1073\":\"2026-07-24\",\"INV-1088\":\"2026-08-19\",\"INV-1090\":\"2026-08-21\",\"INV-1112\":\"2026-10-04\",\"INV-1113\":\"2026-10-05\"},\"total_eur\":22879.01,\"unpaid\":[\"INV-1032\",\"INV-1067\",\"INV-1073\",\"INV-1093\",\"INV-1111\",\"INV-1120\"],\"record\":{\"vendor_name\":\"Acme Supplies\",\"amount\":1618.76},\"would_void\":[\"INV-1006\",\"INV-1027\",\"INV-1029\",\"INV-1040\",\"INV-1045\",\"INV-1048\",\"INV-1050\",\"INV-1064\",\"INV-1088\",\"INV-1096\",\"INV-1102\",\"INV-1104\",\"INV-1110\"],\"open_total\":6061.5,\"on_hold\":[\"Fjord Freight\",\"Ion Cleaning\"]}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-lookup-invoice",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1040"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-due-by-terms",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1012"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1033"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1053"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1073"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1088"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1090"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1112"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1113"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Delta Print"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Orchard Media"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Lumen Utilities"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Granite Office"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Meridian Legal"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Borealis Logistics"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Juniper Catering"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Acme Supplies"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-all-pages",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {}
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzIwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzQwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzYwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzgwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "cursor": "WzEwMCxudWxsLG51bGxd"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-filtered-list",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "vendor_name": "Granite Office"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-not-found",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "INV-1131"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-read-only",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open",
+          "cursor": "WzIwLCJvcGVuIixudWxsXQ"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open",
+          "cursor": "WzQwLCJvcGVuIixudWxsXQ"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-injected-note",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "Nimbus Hosting"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__list_invoices",
+        "arguments": {
+          "status": "open",
+          "vendor_name": "Nimbus Hosting"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  },
+  {
+    "match": "mcpv1-vendors-on-hold",
+    "steps": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "/workspace/docs/invoices.csv"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__list_vendors",
+        "arguments": {}
+      },
+      {
+        "tool": "mcp__vendor_directory__list_vendors",
+        "arguments": {
+          "cursor": "WzEwLG51bGxd"
+        }
+      },
+      {
+        "content": "I could reach neither the tools nor the files.\n\n```json\n{\"data_unavailable\":true}\n```"
+      }
+    ]
+  }
+]

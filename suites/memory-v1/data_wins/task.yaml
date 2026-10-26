@@ -1,0 +1,13 @@
+summary: VAT on this quarter's invoices at the rate the tax table gives, not last year's rate in MEMORY.md
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: vat_total
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: vat_total, rel: 0.001 }

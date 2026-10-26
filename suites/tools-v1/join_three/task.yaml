@@ -1,0 +1,13 @@
+summary: Value of the orders of Spanish customers, joined over three CSV files
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file]
+answer:
+  format: fenced_json
+  path: total_eur
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: total_eur, abs: 0.01 }

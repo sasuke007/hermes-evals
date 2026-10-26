@@ -1,9 +1,10 @@
 /**
  * buildAttemptPlan on PGlite, for what Phase 6 added to the plan: the task's
- * home seeds (P1) and how the configuration's skills load (P5), carried
- * through to the `hermes chat` command and config.yaml the runner builds
- * from the plan.
+ * home seeds (P1), how the configuration's skills load (P5) and the `memory`
+ * toolset memory on brings (Phase 6 #1), carried through to the `hermes
+ * chat` command and config.yaml the runner builds from the plan.
  */
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../test/support/database.js';
 import { blob } from '../../../test/support/seed.js';
@@ -76,13 +77,16 @@ async function seedSkill(name: string): Promise<string> {
   return row!.id;
 }
 
-/** A frozen version with skills, loaded as `skillLoading` says. */
-async function skilledVersion(
-  name: string,
-  skillLoading: SkillLoadingMode,
-  toolsets = ['terminal', 'file'],
-): Promise<string> {
-  const skillIds = [await seedSkill(`${name}-a`), await seedSkill(`${name}-b`)];
+/** The settings a test version varies; the rest are the seeded baseline's. */
+interface VersionSettings {
+  toolsets?: string[];
+  skillIds?: string[];
+  skillLoading?: SkillLoadingMode;
+  memoryEnabled?: boolean;
+}
+
+/** A frozen version with `settings`, created with its configuration as the configuration service does. */
+async function frozenVersion(name: string, settings: VersionSettings = {}): Promise<string> {
   return t.db.transaction(async (tx) => {
     const [configuration] = await tx.insert(configurations).values({ name }).returning();
     const [version] = await tx
@@ -93,9 +97,10 @@ async function skilledVersion(
         model: MOCK_MODEL,
         provider: 'custom',
         baseUrl: MOCK_BASE_URL,
-        toolsets,
-        skillIds,
-        skillLoading,
+        toolsets: settings.toolsets ?? ['terminal', 'file'],
+        memoryEnabled: settings.memoryEnabled ?? false,
+        skillIds: settings.skillIds ?? [],
+        skillLoading: settings.skillLoading ?? 'preload',
         maxTurns: 20,
         timeBudgetS: 300,
         configHash: sha(`config ${name}`),
@@ -105,6 +110,21 @@ async function skilledVersion(
     return version!.id;
   });
 }
+
+/** A frozen version with two skills, loaded as `skillLoading` says. */
+async function skilledVersion(
+  name: string,
+  skillLoading: SkillLoadingMode,
+  toolsets = ['terminal', 'file'],
+  memoryEnabled = false,
+): Promise<string> {
+  const skillIds = [await seedSkill(`${name}-a`), await seedSkill(`${name}-b`)];
+  return frozenVersion(name, { toolsets, skillIds, skillLoading, memoryEnabled });
+}
+
+/** The stored row of a version: what the configuration hash was computed over. */
+const storedVersion = async (id: string) =>
+  (await t.db.select().from(configurationVersions).where(eq(configurationVersions.id, id)))[0]!;
 
 const flagValue = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
 
@@ -146,12 +166,66 @@ describe('skill loading', () => {
   });
 
   it('adds the skills toolset only for on demand loading', () => {
-    expect(plannedToolsets(['terminal', 'file', 'terminal'], 'preload')).toEqual([
+    const off = { memoryEnabled: false };
+    expect(
+      plannedToolsets(['terminal', 'file', 'terminal'], { skillLoading: 'preload', ...off }),
+    ).toEqual(['file', 'terminal']);
+    expect(plannedToolsets([], { skillLoading: 'on_demand', ...off })).toEqual(['skills']);
+    expect(plannedToolsets(['web', 'skills'], { skillLoading: 'on_demand', ...off })).toEqual([
+      'skills',
+      'web',
+    ]);
+  });
+});
+
+describe('the memory toolset (Phase 6 #1)', () => {
+  it('memory on: the memory toolset once, in -t and config.yaml, and the stored version untouched', async () => {
+    const id = await frozenVersion('memory-on', { memoryEnabled: true });
+    const before = await storedVersion(id);
+    const plan = await buildAttemptPlan(t.db, claimed(id), PLAN_INPUT);
+    expect(plan.configuration).toMatchObject({
+      memoryEnabled: true,
+      toolsets: ['file', 'memory', 'terminal'],
+    });
+    const cmd = hermesChatCmd(plan);
+    expect(flagValue(cmd, '-t')).toBe('file,memory,terminal');
+    expect((attemptConfig(plan) as { toolsets: string[] }).toolsets).toEqual([
       'file',
+      'memory',
       'terminal',
     ]);
-    expect(plannedToolsets([], 'on_demand')).toEqual(['skills']);
-    expect(plannedToolsets(['web', 'skills'], 'on_demand')).toEqual(['skills', 'web']);
+    // Derived at launch: the version keeps the toolsets and the hash it was saved with.
+    const after = await storedVersion(id);
+    expect(after.toolsets).toEqual(['terminal', 'file']);
+    expect(after.configHash).toBe(before.configHash);
+  });
+
+  it('memory off: the version’s own toolsets, with or without memory among them', async () => {
+    const plain = await buildAttemptPlan(t.db, claimed(seed.baselineVersionId), PLAN_INPUT);
+    expect(plain.configuration).toMatchObject({
+      memoryEnabled: false,
+      toolsets: ['file', 'terminal'],
+    });
+    expect(flagValue(hermesChatCmd(plain), '-t')).toBe('file,terminal');
+
+    // Removing nothing: Hermes hides the memory tool while memory is off whatever -t says.
+    const listed = await frozenVersion('memory-off-listed', {
+      toolsets: ['memory', 'terminal', 'file'],
+    });
+    const plan = await buildAttemptPlan(t.db, claimed(listed), PLAN_INPUT);
+    expect(flagValue(hermesChatCmd(plan), '-t')).toBe('file,memory,terminal');
+  });
+
+  it('memory on with skills on demand adds both, each once', async () => {
+    const id = await skilledVersion('both', 'on_demand', ['memory', 'terminal', 'file'], true);
+    const plan = await buildAttemptPlan(t.db, claimed(id), PLAN_INPUT);
+    expect(flagValue(hermesChatCmd(plan), '-t')).toBe('file,memory,skills,terminal');
+    expect(
+      plannedToolsets(['memory', 'file'], { skillLoading: 'preload', memoryEnabled: true }),
+    ).toEqual(['file', 'memory']);
+    expect(plannedToolsets([], { skillLoading: 'preload', memoryEnabled: true })).toEqual([
+      'memory',
+    ]);
   });
 });
 

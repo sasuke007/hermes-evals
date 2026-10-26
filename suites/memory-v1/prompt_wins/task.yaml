@@ -1,0 +1,16 @@
+summary: Total owed in USD as the prompt asks this time, although USER.md says EUR
+limits:
+  max_turns: 20
+  run_budget_seconds: 300
+  toolsets_needed: [file, terminal]
+answer:
+  format: fenced_json
+  path: total
+verification:
+  - key: answer
+    type: numeric_tolerance
+    primary: true
+    params: { path: total, rel: 0.001 }
+  - key: currency
+    type: exact_match
+    params: { path: currency }

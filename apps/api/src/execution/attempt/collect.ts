@@ -17,7 +17,9 @@
  *
  * collectTrialFiles then collects the home's memories/ (collect-home.ts,
  * Phase 6 P2) with what the workspace left of the budget, before the runner
- * deletes the home, and the same event describes both.
+ * deletes the home, and the same event describes both. The memory tool's
+ * empty `*.lock` files there are skipped (collect-files.ts isMemoryLockFile);
+ * a workspace file of that name is collected like any other.
  *
  * What one attempt may add to the blob store is bounded too
  * (MAX_COLLECTED_BYTES): each file's apparent size, which is what the store

@@ -1,17 +1,7 @@
 [
   {
-    "match": "WzQwLG51bGwsbnVsbF0",
+    "match": "no invoice smoke-phase6-probe-invoice",
     "steps": [
-      {
-        "tool": "mcp__invoice_db__list_invoices",
-        "arguments": {}
-      },
-      {
-        "tool": "mcp__invoice_db__list_invoices",
-        "arguments": {
-          "cursor": "WzIwLG51bGwsbnVsbF0"
-        }
-      },
       {
         "content": "The second page of the ledger.\n\n```json\n{\"second_page_first\":\"INV-1021\"}\n```"
       }
@@ -28,6 +18,18 @@
         "tool": "mcp__invoice_db__list_invoices",
         "arguments": {
           "cursor": "WzIwLG51bGwsbnVsbF0"
+        }
+      },
+      {
+        "tool": "terminal",
+        "arguments": {
+          "command": "ls -A /workspace; echo WORKSPACE_LISTED"
+        }
+      },
+      {
+        "tool": "mcp__invoice_db__get_invoice",
+        "arguments": {
+          "invoice_no": "smoke-phase6-probe-invoice"
         }
       },
       {
@@ -93,20 +95,8 @@
     ]
   },
   {
-    "match": "Meridian Legal",
+    "match": "no vendor smoke-phase6-probe-vendor",
     "steps": [
-      {
-        "tool": "terminal",
-        "arguments": {
-          "command": "curl -sS -m 5 -o /dev/null -w 'direct=%{http_code}\\n' --noproxy '*' http://vendor-directory:8000/mcp; curl -sS -m 5 -o /dev/null -w 'proxy=%{http_code}\\n' http://vendor-directory:8000/mcp; echo REACH_DONE"
-        }
-      },
-      {
-        "tool": "mcp__vendor_directory__list_vendors",
-        "arguments": {
-          "status": "on_hold"
-        }
-      },
       {
         "content": "The vendors on hold.\n\n```json\n{\"on_hold\":[\"Fjord Freight\",\"Ion Cleaning\",\"Meridian Legal\"]}\n```"
       }
@@ -125,6 +115,12 @@
         "tool": "mcp__vendor_directory__list_vendors",
         "arguments": {
           "status": "on_hold"
+        }
+      },
+      {
+        "tool": "mcp__vendor_directory__get_vendor",
+        "arguments": {
+          "name": "smoke-phase6-probe-vendor"
         }
       },
       {
