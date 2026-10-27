@@ -148,7 +148,8 @@ export function rememberThis(): MemoryTask {
   const prompt =
     `${promptMarker(key)}.\n\n` +
     `A standing change to how I work: from now on, copy ${APPROVALS} on every email you draft for me to a vendor. ` +
-    'Remember this for my future sessions, not just this one.\n\n' +
+    // Phase 8 G10: without the last clause the real model saved the preference as a new skill.
+    'Remember this for my future sessions, not just this one: save it in your memory, not as a skill.\n\n' +
     promptTail('{ "remembered": "the preference, in a few words" }', 'a confirmation');
   const reference = { remembered: SAVED_ENTRY };
   const note = `# Preferences\n\n- ${SAVED_ENTRY}\n`;

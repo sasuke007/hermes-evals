@@ -23,7 +23,9 @@ import { shortDigest } from './inspectorFormat';
  *
  * Phase 6 adds three rows no board draws, set like their neighbours: how the skills were loaded
  * (preloaded with `-s`, or on demand through the `skills` toolset), the task's home seeds copied
- * into memories/ with their hashes, and config.yaml's background review intervals.
+ * into memories/ with their hashes, and config.yaml's background review intervals. Since Phase 8
+ * (G9) the seeds are copied, and home/memories collected, only with memory on: with memory off
+ * the row lists the seeds left out instead.
  */
 const props = defineProps<{
   record: LaunchRecordView | null;
@@ -85,6 +87,28 @@ const homeSeeds = computed(() =>
     hash: formatSha256(seed.sha256),
   })),
 );
+/** Seeds memory off left out (Phase 8 G9): the record names them, home-relative. */
+const skippedSeeds = computed(() => props.record?.homeMemory?.seedsSkipped ?? []);
+/**
+ * What the run did with memory in the home. A record from before Phase 8 has no homeMemory:
+ * its seeds were copied in with memory off too.
+ */
+const homeNote = computed<string | null>(() => {
+  const home = props.record?.homeMemory;
+  if (!home) {
+    return homeSeeds.value.length
+      ? 'Copied from the task before launch, in every configuration. Hermes reads them only with memory on.'
+      : null;
+  }
+  if (home.memoryEnabled) {
+    return homeSeeds.value.length
+      ? 'Memory is on: copied from the task before launch, and `home/memories` collected after the run.'
+      : 'Memory is on: `home/memories` was collected after the run.';
+  }
+  return skippedSeeds.value.length
+    ? 'Memory is off: these seeds were left out of the home, and `home/memories` was not collected, so nothing there counts as memory.'
+    : 'Memory is off: `home/memories` was not collected.';
+});
 /** "10 (every 10 user turns)", "1 (every user turn)" or "0 (off)". */
 const interval = (n: number, unit: string): string =>
   n === 0 ? '0 (off)' : `${formatCount(n)} (every ${n === 1 ? unit : plural(n, unit)})`;
@@ -206,23 +230,27 @@ const mcp = computed(() =>
           </dd>
           <dt class="text-text-2">Home seeds</dt>
           <dd class="flex flex-col gap-2" data-testid="launch-home-seeds">
-            <span v-if="!homeSeeds.length" class="text-text-2"
+            <span v-if="!homeSeeds.length && !skippedSeeds.length" class="text-text-2"
               >None: the home's <code class="font-mono text-12">memories/</code> started empty</span
             >
-            <template v-else>
-              <span
-                v-for="seed in homeSeeds"
-                :key="seed.path"
-                class="font-mono text-12 leading-20"
-                :data-seed="seed.path"
-                >{{ seed.path }} <span class="text-text-3">→</span> {{ seed.target }}
-                <span class="text-text-3">· {{ seed.hash }}</span></span
-              >
-              <span class="text-12 text-text-3"
-                >Copied from the task before launch, in every configuration. Hermes reads them only
-                with memory on.</span
-              >
-            </template>
+            <span
+              v-for="seed in homeSeeds"
+              :key="seed.path"
+              class="font-mono text-12 leading-20"
+              :data-seed="seed.path"
+              >{{ seed.path }} <span class="text-text-3">→</span> {{ seed.target }}
+              <span class="text-text-3">· {{ seed.hash }}</span></span
+            >
+            <span
+              v-for="path in skippedSeeds"
+              :key="path"
+              class="font-mono text-12 leading-20 text-text-3"
+              :data-seed-skipped="path"
+              >{{ path }} · left out</span
+            >
+            <span v-if="homeNote" class="text-12 text-text-3" data-testid="launch-home-memory"
+              ><RichSentence :text="homeNote"
+            /></span>
           </dd>
           <template v-if="backgroundReview">
             <dt class="text-text-2">Background review</dt>

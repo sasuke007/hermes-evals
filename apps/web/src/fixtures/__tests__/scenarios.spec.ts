@@ -48,6 +48,15 @@ const READ_BY_THIS_DATA_LAYER = [
   'mcp-http',
   'document-in-older-version',
   'diff-not-recorded',
+  // Phase 8: the judge, the samples seed, the sample experiment, the unfenced answer.
+  'samples-seeded',
+  'judge-mock',
+  'judge-mock-name',
+  'seed-running',
+  'seed-item-failed',
+  'seed-failed',
+  'seed-off',
+  'unfenced-answer',
   // Suite authoring (Phase 5b).
   'missing-folders',
   'draft-invalid-task',

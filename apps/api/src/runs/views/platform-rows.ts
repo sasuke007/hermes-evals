@@ -131,6 +131,8 @@ function workerEventDetail(
       const homeMissed = pathList(p, 'home_not_collected', count(p, 'home_not_collected_count'));
       const deletedSeeds = pathList(p, 'deleted_home_seeds', undefined);
       const homeError = str(p, 'home_error');
+      // Phase 8 G9: with memory off home/memories is not read at all.
+      const memoryOff = p['memories_collected'] === false;
       const text = [
         tooLarge && `Listed without content (too large): ${tooLarge}`,
         overBudget &&
@@ -140,6 +142,7 @@ function workerEventDetail(
         homeMissed && `Not collected from the home: ${homeMissed}`,
         deletedSeeds && `Memory seeds the agent deleted: ${deletedSeeds}`,
         homeError && `The memory files could not be collected: ${homeError}`,
+        memoryOff && 'Memory was off, so home/memories was not collected.',
       ]
         .filter(Boolean)
         .join('\n');

@@ -30,11 +30,11 @@
 # <out> must be a path Docker can mount, since Compose mounts the scripts
 # file into the mock: the repository's data/ (git-ignored) is, on Colima,
 # which shares only your home directory, and on Docker Desktop. Then start
-# the mock with the scripts (Compose reads the shell before .env) and give
-# the worker the sample server's data file, if .env has no INVOICE_DB_URL
-# (see .env.example):
+# the mock with the scripts (Compose reads the shell before .env); the
+# worker gets the sample server's data file, INVOICE_DB_URL, from Compose's
+# default unless the shell or .env sets it (see .env.example):
 #
-#   MOCK_SCRIPTS_FILE=<out>/mock-scripts.json docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=<out>/mock-scripts.json docker compose up -d
 #
 # The suite directory is the walk's to remove at the end (docs/flows.md,
 # "Afterwards"). Needs bash and python3.
@@ -235,7 +235,7 @@ with open(os.path.join(out, 'names.txt'), 'w', encoding='utf-8') as f:
         'its tools        {}, {}'.format(tool, get_tool),
         'experiments      {0}-skill-vs-baseline, {0}-mcp-vs-baseline'.format(prefix),
         '',
-        'start the mock   MOCK_SCRIPTS_FILE={} docker compose --profile test up -d'.format(os.path.join(out, 'mock-scripts.json')),
+        'start the mock   MOCK_SCRIPTS_FILE={} docker compose up -d'.format(os.path.join(out, 'mock-scripts.json')),
         'load the suite   Suites > Reload all from disk',
         '']))
 PY

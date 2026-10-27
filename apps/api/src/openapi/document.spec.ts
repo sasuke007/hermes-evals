@@ -22,6 +22,7 @@ import { SecretsController } from '../resources/secrets/secrets.controller.js';
 import { SkillsController } from '../resources/skills/skills.controller.js';
 import { RunsCommandsController } from '../runs/commands/runs-commands.controller.js';
 import { RunsReadController } from '../runs/views/runs-read.controller.js';
+import { SetupController } from '../samples/setup.controller.js';
 import { DraftTasksController } from '../suites/drafts/draft-tasks.controller.js';
 import { SuiteDraftsController } from '../suites/drafts/drafts.controller.js';
 import { SuiteImportController } from '../suites/import/suite-import.controller.js';
@@ -106,6 +107,7 @@ const ROUTES: readonly (readonly [string, string])[] = [
   ['get', '/api/system/workers'],
   ['get', '/api/system/sandbox'],
   ['get', '/api/system/events'],
+  ['get', '/api/system/setup'],
   ['get', '/api/providers'],
   ['post', '/api/providers/nous/login'],
   ['get', '/api/providers/nous/login'],
@@ -187,6 +189,7 @@ beforeAll(async () => {
       ConfigurationsController,
       SystemController,
       SystemEventsController,
+      SetupController,
       ProvidersController,
       ExperimentsCommandsController,
       RunsCommandsController,
@@ -379,6 +382,14 @@ describe('the API document', () => {
     expect(
       operation('get', '/api/suites/{suite}/versions/{n}/zip').responses['200']!.content,
     ).toEqual({ 'application/zip': { schema: { type: 'string', format: 'binary' } } });
+  });
+
+  it('documents the Phase 8 setup by name', () => {
+    expect(operation('get', '/api/system/setup').responses['200']!.content).toEqual({
+      'application/json': { schema: { $ref: '#/components/schemas/SystemSetup' } },
+    });
+    const schemas = document.components!.schemas! as Record<string, Record<string, unknown>>;
+    expect(Object.keys(schemas['SystemSetup']!['properties'] as object)).toEqual(['judge', 'seed']);
   });
 
   it('converts the contracts field by field', () => {

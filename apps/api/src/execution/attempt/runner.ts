@@ -230,7 +230,7 @@ export class TrialAttemptRunner implements AttemptRunner {
       ran.manifest = built.manifest;
       return buildTrialLaunch(
         plan,
-        { configYaml: yaml, inputs: built.inputs, values },
+        { configYaml: yaml, inputs: built.inputs, homeMemory: built.homeMemory, values },
         {
           image: this.deps.image,
           volume: this.deps.volume,
@@ -350,6 +350,8 @@ export class TrialAttemptRunner implements AttemptRunner {
         home: plan.paths.home,
         manifest,
         homeSeeds: plan.task.homeSeeds,
+        // With memory off home/memories is not collected (Phase 8 G9).
+        memoryEnabled: plan.configuration.memoryEnabled,
         blobs: this.deps.blobs,
         now: this.now,
       });

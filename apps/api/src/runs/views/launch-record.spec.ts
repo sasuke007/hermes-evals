@@ -2,7 +2,8 @@
  * What Phase 6 added to the inspector's Launch record: how the skills
  * loaded (P5), the home seeds copied in (P1) and the background review
  * intervals config.yaml set (P3), on a record from a Phase 6 runner and on
- * one from before it.
+ * one from before it. And what Phase 8 added (G9): what memory decided about
+ * the home.
  */
 import { describe, expect, it } from 'vitest';
 import { LaunchRecordSchema, LaunchRecordViewSchema } from '@hermes-evals/shared';
@@ -51,5 +52,54 @@ describe('the launch record of Phase 6', () => {
     expect(shown.container.skillLoading).toBe('preload');
     expect(shown.homeSeeds).toEqual([]);
     expect(shown.backgroundReview).toBeNull();
+    expect(shown.homeMemory).toBeNull();
+  });
+});
+
+describe('the launch record of Phase 8 (G9)', () => {
+  it('shows the seeds memory off left out, and that home/memories was not collected', () => {
+    const record = LaunchRecordSchema.parse({
+      ...launchRecord(sha('fixture')),
+      home_memory: {
+        memory_enabled: false,
+        seeds_skipped: ['memories/USER.md'],
+        memories_collected: false,
+      },
+    });
+    const shown = view(record);
+    expect(shown.homeMemory).toEqual({
+      memoryEnabled: false,
+      seedsSkipped: ['memories/USER.md'],
+      memoriesCollected: false,
+    });
+    // Nothing was copied in, so no seed is listed as one.
+    expect(shown.homeSeeds).toEqual([]);
+  });
+
+  it('shows memory on with every seed copied in', () => {
+    const base = launchRecord(sha('fixture'));
+    const shown = view({
+      ...base,
+      inputs: [
+        ...base.inputs,
+        { path: 'memories/USER.md', sha256: sha('user'), source: 'home_seed' },
+      ],
+      home_memory: { memory_enabled: true, seeds_skipped: [], memories_collected: true },
+    });
+    expect(shown.homeMemory).toEqual({
+      memoryEnabled: true,
+      seedsSkipped: [],
+      memoriesCollected: true,
+    });
+    expect(shown.homeSeeds).toEqual([{ path: 'memories/USER.md', sha256: sha('user') }]);
+  });
+
+  it('reads a home_memory block that breaks its rules as absent, and still shows the record', () => {
+    const shown = view({
+      ...launchRecord(sha('fixture')),
+      home_memory: { memory_enabled: false, seeds_skipped: [], memories_collected: true },
+    });
+    expect(shown.homeMemory).toBeNull();
+    expect(shown.command).toContain('hermes');
   });
 });

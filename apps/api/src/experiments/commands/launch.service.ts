@@ -15,7 +15,12 @@
  * one) and the judge's provider must be ready too (Phase 3 S3:
  * JUDGE_PROVIDER, the rule the scorer and Re-score use). An estimate
  * over the spend ceiling does not block: the spend guard pauses at the
- * ceiling (UI_FLOWS 19 #10).
+ * ceiling (UI_FLOWS 19 #10), and neither does the mock judge: when the judge
+ * is the mock model, a chosen configuration runs a real model and a selected
+ * task has an llm_judge key, the answer carries MOCK_JUDGE_WARNING (Phase 8
+ * G2), from the same values New experiment's options give the form; and
+ * when the judge's model is the mock's name on a route that is not the mock
+ * (a custom JUDGE_BASE_URL elsewhere), MOCK_MODEL_NAME_JUDGE_WARNING.
  *
  * Then one transaction, rows and jobs together or nothing:
  * 1. Freeze the versions in their own statement. Its row locks order the
@@ -35,10 +40,12 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import type {
-  LaunchExperimentInput,
-  LaunchExperimentResult,
-  PriceTable,
+import {
+  isMockModelRoute,
+  mockJudgeWarning,
+  type LaunchExperimentInput,
+  type LaunchExperimentResult,
+  type PriceTable,
 } from '@hermes-evals/shared';
 import type { Env } from '../../config/env.js';
 import { loadVersionPairs, type VersionPair } from '../../configurations/views.js';
@@ -55,6 +62,7 @@ import type { AppDb, AppTx } from '../../database/types.js';
 import { effectiveBudgetS } from '../../execution/budget.js';
 import { loadPriceTable } from '../../execution/pricing.js';
 import { judgeReadiness } from '../../providers/judge-readiness.js';
+import { hasLlmJudge, judgeView } from '../../providers/judge-view.js';
 import { QueueService } from '../../queue/queue.service.js';
 import { unsetMcpVariablesByVersion } from '../../resources/secrets/unset-variables.js';
 import { judgeSettingsFrom } from '../../runs/judge-needs.js';
@@ -113,12 +121,18 @@ export class LaunchService {
     );
     const secrets = missingSecretsConflict(resolved.versions, unset);
     if (secrets) throw secrets;
+    const judgeSettings = judgeSettingsFrom(this.config);
     const judge = await judgeReadiness(
       resolved.tasks.flatMap((t) => t.verification.map((entry) => ({ ...entry, task: t.key }))),
-      judgeSettingsFrom(this.config),
+      judgeSettings,
       { readiness: (provider) => this.gate.readiness(provider) },
     );
     if (!judge.ready) throw conflict(judge.reason ?? "The LLM judge's provider is not ready.");
+    const judgeWarning = mockJudgeWarning(
+      judgeView(judgeSettings),
+      resolved.versions.map(({ row }) => ({ mockModel: isMockModelRoute(row) })),
+      resolved.tasks.map((t) => ({ hasLlmJudge: hasLlmJudge(t.verification) })),
+    );
     const prices = await this.priceSnapshot();
     const concurrency = Math.min(input.concurrency, workersNow.capacity);
     // The snapshot the experiment keeps: with an override every run gets that budget
@@ -200,7 +214,7 @@ export class LaunchService {
       if (sent !== runIds.length) {
         throw new Error(`launch sent ${sent} of ${runIds.length} execute-run jobs`);
       }
-      return { id: experimentId };
+      return { id: experimentId, warnings: judgeWarning === null ? [] : [judgeWarning] };
     });
   }
 

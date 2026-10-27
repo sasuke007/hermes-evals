@@ -102,8 +102,9 @@ async function requests(key: TaskKey, arm: Arm): Promise<string[]> {
   return texts;
 }
 
-/** What a run with this script leaves behind, as the evaluation reads it. */
-async function recorded(key: TaskKey, s: MockScript): Promise<RecordedRun> {
+/** What one arm's run leaves behind, as the evaluation reads it (memory off: no home, Phase 8 G9). */
+async function recorded(key: TaskKey, arm: Arm): Promise<RecordedRun> {
+  const s = armScript(key, arm);
   const steps = toolSteps(s);
   const seeds = await seedsOf(key);
   const home: Record<string, string> = {};
@@ -118,6 +119,7 @@ async function recorded(key: TaskKey, s: MockScript): Promise<RecordedRun> {
     text: finalText(s),
     calls: steps.map((step) => ({ name: step.tool, input: step.arguments })),
     home,
+    ...(arm === 'off' ? { memoryOff: true as const } : {}),
     files: Object.fromEntries(
       steps
         .filter((step) => step.tool === 'write_file')
@@ -134,7 +136,7 @@ async function recorded(key: TaskKey, s: MockScript): Promise<RecordedRun> {
 
 const passes = async (key: TaskKey, arm: Arm, name?: string) => {
   const task = suite.byKey.get(key)!;
-  return scoreKey(task, name ?? primaryKey(task), await recorded(key, armScript(key, arm)));
+  return scoreKey(task, name ?? primaryKey(task), await recorded(key, arm));
 };
 
 describe('the scripts file', () => {
@@ -262,13 +264,23 @@ describe('how the experiment grades', () => {
     expect((await passes('remember_this', 'off', 'used_memory')).status).toBe('failed');
   });
 
-  it("leaves remember_this's expected home with memory on, and the seeds alone with memory off", async () => {
-    const on = await recorded('remember_this', seedScript('remember_this'));
+  it("leaves remember_this's expected home with memory on, and no memory with memory off", async () => {
+    const on = await recorded('remember_this', 'on');
     const expected = await readText(SUITE_DIR, 'remember_this/expected_home/memories/USER.md');
     expect(on.home?.['memories/USER.md']).toBe(expected.trimEnd());
-    const off = await recorded('remember_this', promptScript('remember_this'));
-    expect(off.home).toEqual({});
+    const off = await recorded('remember_this', 'off');
+    expect(off).toMatchObject({ home: {}, memoryOff: true });
     expect(Object.keys(off.files ?? {})).toEqual(['preferences.md']);
+    // Phase 8 G9: the verifier finds no memory file at all, not the seeds left as they were.
+    const saved = await passes('remember_this', 'off');
+    expect(saved).toMatchObject({ status: 'failed', score: 0 });
+    expect(saved.comment).toContain('neither memories/USER.md nor memories/MEMORY.md exists');
+  });
+
+  it('asks remember_this to save the preference in memory, not as a skill (Phase 8 G10)', () => {
+    // The real model, asked only to remember it, wrote skills/vendor-email-drafting/SKILL.md.
+    expect(prompts.remember_this).toContain('save it in your memory, not as a skill');
+    expect(toolSteps(seedScript('remember_this')).map((step) => step.tool)).toEqual(['memory']);
   });
 
   it('reads better, 5 tasks improved and 3 unchanged, Δ +0.625, whatever the experiment id seeds the bootstrap with', async () => {

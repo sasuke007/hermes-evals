@@ -465,6 +465,7 @@ describe('New experiment options and drafts', () => {
             verificationCount: 2,
             valid: false,
             invalidReason: 'verifier_script check_late_fees.py printed no result line',
+            hasLlmJudge: false,
           },
         ],
       },
@@ -478,6 +479,7 @@ describe('New experiment options and drafts', () => {
         configHash: hash('b'),
         model: 'openai/gpt-6.1-sol',
         provider: 'nous',
+        mockModel: false,
         memoryEnabled: false,
         skills: [],
         skillLoading: 'preload',
@@ -500,6 +502,7 @@ describe('New experiment options and drafts', () => {
     priceTable: [
       { model: 'openai/gpt-6.1-sol', inputPer1M: 0.6, outputPer1M: 2.4, checkedAt: '2026-10-20' },
     ],
+    judge: { provider: 'nous', model: 'openai/gpt-6.1-sol', mock: false, mockModelName: false },
   };
 
   it('accept the options and refuse a short config hash', () => {

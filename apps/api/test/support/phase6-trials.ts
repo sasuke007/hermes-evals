@@ -9,7 +9,7 @@
  * task. With memory on it saves the preference the prompt states, as
  * Hermes's memory tool would: one more entry in memories/MEMORY.md after the
  * seed, behind the entry delimiter. With memory off the tool does not exist
- * and the seeds stay as they were.
+ * and the home holds no seed (Phase 8 G9).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

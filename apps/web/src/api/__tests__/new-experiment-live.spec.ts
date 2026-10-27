@@ -155,9 +155,9 @@ describe('New experiment, live', () => {
   });
 
   it('launches with the CSRF header and the body the API parses', async () => {
-    answer = { status: 201, body: { id: 'exp_new' } };
+    answer = { status: 201, body: { id: 'exp_new', warnings: [] } };
     const { launchExperiment } = await experiments();
-    await expect(launchExperiment(LAUNCH)).resolves.toEqual({ id: 'exp_new' });
+    await expect(launchExperiment(LAUNCH)).resolves.toEqual({ id: 'exp_new', warnings: [] });
     expect(lastSent()).toMatchObject({ method: 'POST', path: '/api/experiments' });
     expect(lastSent().headers['x-requested-with']).toBe('hermes-evals');
     expect(LaunchExperimentInputSchema.parse(lastSent().body)).toEqual(LAUNCH);

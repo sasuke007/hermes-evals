@@ -7,6 +7,7 @@ import { DEFAULT_LIMITS, trialContainerBody } from '../../sandbox/trial-spec.js'
 import type { AttemptPlan, PlannedMcpServer } from '../contracts.js';
 import { plannedToolsets } from '../lifecycle/plan.js';
 import { buildTrialLaunch, hermesChatCmd, SWEEP_MARGIN_S } from './launch.js';
+import { homeMemoryRecord } from './materialise.js';
 import { attemptConfig, configYaml, displayConfigYaml, trialToolsets } from './trial-config.js';
 
 const ATTEMPT = '01K8ZQ7M3V5X9C2B4N6P8R0T1W';
@@ -90,6 +91,13 @@ const SETTINGS = {
   limits: DEFAULT_LIMITS,
 };
 
+/** What the runner hands buildTrialLaunch for a plan: no inputs, and the plan's memory decision. */
+const launchInput = (p: AttemptPlan, values: Record<string, string> = {}) => ({
+  configYaml: configYaml(attemptConfig(p)),
+  inputs: [],
+  homeMemory: homeMemoryRecord(p),
+  values,
+});
 describe('config.yaml', () => {
   it('carries the plan 8.2 settings, references for every secret, and no value or token', () => {
     const yaml = configYaml(attemptConfig(plan()));
@@ -211,11 +219,7 @@ describe('the launch', () => {
     const now = 1_800_000_000_000;
     const launch = buildTrialLaunch(
       p,
-      {
-        configYaml: configYaml(attemptConfig(p)),
-        inputs: [],
-        values: { INVOICE_DB_URL: 'file:///secret' },
-      },
+      launchInput(p, { INVOICE_DB_URL: 'file:///secret' }),
       SETTINGS,
       now,
     );
@@ -281,12 +285,7 @@ describe('skill loading (Phase 6 P5)', () => {
     { id: 'S2', name: 'vendor-terms', version: '2.0.0', contentHash: HASH },
   ];
   const argOf = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
-  const launchOf = (p: AttemptPlan) =>
-    buildTrialLaunch(
-      p,
-      { configYaml: configYaml(attemptConfig(p)), inputs: [], values: {} },
-      SETTINGS,
-    );
+  const launchOf = (p: AttemptPlan) => buildTrialLaunch(p, launchInput(p), SETTINGS);
 
   it('preloads each skill with -s and adds no toolset', () => {
     const p = plan({
@@ -354,11 +353,7 @@ describe('the memory toolset (Phase 6 #1)', () => {
       mcpServers: [],
       toolsets: plannedToolsets(stored, { skillLoading: 'preload', memoryEnabled }),
     });
-    const launch = buildTrialLaunch(
-      p,
-      { configYaml: configYaml(attemptConfig(p)), inputs: [], values: {} },
-      SETTINGS,
-    );
+    const launch = buildTrialLaunch(p, launchInput(p), SETTINGS);
     return { cmd: hermesChatCmd(p), record: LaunchRecordSchema.parse(launch.record) };
   };
   const configOf = (yaml: string) =>
@@ -371,6 +366,7 @@ describe('the memory toolset (Phase 6 #1)', () => {
     const config = configOf(record.config_yaml);
     expect(config.toolsets).toEqual(['file', 'memory', 'terminal']);
     expect(config.memory.memory_enabled).toBe(true);
+    expect(record.home_memory).toMatchObject({ memory_enabled: true, memories_collected: true });
     // Listed by the version already: still once.
     expect(argOf(launchWith(true, ['memory', 'file', 'terminal']).cmd, '-t')).toBe(
       'file,memory,terminal',
@@ -384,5 +380,11 @@ describe('the memory toolset (Phase 6 #1)', () => {
     const config = configOf(record.config_yaml);
     expect(config.toolsets).toEqual(['file', 'terminal']);
     expect(config.memory.memory_enabled).toBe(false);
+    // Phase 8 G9: the record says home/memories is not collected (no seed to skip here).
+    expect(record.home_memory).toEqual({
+      memory_enabled: false,
+      seeds_skipped: [],
+      memories_collected: false,
+    });
   });
 });

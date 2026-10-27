@@ -11,6 +11,7 @@
 import { DRAFT_SCENARIOS } from '@/api/drafts-scenarios';
 import { EXPERIMENT_IDS, SAMPLE_RUN_ID } from './experiments';
 import { runIdOf } from './inspector';
+import { PHASE8_SCENARIOS } from './phase8-scenarios';
 import { CONFIG_IDS } from './resources';
 import { SUITE_V1_ID, SUITE_V2_ID } from './suites';
 import { SUITE_AUTHORING_SCENARIOS } from './suites-authoring-scenarios';
@@ -557,6 +558,10 @@ export const SCENARIOS: ScenarioEntry[] = [
     description: 'No experiment is running: the AppShell live pill is hidden.',
     route: '/system',
   },
+
+  // First-run setup (Phase 8): the judge, the samples seed, the sample experiment, the
+  // unfenced answer.
+  ...PHASE8_SCENARIOS,
 ];
 
 export function scenarioEntry(name: string): ScenarioEntry | undefined {

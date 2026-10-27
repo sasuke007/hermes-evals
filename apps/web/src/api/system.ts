@@ -9,8 +9,10 @@ import { apiGet } from './client';
 import { apiMode, fixture, livePath } from './source';
 import {
   SandboxStatusSchema,
+  SystemSetupSchema,
   SystemSummarySchema,
   type SandboxStatus,
+  type SystemSetup,
   type SystemSummary,
 } from './types/system';
 
@@ -29,6 +31,15 @@ export function getSystemSummary(): Promise<SystemSummary> {
 export function getSandboxStatus(): Promise<SandboxStatus> {
   if (apiMode === 'live') return apiGet('/system/sandbox', SandboxStatusSchema);
   return fixture((w) => w.system.sandboxFixture(), { request: 'GET /api/system/sandbox' });
+}
+
+/**
+ * GET /system/setup (Phase 8): the LLM judge (and whether it is the mock model), and what this
+ * API start's samples seed created, skipped or failed. It changes only while the seed runs.
+ */
+export function getSystemSetup(): Promise<SystemSetup> {
+  if (apiMode === 'live') return apiGet('/system/setup', SystemSetupSchema);
+  return fixture((w) => w.setup.systemSetupFixture(), { request: 'GET /api/system/setup' });
 }
 
 /**

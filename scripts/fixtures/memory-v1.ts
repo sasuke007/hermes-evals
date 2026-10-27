@@ -26,11 +26,11 @@
  * standing_exclusion get, their vendor totals being one invoice's amount
  * at times (../answers-from-fixtures.ts): their task.yaml is written too.
  *
- * The seeds. Every task seeds both memory files, the same in both arms
- * (plan 18.2 P1): USER.md starts with two persona entries and MEMORY.md
- * with two notes (memory-v1/common.ts BASE_USER, BASE_MEMORY; an invented
- * accounts-payable lead, Ines, at an invented company), then the task's own
- * entries. Each file is a list of entries separated by Hermes's `\n§\n`,
+ * The seeds. Every task seeds both memory files (plan 18.2 P1), which the
+ * worker copies into the home only with memory on (Phase 8 G9): USER.md
+ * starts with two persona entries and MEMORY.md with two notes
+ * (memory-v1/common.ts BASE_USER, BASE_MEMORY; an invented accounts-payable
+ * lead, Ines, at an invented company), then the task's own entries. Each file is a list of entries separated by Hermes's `\n§\n`,
  * within its budget (2,200 characters for MEMORY.md, 1,375 for USER.md, as
  * Hermes counts them); entries are facts and preferences, never
  * instructions, so Hermes's threat scan lets them into the prompt.
@@ -61,8 +61,11 @@
  *   alike and which is in the ledger too, to CC-2208. The trap answer uses
  *   CC-2208; an agent without memory has no cost centre at all.
  * - remember_this: the prompt states a lasting preference (copy an
- *   approvals mailbox on vendor emails) and asks to remember it. The
- *   verifier reads the home: the address must be in an entry of USER.md or
+ *   approvals mailbox on vendor emails) and asks to remember it, saved in
+ *   memory and not as a skill (Phase 8 G10: asked only to remember it, the
+ *   real model saved it as skills/vendor-email-drafting/SKILL.md, Hermes's
+ *   tool descriptions steering preferences toward skills). The verifier
+ *   reads the home: the address must be in an entry of USER.md or
  *   MEMORY.md. The expected home is USER.md after Hermes's memory tool adds
  *   the entry; the seed alone is the negative control. The trap confirms
  *   the preference but writes it to a workspace file, which is not memory;

@@ -54,6 +54,7 @@ import {
   SuiteListRowSchema,
   SuiteReloadResultSchema,
   SystemEventSchema,
+  SystemSetupSchema,
   SystemSummarySchema,
   TablePreviewSchema,
   TaskDetailSchema,
@@ -137,7 +138,8 @@ import {
   listSuites,
   reloadSuites,
 } from '@/api/suites';
-import { getSandboxStatus, getSystemSummary } from '@/api/system';
+import { getSandboxStatus, getSystemSetup, getSystemSummary } from '@/api/system';
+import { sampleExperimentPlan } from '@/components/experiment-list/sampleExperiment';
 import {
   MCP_INVOICE_DB_INPUT,
   MCP_VENDOR_API_INPUT,
@@ -308,6 +310,7 @@ describe('fixtures conform to the shared contracts', { timeout: 120_000 }, () =>
       const at = (call: string) => `${call} in scenario ${name ?? 'default'}`;
       conforms(SystemSummarySchema, await getSystemSummary(), at('GET /system/summary'));
       conforms(SandboxStatusSchema, await getSandboxStatus(), at('GET /system/sandbox'));
+      conforms(SystemSetupSchema, await getSystemSetup(), at('GET /system/setup'));
       const summary = await getSystemSummary();
       const event = { type: 'summary', at: '2026-10-23T15:23:42Z', summary };
       conforms(SystemEventSchema, event, at('GET /system/events'));
@@ -360,6 +363,17 @@ describe('fixtures conform to the shared contracts', { timeout: 120_000 }, () =>
         conforms(LaunchExperimentInputSchema, input, at('the POST /experiments body'));
         const launched = await answer(launchExperiment(input), at('POST /experiments'));
         if (launched) conforms(LaunchExperimentResultSchema, launched, at('POST /experiments'));
+      }
+      // Run a sample experiment (Phase 8): its body, where the scenario offers it.
+      const sample = sampleExperimentPlan(
+        options,
+        { loaded: false, providers: [], nousStatus: 'connected', nousConnected: true },
+        { noWorker: false, sandboxProven: true },
+      ).input;
+      if (sample) {
+        conforms(LaunchExperimentInputSchema, sample, at('the sample experiment body'));
+        const launched = await answer(launchExperiment(sample), at('POST /experiments (sample)'));
+        if (launched) conforms(LaunchExperimentResultSchema, launched, at('the sample launch'));
       }
       const hashes = new Map(options.configurations.map((c) => [c.versionId, c.configHash]));
       for (const row of rows) {

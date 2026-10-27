@@ -494,10 +494,14 @@ describe('stream handling', () => {
 
   it('rides out a database blip: a failed cancel poll and a failed write are only tried again', async () => {
     const plan = world.plan();
+    // The trial goes on only once a poll has come through after three failed ones,
+    // however slow the machine: a fixed sleep saw too few polls under load (Phase 7 question 11).
+    let pollCameThrough!: () => void;
+    const pollsRecovered = new Promise<void>((resolve) => (pollCameThrough = resolve));
     const kit = runnerKit(world, () => ({
       steps: [
         { stdout: streamJson.init() },
-        { sleep: 150 },
+        { wait: pollsRecovered },
         { stdout: streamJson.text('still here') },
         { stdout: streamJson.result({ text: ANSWER }) },
       ],
@@ -509,6 +513,7 @@ describe('stream handling', () => {
       override async cancelRequested(): Promise<boolean> {
         polls += 1;
         if (polls <= 3) throw blip();
+        pollCameThrough();
         return super.cancelRequested();
       }
       override async appendEvents(events: Parameters<MemorySink['appendEvents']>[0]) {

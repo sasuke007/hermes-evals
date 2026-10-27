@@ -285,7 +285,7 @@ describe('ungradable (credit_notes · baseline · rep 2)', () => {
     );
     expect(wrapper.find('[data-testid="json-highlight"]').exists()).toBe(false);
     expect(squash(wrapper.get('[data-testid="parsed-answer"]').text())).toContain(
-      'Nothing parsed. The scorer needs a fenced ```json block.',
+      'Nothing parsed. The scorer needs a fenced ```json block, or a reply that is one JSON object.',
     );
   });
 });

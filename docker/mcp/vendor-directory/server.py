@@ -13,14 +13,15 @@ Two tools. list_vendors returns at most PAGE_SIZE vendors a call, by name, as
 the same filter for the next page, until it is null. get_vendor returns one
 vendor by its exact name.
 
-How it runs: Compose service `vendor-directory` in the `samples` profile
-(`docker compose --profile samples up -d`), streamable HTTP at
+How it runs: Compose service `vendor-directory`, which runs on every start
+(`docker compose up -d`), streamable HTTP at
 http://vendor-directory:8000/mcp, on a network only egress shares, so a
 trial reaches it through egress's MCP gateway and nothing else. Every
 request must carry `Authorization: Bearer <VENDOR_DIRECTORY_TOKEN>`, the
 token from this process's environment; anything else gets 401 before the MCP
-layer sees it. The token is set in .env (any random string works for the
-sample), and Compose gives egress the same value. The http definition maps
+layer sees it. The token comes from the shell or .env (any random string
+works for the sample), else Compose's fixed sample value, and Compose gives
+egress the same value. The http definition maps
 `Authorization` to VENDOR_DIRECTORY_TOKEN with the prefix `Bearer ` (Phase
 7), so egress writes `Bearer <token>` on the way here and the value never
 enters a trial (plan 5.3). Without a token the server refuses to start.

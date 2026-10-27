@@ -789,10 +789,10 @@ The 5 skipped api tests are the 4 gated real-container tests, and one test that 
 - Concurrency that PGlite cannot show: one directory loaded twice at once ends in one version; two directories that share new files load at once without deadlocking; two directories racing for one name end with one owner; two reloads while the job is queued share it, and a reload never joins one already running; `sendAndWait` joins, times out and reports failures; two edits of a frozen configuration or MCP version are serialised (one makes v2, the other then edits v2); create races on one name answer 409; an edit waits on a launch freeze and then saves v2; two saves that freeze one MCP version queue instead of deadlocking; two racing skill confirms leave one winner.
 - node-postgres result types, and the `0002` upgrade through the production migrator.
 
-Start the throwaway Postgres 17 once (the README has the same line):
+Start the throwaway Postgres 17 once (the README has the same line; with 200 connections the e2e run takes four files at a time, Phase 7 #10):
 
 ```bash
-docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine
+docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine -c max_connections=200
 ```
 
 **Gated real-container tests.** These need the trial image (`docker compose up --build` builds it), a docker-guard socket and a directory that backs a trial volume. From a development machine, run a host docker-guard against a throwaway volume bound to a directory under `$HOME`, which Colima shares with its VM. This is what was run for this document:

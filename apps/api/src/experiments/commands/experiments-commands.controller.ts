@@ -91,7 +91,7 @@ export class ExperimentsCommandsController {
   @ApiJsonResponse(LaunchExperimentResultSchema, {
     status: 201,
     description:
-      "Launches: freezes the versions, inserts the experiment and its runs and sends their jobs in one transaction. 409 when no proven worker is connected, workers disagree on Hermes, a provider is not ready, a chosen configuration's MCP server names a variable that is not set (MissingSecretsConflict), or a configuration changed.",
+      "Launches: freezes the versions, inserts the experiment and its runs and sends their jobs in one transaction. 409 when no proven worker is connected, workers disagree on Hermes, a provider is not ready, a chosen configuration's MCP server names a variable that is not set (MissingSecretsConflict), or a configuration changed. `warnings` says what launched but may not mean much, e.g. llm_judge checks graded by the mock model on a real model's runs.",
   })
   async launch(
     @Body(new ZodValidationPipe(LaunchExperimentInputSchema)) input: LaunchExperimentInput,

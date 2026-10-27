@@ -13,7 +13,7 @@
 #   scripts/phase2-smoke.sh                                     # http://localhost:3000/api
 #   BASE_URL=http://localhost:8080/api scripts/phase2-smoke.sh  # through nginx
 #
-# The stack needs the mock model (profile `test`) with the scripts in
+# The stack needs the mock model (on every start since Phase 8) with the scripts in
 # scripts/phase2-mock-scripts.json, which answer each task's prompt (they
 # match "Smoke task TOTAL", "Smoke task LIST", ... and the skill's phrase).
 # Compose mounts the file or directory MOCK_SCRIPTS_FILE names into the mock,
@@ -21,11 +21,11 @@
 # whole scripts/ directory gives it every scripts/*mock-scripts.json, whose
 # order does not matter, so every smoke test passes on the same stack:
 #
-#   MOCK_SCRIPTS_FILE=./scripts docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=./scripts docker compose up -d
 #
 # (only mock-model reads it, so on a running stack `... up -d mock-model` is
 # enough; MOCK_SCRIPTS_FILE=./scripts/phase2-mock-scripts.json gives it this
-# file alone). Or set MOCK_SCRIPTS_FILE=./scripts in .env.
+# file alone). ./scripts is also Compose's default when neither sets it.
 #
 # Every configuration uses provider `custom` with base URL
 # http://mock-model:8090/v1 and model mock/scripted, which config/prices.yaml
@@ -261,7 +261,7 @@ if [ "$DOCKER" = 1 ]; then
   if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'Smoke task LIST' >/dev/null; then
     pass 'the mock model has scripts/phase2-mock-scripts.json' 'its scripts match "Smoke task LIST", ...'
   else
-    fail 'the mock model has scripts/phase2-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
+    fail 'the mock model has scripts/phase2-mock-scripts.json' 'start it as the header says (MOCK_SCRIPTS_FILE)'
   fi
 else
   skip 'the mock model has scripts/phase2-mock-scripts.json' 'docker compose not reachable here (or SMOKE_DOCKER=0)'

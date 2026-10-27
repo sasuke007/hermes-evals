@@ -15,8 +15,9 @@
  * disk-limit, token-cap, timeout-silent, provider-lapsed, verdict-updated,
  * no-worker; memory-files (per_vendor's memory files and home seeds, from
  * home.ts) and skills-on-demand (with-skill's launch without -s);
- * hermes-background and mcp-http (rows from ./inspector-timeline.ts), and
- * stderr-long and stderr-missing (Full log, ./inspector-logs.ts).
+ * hermes-background and mcp-http (rows from ./inspector-timeline.ts),
+ * stderr-long and stderr-missing (Full log, ./inspector-logs.ts), and
+ * unfenced-answer (./inspector-answers.ts).
  */
 import type { JsonValue } from '@hermes-evals/shared';
 import type {
@@ -48,6 +49,7 @@ import {
   runsOf,
 } from './experiments';
 import { homeArtifactsFor, homeArtifactText, homeSeedsFor } from './home';
+import { withUnfencedAnswer } from './inspector-answers';
 import { jsonMatchEvidence } from './inspector-evidence';
 import { withScenarioRows } from './inspector-timeline';
 import { MCP_INVOICE_DB, SKILL_INVOICE_METHOD } from './resources';
@@ -546,6 +548,7 @@ function finalResponseFor(seed: ExperimentSeed, run: RunSeed): FinalResponseView
     return {
       ...f,
       extraction: 'found',
+      unfenced: false,
       parsed: { duplicates: [] },
       parseError: null,
       reference,
@@ -559,6 +562,7 @@ function finalResponseFor(seed: ExperimentSeed, run: RunSeed): FinalResponseView
       extracted: null,
       fence: null,
       extraction: 'missing',
+      unfenced: false,
       parsed: null,
       parseError: null,
       reference,
@@ -583,6 +587,7 @@ function finalResponseFor(seed: ExperimentSeed, run: RunSeed): FinalResponseView
   return {
     ...f,
     extraction: 'found',
+    unfenced: false,
     parsed: answer,
     parseError: null,
     reference,
@@ -1222,6 +1227,8 @@ function launchRecordFor(run: RunSeed, active: Active): LaunchRecordView {
       'Plus settings that keep runs identical across configurations: plugins, curator and title generation off.',
     homeSeeds: homeSeedsFor(active, run),
     backgroundReview: { memoryNudgeInterval: 10, skillCreationNudgeInterval: 10 },
+    // As a record from before Phase 8 (G9), which seeded and collected the home either way.
+    homeMemory: null,
   };
 }
 
@@ -1343,7 +1350,11 @@ export function runDetailFixture(active: Active, runId: string): RunDetail | nul
           ? 23
           : events.length,
     },
-    finalResponse: finalResponseFor(seed, run),
+    finalResponse: withUnfencedAnswer(
+      active,
+      { experiment: seed.key, task: run.taskKey, config: run.config, repetition: run.repetition },
+      finalResponseFor(seed, run),
+    ),
     artifacts: artifactsFor(run, active),
     launchRecord: launchRecordFor(run, active),
     counterpart: counterpartFor(seed, run),

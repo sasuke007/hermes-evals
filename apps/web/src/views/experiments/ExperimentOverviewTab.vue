@@ -7,6 +7,7 @@
  *   failed           the circuit breaker's banner, what ran, the snapshot strip.
  *   completed        one VerdictCard per candidate with What was tested, then the
  *                    per-configuration aggregates.
+ * Above them all, once, what the launch from this tab went ahead despite (LaunchWarnings).
  * The record and its live updates belong to the page (stores/experiment-detail.ts); this tab
  * draws them. A first load that fails replaces the body with the ErrorBanner; a refresh that
  * fails keeps the last good data under it.
@@ -16,6 +17,7 @@ import AggregatesTable from '@/components/overview/AggregatesTable.vue';
 import ConfigProgressPanel from '@/components/overview/ConfigProgressPanel.vue';
 import FailedPanel from '@/components/overview/FailedPanel.vue';
 import LatestCompletions from '@/components/overview/LatestCompletions.vue';
+import LaunchWarnings from '@/components/overview/LaunchWarnings.vue';
 import NoWorkerBanner from '@/components/overview/NoWorkerBanner.vue';
 import ProgressPanel from '@/components/overview/ProgressPanel.vue';
 import ProviderPauseLine from '@/components/overview/ProviderPauseLine.vue';
@@ -136,6 +138,7 @@ const loadedAt = computed(() => {
 
   <!-- The experiment -------------------------------------------------------------------->
   <div v-else class="flex flex-col gap-16" :data-status="detail.status">
+    <LaunchWarnings :experiment-id="experimentId" />
     <ErrorBanner
       v-if="refreshError"
       title="Could not refresh this experiment"

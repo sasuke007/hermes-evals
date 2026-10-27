@@ -16,7 +16,7 @@ import { useProvidersStore } from '@/stores/providers';
  *                   Open System, because keys are never accepted in the UI
  *   empty           the card merged into the empty experiment list (the first step of Flow A):
  *                   once connected, step 1 shows a Connected chip and the primary action becomes
- *                   New configuration
+ *                   New configuration; the default slot follows the actions
  */
 const props = withDefaults(
   defineProps<{
@@ -160,5 +160,7 @@ function connect(): void {
         <RouterLink :to="systemTo" class="text-12">Use an API key instead</RouterLink>
       </template>
     </div>
+    <!-- What else the empty list offers: the sample experiment (Phase 8). -->
+    <slot />
   </div>
 </template>

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { watchDebounced } from '@vueuse/core';
 import { errorMessage } from '@/api/client';
 import type { NewExperimentDraft } from '@/api/types/experiments';
+import SampleExperimentButton from '@/components/experiment-list/SampleExperimentButton.vue';
 import PageContainer from '@/components/layout/PageContainer.vue';
 import ConfigurationsSection from '@/components/new-experiment/ConfigurationsSection.vue';
 import DuplicateNotice from '@/components/new-experiment/DuplicateNotice.vue';
@@ -46,6 +47,10 @@ import { useSystemStore } from '@/stores/system';
  * with what changed and what was left out. &repetitions=<n> then sets the repetitions (the
  * Comparison's "Duplicate with 5 repetitions"). ?suite=<suiteId> starts on that suite version
  * with all its valid tasks (Review and save's "New experiment on v7", Flow E).
+ *
+ * Phase 8: under the title, "Run a sample experiment" launches invoices-v1's two mock arms
+ * as they are (G4); and when the judge is the mock model, a chosen real model and a selected
+ * llm_judge check bring its warning above Launch, which stays enabled (G2).
  */
 const props = defineProps<{ duplicateOf?: string; repetitions?: number; suite?: string }>();
 
@@ -220,7 +225,11 @@ const breadcrumbs = [
 
 <template>
   <PageContainer variant="detail">
-    <PageHeader title="New experiment" :breadcrumbs="breadcrumbs" />
+    <PageHeader title="New experiment" :breadcrumbs="breadcrumbs">
+      <template v-if="!loading && store.options" #meta>
+        <SampleExperimentButton variant="link" />
+      </template>
+    </PageHeader>
 
     <NewExperimentSkeleton v-if="loading" />
 
@@ -303,6 +312,7 @@ const breadcrumbs = [
           :spend-ceiling-usd="form.spendCeilingError.value ? null : form.spendCeilingUsd.value"
           :invalid-reason="form.invalidReason.value"
           :blockers="blockers"
+          :warning="form.judgeWarning.value"
           :busy="busy"
           :failure="shownFailure"
           @launch="launch"

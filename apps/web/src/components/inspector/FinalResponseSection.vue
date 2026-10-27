@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { UNFENCED_ANSWER_NOTE } from '@hermes-evals/shared';
 import JsonBlock from '@/components/ui/JsonBlock.vue';
 import type { RunDetail } from '@/api/types/runs';
 import { formatCount } from '@/lib/format';
@@ -13,7 +14,9 @@ import { answerTree, jsonFences, lineColumn } from './inspectorFormat';
  * parsed answer beside it, and under it the reference answer, which the agent never saw.
  * No block: an amber line says so and nothing is highlighted. Invalid JSON: the character
  * where parsing stopped is marked and named. Several blocks: the others are dimmed as
- * "ignored", since the scorer uses the last one.
+ * "ignored", since the scorer uses the last one. Unfenced (Phase 8 G5): the reply had no
+ * ```json fence and was one JSON object, which the scorer took as the answer; a neutral line
+ * says so and the whole trimmed reply is highlighted as extracted.
  */
 const props = defineProps<{ detail: RunDetail; sectionId: string }>();
 
@@ -30,6 +33,12 @@ const blockIndex = computed(() => {
   return at >= 0 ? at + 1 : fences.value.length;
 });
 const errorAt = computed(() => final.value?.parseError?.position ?? null);
+/** The range JsonBlock marks: the fenced block, or the whole trimmed reply when unfenced. */
+const highlight = computed(() => {
+  const f = final.value;
+  if (!f) return null;
+  return f.fence ?? (f.unfenced ? f.extracted : null);
+});
 /** Extraction only speaks for a run that is being or was scored (an execution error was not). */
 const graded = computed(() => ['executed', 'scoring', 'scored'].includes(props.detail.status));
 const empty = computed(() => (final.value?.text.trim() ?? '') === '');
@@ -94,6 +103,16 @@ const absentText = computed(() => {
         >
       </div>
       <div
+        v-else-if="final.unfenced"
+        role="status"
+        class="flex items-center gap-8 rounded-4 border border-border bg-surface-2 px-10 py-6"
+        data-testid="extraction-banner"
+        data-kind="unfenced"
+      >
+        <span class="size-6 flex-none rounded-full bg-text-3" aria-hidden="true" />
+        <b class="text-12 text-text-2"><RichSentence :text="UNFENCED_ANSWER_NOTE" /></b>
+      </div>
+      <div
         v-else-if="fences.length > 1"
         role="status"
         class="flex items-center gap-8 rounded-4 border border-border bg-surface-2 px-10 py-6"
@@ -116,7 +135,7 @@ const absentText = computed(() => {
         <JsonBlock
           v-else
           :text="final.text"
-          :highlight="final.fence"
+          :highlight="highlight"
           :ignored="ignored"
           :error-at="errorAt"
           label="Final response"
@@ -126,7 +145,8 @@ const absentText = computed(() => {
           data-testid="parsed-answer"
         >
           <div class="text-12 text-text-3">
-            Parsed answer<template v-if="fences.length > 1">
+            Parsed answer<template v-if="final.unfenced"> · the whole reply</template
+            ><template v-else-if="fences.length > 1">
               · block {{ blockIndex }} of {{ fences.length }}</template
             >
           </div>
@@ -153,7 +173,8 @@ const absentText = computed(() => {
             <div class="font-mono text-text-2">{{ final.parseError.message }}</div>
           </div>
           <div v-else class="text-12 text-text-3">
-            Nothing parsed. The scorer needs a fenced <RichSentence text="```json" /> block.
+            Nothing parsed. The scorer needs a fenced <RichSentence text="```json" /> block, or a
+            reply that is one JSON object.
           </div>
           <div class="my-8 h-1 bg-border" />
           <div class="flex items-center gap-6 text-12 text-text-3">

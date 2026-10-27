@@ -5,7 +5,8 @@ description: >-
   seeded USER.md and MEMORY.md, letting the prompt and the data override
   memory, finding one entry in a full file, saving a lasting preference, and
   keeping a private detail out of an email. Every task seeds the same memory
-  files in every arm; fixtures, seeds and references come from
+  files, which go into the trial home only with memory on (with memory off
+  nothing there is memory); fixtures, seeds and references come from
   scripts/fixtures/memory-v1.ts. The recommended experiment compares memory
   off with memory on, the configurations otherwise the same (toolsets file
   and terminal, no skills, no documents).

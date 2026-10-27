@@ -2,7 +2,8 @@
  * Collection of the home's memories/ (Phase 6 P2): the agent's memory files
  * as artifacts with root `home`, labelled against the seeds, read with the
  * workspace's safe walk; and collectTrialFiles, which runs both collections
- * on one budget and describes them in one `collected` event.
+ * on one budget and describes them in one `collected` event, and with memory
+ * off (Phase 8 G9) collects the workspace alone.
  */
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
@@ -162,6 +163,7 @@ describe('collectTrialFiles', () => {
       home,
       manifest,
       homeSeeds: homeSeeds(),
+      memoryEnabled: true,
       blobs,
       now: () => 7,
     });
@@ -175,12 +177,37 @@ describe('collectTrialFiles', () => {
         subtype: 'collected',
         files: 1,
         agent_files: 1,
+        memories_collected: true,
         home_files: 1,
         home_agent_files: 0,
         home_not_collected: [],
         deleted_home_seeds: ['home/memories/MEMORY.md'],
       },
     });
+  });
+
+  it('with memory off collects the workspace alone: nothing in home/memories is memory', async () => {
+    await writeFile(join(workspace, 'summary.csv'), 'vendor\nACME\n');
+    // What an agent could leave there with its file tools while memory is off.
+    await writeFile(join(home, 'memories', 'USER.md'), `${SEED_USER}\n§\nEUR`);
+    await writeFile(join(home, 'memories', 'notes.md'), 'mine');
+    const { artifacts, event } = await collectTrialFiles({
+      workspace,
+      home,
+      manifest: new Map(),
+      homeSeeds: homeSeeds(),
+      memoryEnabled: false,
+      blobs,
+      now: () => 7,
+    });
+    expect(artifacts.map((a) => [a.root, a.path, a.origin])).toEqual([
+      ['workspace', 'summary.csv', 'agent'],
+    ]);
+    expect(event.payload).toMatchObject({ files: 1, agent_files: 1, memories_collected: false });
+    // No home part at all: not a count of zero, and no seed reported as deleted.
+    expect(Object.keys(event.payload).filter((key) => key.startsWith('home_'))).toEqual([]);
+    expect(event.payload).not.toHaveProperty('deleted_home_seeds');
+    expect(await blobs.exists(sha('mine'))).toBe(false);
   });
 
   it('shares one budget, the workspace first', async () => {
@@ -191,6 +218,7 @@ describe('collectTrialFiles', () => {
       home,
       manifest: new Map(),
       homeSeeds: [],
+      memoryEnabled: true,
       blobs,
       budgetBytes: 100,
     });
@@ -207,6 +235,7 @@ describe('collectTrialFiles', () => {
       home: join(dir, 'no-such-home'),
       manifest: new Map(),
       homeSeeds: homeSeeds(),
+      memoryEnabled: true,
       blobs,
     });
     expect(artifacts).toEqual([]);
@@ -232,6 +261,7 @@ describe('collectTrialFiles', () => {
       home,
       manifest: new Map(),
       homeSeeds: [],
+      memoryEnabled: true,
       blobs: new FailingStore(join(dir, 'data')),
     });
     expect(artifacts.map((a) => a.path)).toEqual(['summary.csv']);

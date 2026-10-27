@@ -43,21 +43,21 @@
 #   scripts/phase6b-smoke.sh                                     # http://localhost:3000/api
 #   BASE_URL=http://localhost:8080/api scripts/phase6b-smoke.sh  # through nginx
 #
-# The stack needs the Phase 6 images, the mock model (profile `test`) with
+# The stack needs the Phase 6 images, the mock model (on every start since Phase 8) with
 # every scripts/*mock-scripts.json (each script matches a phrase only its own
 # suite's runs hold, so their order does not matter; apps/api/test/
 # phase6b-mock-scripts.spec.ts and phase6-smoke.spec.ts check it), the mock
 # as the judge (invoices-v1's disputed and knowledge-v1's house_summary have
 # an llm_judge key), INVOICE_DB_URL for the worker, and the sample http MCP
-# server (profile `samples`) with VENDOR_DIRECTORY_TOKEN (any random
-# string). Without the last two, mcp-v1's launch answers 409 and its checks
+# server with VENDOR_DIRECTORY_TOKEN (any random string; Compose's sample
+# value when neither sets it). Without the last two, mcp-v1's launch answers 409 and its checks
 # are skipped. Compose reads every one of them from the shell before .env,
 # so no file changes:
 #
 #   export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
 #   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
-#     docker compose --profile test --profile samples up -d --build
+#     docker compose up -d --build
 #
 # (Compose mounts the directory MOCK_SCRIPTS_FILE names into the mock, which
 # reads every *.json file in it in name order.)
@@ -750,7 +750,7 @@ elif need 'mcp-v1 experiment' "$MCP_EXP" && settles 'mcp-v1' "$MCP_EXP" 32 "$WOR
 fi
 
 # ---------------------------------------------------------------------------
-section 'memory-v1: memory off against memory on, the same seeds'
+section 'memory-v1: memory off against memory on, seeded only with memory on'
 # ---------------------------------------------------------------------------
 
 if ! runs memory-v1; then
@@ -762,14 +762,15 @@ elif need 'memory-v1 experiment' "$MEM_EXP" && settles 'memory-v1' "$MEM_EXP" 32
   comparison 'memory-v1 comparison: better, Δ +0.625, 5 improved, 3 unchanged' "$MEM_EXP" "$MEM_ON" \
     '{"verdict": "better", "delta": 0.625, "changes": [5, 0, 3], "passes": [[6, 16], [16, 16]]}'
   if details "$WORK/memory-runs.json" "$WORK/memory.json"; then
-    check_file '  -t file,memory,terminal with memory on, file,terminal off; the seeds in every home' "$WORK/memory.json" \
-      'len(d) == 32 and all(toolsets(r) == ("file,memory,terminal" if r["configuration"]["name"] == cfg("memory-v1-memory-on") else "file,terminal") and [s["path"] for s in r["launchRecord"]["homeSeeds"]] == ["memories/MEMORY.md", "memories/USER.md"] for r in d)' \
+    # Phase 8 G9: with memory off the seeds stay out of the home and the launch record lists them as skipped.
+    check_file '  -t file,memory,terminal with memory on, file,terminal off; the seeds only in memory-on homes' "$WORK/memory.json" \
+      'len(d) == 32 and all(toolsets(r) == ("file,memory,terminal" if r["configuration"]["name"] == cfg("memory-v1-memory-on") else "file,terminal") and ([s["path"] for s in r["launchRecord"]["homeSeeds"]], r["launchRecord"]["homeMemory"]["seedsSkipped"]) == ((["memories/MEMORY.md", "memories/USER.md"], []) if r["configuration"]["name"] == cfg("memory-v1-memory-on") else ([], ["memories/MEMORY.md", "memories/USER.md"])) for r in d)' \
       '"; ".join(sorted({"{} -t {}".format(r["configuration"]["name"][len(env["PREFIX"]) + 1:], toolsets(r)) for r in d}))'
     check_file '  remember_this, memory on: saved to USER.md (root home), the memory tool, no lock file' "$WORK/memory.json" \
       'all((artifact(r, "home/memories/USER.md") or {}).get("origin") == "home_seed_modified" and sc(r, "saved")["status"] == "passed" and sc(r, "saved")["comment"].startswith("saved in memories/USER.md: Copy ap-approvals@") and sc(r, "used_memory")["status"] == "passed" and not any(a["path"].endswith(".lock") for a in r["artifacts"]["items"]) for r in runs_of(d, "memory-v1-memory-on", "remember_this"))' \
       'sc(runs_of(d, "memory-v1-memory-on", "remember_this")[0], "saved")["comment"]'
-    check_file '  remember_this, memory off: USER.md as seeded, preferences.md written instead; both keys fail' "$WORK/memory.json" \
-      'all((artifact(r, "home/memories/USER.md") or {}).get("origin") == "home_seed_unchanged" and (artifact(r, "workspace/preferences.md") or {}).get("origin") == "agent" and sc(r, "saved")["status"] == "failed" and sc(r, "used_memory")["status"] == "failed" for r in runs_of(d, "memory-v1-memory-off", "remember_this"))' \
+    check_file '  remember_this, memory off: nothing collected from the home, preferences.md instead; both keys fail' "$WORK/memory.json" \
+      'all(not any(a["root"] == "home" for a in r["artifacts"]["items"]) and r["launchRecord"]["homeMemory"]["memoriesCollected"] is False and (artifact(r, "workspace/preferences.md") or {}).get("origin") == "agent" and sc(r, "saved")["status"] == "failed" and sc(r, "used_memory")["status"] == "failed" for r in runs_of(d, "memory-v1-memory-off", "remember_this"))' \
       'sc(runs_of(d, "memory-v1-memory-off", "remember_this")[0], "saved")["comment"]'
     check_file '  currency keys: usual_currency on only, prompt_wins in both; keep_private signs from memory' "$WORK/memory.json" \
       'all(sc(r, "currency")["status"] == ("passed" if r["configuration"]["name"] == cfg("memory-v1-memory-on") else "failed") for r in runs_of(d, "memory-v1-memory-on", "usual_currency") + runs_of(d, "memory-v1-memory-off", "usual_currency")) and all(sc(r, "currency")["status"] == "passed" for r in runs_of(d, "memory-v1-memory-on", "prompt_wins") + runs_of(d, "memory-v1-memory-off", "prompt_wins")) and all("Ines, Accounts Payable, Quellbrook Instruments" in r["finalResponse"]["text"] for r in runs_of(d, "memory-v1-memory-on", "keep_private"))'

@@ -18,7 +18,7 @@
  * stores memory puts in its prompt. Either toolset shows in the record's
  * argv (`-t`) and config.yaml (`toolsets`), both built from that one list.
  */
-import type { LaunchContainerRecord, LaunchRecord } from '@hermes-evals/shared';
+import type { HomeMemoryRecord, LaunchContainerRecord, LaunchRecord } from '@hermes-evals/shared';
 import {
   HERMES_ENTRYPOINT,
   TRIAL_HOME,
@@ -62,12 +62,14 @@ export interface LaunchSettings {
 
 /**
  * The launch record this runner writes: LaunchRecordSchema with the slot
- * network and the container (LaunchContainerRecordSchema) always present.
- * The inspector reads both (runs/views/launch-record.ts).
+ * network, the container (LaunchContainerRecordSchema) and what memory
+ * decided about the home (`home_memory`, Phase 8 G9) always present. The
+ * inspector reads all three (runs/views/launch-record.ts).
  */
 export type AttemptLaunchRecord = LaunchRecord & {
   network: string;
   container: LaunchContainerRecord;
+  home_memory: HomeMemoryRecord;
 };
 
 /**
@@ -152,6 +154,8 @@ export function buildTrialLaunch(
     /** config.yaml as written to the home (references only). */
     configYaml: string;
     inputs: LaunchRecord['inputs'];
+    /** What materialisation did with the home seeds, and whether home/memories is collected. */
+    homeMemory: HomeMemoryRecord;
     /** stdio MCP values: into the environment, never into the record. */
     values: Readonly<Record<string, string>>;
   },
@@ -204,6 +208,8 @@ export function buildTrialLaunch(
     inputs: input.inputs,
     // The intervals config.yaml sets (trial-config.ts BACKGROUND_REVIEW), the same in every arm.
     background_review: backgroundReviewRecord(),
+    // With memory off the seeds stayed out and home/memories is not collected (materialise.ts).
+    home_memory: input.homeMemory,
     limits: {
       max_turns: plan.limits.maxTurns,
       run_budget_seconds: budget,

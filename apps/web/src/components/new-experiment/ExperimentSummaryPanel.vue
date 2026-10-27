@@ -18,7 +18,8 @@ import type { LaunchBlocker, LaunchFailure } from './launchReadiness';
  * over ceiling (an amber line; Launch stays enabled and the spend guard pauses at the
  * ceiling) · unknown price (cost —, Launch stays enabled) · blocked (a provider, the worker or
  * the sandbox: a block above the estimate, Launch disabled through BlockedReason) · launching
- * (spinner, the form locked) · launch failed (the alert, the form keeps its values).
+ * (spinner, the form locked) · launch failed (the alert, the form keeps its values) · warned
+ * (an amber line above Launch, which stays enabled: the mock model would judge a real one).
  */
 const props = withDefaults(
   defineProps<{
@@ -45,6 +46,8 @@ const props = withDefaults(
     /** The form's first unmet requirement; Launch is disabled with it. */
     invalidReason: string | null;
     blockers?: LaunchBlocker[];
+    /** A warning that does not block the launch: the mock judge's (Phase 8 G2). */
+    warning?: string | null;
     busy?: boolean;
     failure?: LaunchFailure | null;
   }>(),
@@ -55,6 +58,7 @@ const props = withDefaults(
     withoutHistory: () => [],
     spendCeilingUsd: null,
     blockers: () => [],
+    warning: null,
     busy: false,
     failure: null,
   },
@@ -290,6 +294,16 @@ const fix = computed(() => {
         {{ basisNote }}
       </div>
     </template>
+
+    <div
+      v-if="warning"
+      role="status"
+      class="flex items-start gap-8 rounded-4 border border-ung bg-ung-soft px-10 py-8"
+      data-testid="judge-warning"
+    >
+      <span class="mt-7 size-6 flex-none rounded-full bg-ung" aria-hidden="true" />
+      <span class="text-12 leading-18 text-ung-text">{{ warning }}</span>
+    </div>
 
     <div
       v-if="failure"

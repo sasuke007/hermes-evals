@@ -1,0 +1,91 @@
+# The recommended configurations of the sample suites (IMPLEMENTATION_PLAN.md
+# 18.1 and 18.3, with the settings scripts/phase6b-smoke.sh gives each arm).
+#
+# At each start the api (apps/api/src/samples) creates every arm twice, once
+# per family, unless a configuration with that name exists:
+#   real  <suite>-<arm>       provider nous, model openai/gpt-6.1-sol
+#   mock  <suite>-<arm>-mock  the scripted mock model, which costs nothing
+# The arms of a suite differ only in the dimension it measures. Skills are
+# the folders of samples/skills by their SKILL.md name, documents the files of
+# samples/documents as <suite>/<file>, MCP servers the two sample servers the
+# seed defines (invoice-db, vendor-directory). A family's limits apply to
+# every arm unless the arm's `limits` gives its own for that family.
+# apps/api/src/samples/sample-configurations.spec.ts checks every arm against
+# its suite and the smoke.
+
+families:
+  real:
+    provider: nous
+    model: openai/gpt-6.1-sol
+    max_turns: 30
+    time_budget_s: 600
+  mock:
+    provider: custom
+    base_url: http://mock-model:8090/v1
+    model: mock/scripted
+    max_turns: 10
+    time_budget_s: 180
+
+suites:
+  # A skill's method: the same configuration with and without invoice-method, preloaded.
+  invoices-v1:
+    baseline:
+      toolsets: [file, terminal]
+    with-skill:
+      toolsets: [file, terminal]
+      skills: [invoice-method]
+
+  # The same ledger and vendor list as documents, or through the two MCP servers.
+  # due_by_terms makes 18 model calls with the servers, hence 30 turns on the mock too.
+  mcp-v1:
+    docs-export:
+      toolsets: [file, terminal]
+      documents: [mcp-v1/invoices.csv, mcp-v1/vendors.json]
+      limits:
+        mock: { max_turns: 30, time_budget_s: 600 }
+    with-mcp:
+      toolsets: [file, terminal]
+      mcp_servers: [invoice-db, vendor-directory]
+      limits:
+        mock: { max_turns: 30, time_budget_s: 600 }
+
+  # Memory off against memory on. A task's memory seeds go into the home only
+  # with memory on: with memory off nothing there is memory (Phase 8 G9).
+  memory-v1:
+    memory-off:
+      toolsets: [file, terminal]
+      memory: false
+    memory-on:
+      toolsets: [file, terminal]
+      memory: true
+
+  # The same knowledge four ways: none, as documents, as skills preloaded, as skills on demand.
+  knowledge-v1:
+    none:
+      toolsets: [file, terminal]
+    docs:
+      toolsets: [file, terminal]
+      documents:
+        - knowledge-v1/bx6-spec.md
+        - knowledge-v1/bx7-spec.md
+        - knowledge-v1/bx7.py
+        - knowledge-v1/codes.md
+        - knowledge-v1/house-style.md
+        - knowledge-v1/summary-template.md
+    skills-preload:
+      toolsets: [file, terminal]
+      skills: [bx7-format, house-style, bx6-format]
+      skill_loading: preload
+    skills-on-demand:
+      toolsets: [file, terminal]
+      skills: [bx7-format, house-style, bx6-format]
+      skill_loading: on_demand
+
+  # Toolsets alone: file, then file + terminal, then file + terminal + code_execution.
+  tools-v1:
+    file:
+      toolsets: [file]
+    file-terminal:
+      toolsets: [file, terminal]
+    file-terminal-code:
+      toolsets: [file, terminal, code_execution]

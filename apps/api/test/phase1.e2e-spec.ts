@@ -138,6 +138,9 @@ describe.skipIf(!SERVER_URL)('Phase 1 on Postgres 17: API and worker', () => {
       WORKER_CONCURRENCY: '2',
       SUITE_RELOAD_TIMEOUT_S: '60',
       MCP_TEST_TIMEOUT_S: '30',
+      // The samples seed (Phase 8) would add skills, documents, MCP servers and
+      // configurations this spec counts; phase8.e2e-spec.ts covers it.
+      SEED_SAMPLES: 'false',
     } satisfies Partial<Record<keyof Env, string>>);
     // The MCP test below proves a missing value is reported by name.
     delete process.env['INVOICE_DB_URL'];

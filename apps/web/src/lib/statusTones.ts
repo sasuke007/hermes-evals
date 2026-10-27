@@ -27,7 +27,10 @@ export type StatusKind =
   | 'mcpTest'
   | 'secret'
   | 'sandbox'
-  | 'worker';
+  | 'worker'
+  | 'judge'
+  | 'seed'
+  | 'seedItem';
 
 export interface StatusTone {
   tone: Tone;
@@ -144,6 +147,28 @@ export const STATUS_TONES: Record<StatusKind, Record<string, StatusTone>> = {
   worker: {
     online: t('pass', 'solid', 'online'),
     offline: t('fail', 'solid', 'offline'),
+  },
+  /**
+   * The LLM judge (System, Phase 8): the scripted mock model, which grades the samples but
+   * means nothing on a real model's answers; the mock's model name on another endpoint, which
+   * a real one fails; or a real one.
+   */
+  judge: {
+    mock: t('ung', 'solid', 'mock model'),
+    mock_name: t('ung', 'solid', 'check model'),
+    real: t('pass', 'solid', 'real model'),
+  },
+  /** This API start's samples seed (SEED_STATES), and what it did with each sample. */
+  seed: {
+    off: t('que', 'hollow', 'off'),
+    running: t('run', 'pulse', 'running'),
+    done: t('pass', 'solid', 'done'),
+    failed: t('fail', 'solid', 'failed'),
+  },
+  seedItem: {
+    created: t('pass', 'solid', 'created'),
+    skipped: t('que', 'hollow', 'skipped'),
+    failed: t('fail', 'solid', 'failed'),
   },
 };
 

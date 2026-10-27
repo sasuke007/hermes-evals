@@ -418,7 +418,10 @@ describe('New experiment', () => {
       timeBudgetOverrideS: null,
       expectedConfigHashes: {},
     };
-    await expect(launchExperiment(input)).resolves.toEqual({ id: EXPERIMENT_IDS.mcpVsBaseline });
+    await expect(launchExperiment(input)).resolves.toEqual({
+      id: EXPERIMENT_IDS.mcpVsBaseline,
+      warnings: [],
+    });
     setScenario('launch-refused');
     await expect(launchExperiment(input)).rejects.toThrow(
       'POST /api/experiments → 409 · Nous Portal is not connected',

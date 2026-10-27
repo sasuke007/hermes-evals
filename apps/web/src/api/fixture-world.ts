@@ -13,6 +13,7 @@ export * as inspector from '@/fixtures/inspector';
 export * as inspectorLogs from '@/fixtures/inspector-logs';
 export * as resources from '@/fixtures/resources';
 export * as runs from '@/fixtures/runs';
+export * as setup from '@/fixtures/setup';
 export * as suites from '@/fixtures/suites';
 export * as suitesAuthoring from '@/fixtures/suites-authoring';
 export * as suitesImport from '@/fixtures/suites-import';

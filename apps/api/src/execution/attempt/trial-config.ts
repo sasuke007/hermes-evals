@@ -10,7 +10,8 @@
  * - the toolsets, plus one entry per MCP server name (the `-t` aliases).
  * - memory on or off as the configuration says, for both of Hermes's stores
  *   (MEMORY.md and the user profile), which start empty in a fresh home
- *   unless the task seeds them (materialise.ts, Phase 6 P1).
+ *   unless the task seeds them and memory is on (materialise.ts, Phase 6
+ *   P1, Phase 8 G9).
  * - the background review's intervals, written out at Hermes's defaults
  *   (BACKGROUND_REVIEW: why they are not turned off).
  * - mcp_servers through hermesMcpEntry: stdio env values as `${NAME}`

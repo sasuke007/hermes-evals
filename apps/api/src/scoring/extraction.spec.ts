@@ -124,3 +124,75 @@ describe('extractAnswer', () => {
       expect(Object.keys(answer.value as object)).toEqual(['__proto__']);
   });
 });
+
+describe('extractAnswer on a reply without a fence (Phase 8 G5)', () => {
+  const MISSING = { status: 'missing', block_count: 0 };
+
+  it('takes a reply that is exactly one JSON object, flagged unfenced, over the trimmed reply', () => {
+    const text = '\n  {\n  "total_due": 99760.52,\n  "currency": "USD"\n}\n\n';
+    const answer = extractAnswer(text);
+    expect(ExtractedAnswerSchema.parse(answer)).toEqual({
+      status: 'found',
+      block_count: 0,
+      start: 3,
+      end: text.length - 2,
+      value: { total_due: 99760.52, currency: 'USD' },
+      unfenced: true,
+    });
+    expect(body(text)).toBe(text.trim());
+    expect(extractionComment(answer)).toBe('answer found');
+  });
+
+  it('takes a bare object with nothing around it, and an empty one', () => {
+    expect(extractAnswer('{"a":1}')).toMatchObject({ start: 0, end: 7, unfenced: true });
+    expect(extractAnswer('{}')).toMatchObject({ status: 'found', value: {}, unfenced: true });
+  });
+
+  it('keeps a reply with prose before or after the object missing', () => {
+    for (const text of [
+      'Here is the answer: {"total_due": 1}',
+      'Here is the answer:\n{"total_due": 1}',
+      '{"total_due": 1}\nLet me know if you need anything else.',
+      '{"a": 1} {"b": 2}',
+    ]) {
+      expect(extractAnswer(text)).toEqual(MISSING);
+      expect(extractionComment(extractAnswer(text))).toBe(
+        'no fenced JSON block found in final response',
+      );
+    }
+  });
+
+  it('keeps arrays, scalars and invalid objects missing, never invalid', () => {
+    for (const text of [
+      '[1, 2]',
+      '42',
+      '"done"',
+      'null',
+      'true',
+      '{total_due: 1}',
+      '{"a": 1,}',
+      '{',
+    ]) {
+      expect(extractAnswer(text)).toEqual(MISSING);
+    }
+    // An object JSON parses but no JSON column can hold.
+    expect(extractAnswer('{"x": 1e999}')).toEqual(MISSING);
+  });
+
+  it('leaves fenced answers as they were: the fence wins and no flag is written', () => {
+    const fenced = extractAnswer('```json\n{"a": 1}\n```');
+    expect(fenced).toEqual({ status: 'found', block_count: 1, start: 8, end: 16, value: { a: 1 } });
+    expect(fenced).not.toHaveProperty('unfenced');
+    // A non-json fence around the object is not an answer, and not a bare object either.
+    expect(extractAnswer('```\n{"a": 1}\n```')).toEqual(MISSING);
+    expect(extractAnswer('```javascript\n{"a": 1}\n```')).toEqual(MISSING);
+  });
+
+  it('keeps an unclosed json block invalid, whatever follows it', () => {
+    expect(extractAnswer('```json\n{"a": 1}')).toMatchObject({
+      status: 'invalid',
+      block_count: 1,
+      error: 'the last ```json block is not closed',
+    });
+  });
+});

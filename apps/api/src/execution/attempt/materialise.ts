@@ -2,16 +2,21 @@
  * Builds an attempt's home and workspace (plan 5.4) in the fresh directories
  * prepareTrialDirs made. Only four things from the platform ever enter them:
  * the task's fixtures and the configuration's documents (workspace), the
- * configuration's skills and the task's home seeds (home: skills/ and
- * memories/, Phase 6 P1), plus the files Hermes needs (task.txt,
+ * configuration's skills and, with memory on, the task's home seeds (home:
+ * skills/ and memories/, Phase 6 P1), plus the files Hermes needs (task.txt,
  * config.yaml, .no-bundled-skills, .run). Nothing else of the task — the
  * reference answer, verifiers, rubric, expected workspace or home — is read
  * here.
  *
- * The home seeds are copied in every arm, whatever memoryEnabled says: with
- * memory off Hermes builds no memory store and puts nothing in the prompt
- * (agent/agent_init.py _init_memory, agent/system_prompt.py _memory_parts),
- * so the same seed in both arms isolates the setting.
+ * The home seeds are copied in only when the configuration's memory is on
+ * (Phase 8 G9; homeMemoryRecord). Phase 6 copied them in every arm, on the
+ * reasoning that with memory off Hermes builds no memory store and puts
+ * nothing in the prompt (agent/agent_init.py _init_memory,
+ * agent/system_prompt.py _memory_parts). The real model showed otherwise:
+ * with memory off it found /opt/data/memories/USER.md with its file tools,
+ * read it and passed. With memory off nothing in the home is memory, so the
+ * seeds stay out, and the launch record's `home_memory` lists the ones left
+ * out.
  *
  * Every copy re-checks the content it wrote against the hash it was promised,
  * opens its source with O_NOFOLLOW, never follows a link, and creates its
@@ -22,7 +27,12 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { HOME_SEED_PATHS, homeSeedTarget, type LaunchRecord } from '@hermes-evals/shared';
+import {
+  HOME_SEED_PATHS,
+  homeSeedTarget,
+  type HomeMemoryRecord,
+  type LaunchRecord,
+} from '@hermes-evals/shared';
 import { SKILL_NAME_PATTERN } from '../../resources/skills/front-matter.js';
 import { skillContentHash } from '../../resources/skills/skill-files.js';
 import { walkTrialTree } from '../../sandbox/trial-files.js';
@@ -52,8 +62,27 @@ export interface MaterialisedTrial {
   inputs: LaunchRecord['inputs'];
   /** Workspace-relative path to the input copied there. */
   manifest: Map<string, InputFile>;
-  /** Home-relative path (`memories/MEMORY.md`) to the seed copied there. */
+  /** Home-relative path (`memories/MEMORY.md`) to the seed copied there; empty with memory off. */
   homeSeeds: Map<string, InputFile>;
+  /** The launch record's `home_memory`: what memory decided about the home. */
+  homeMemory: HomeMemoryRecord;
+}
+
+/**
+ * What the configuration's memory setting decides about the home (Phase 8
+ * G9), for the launch record's `home_memory`. With memory on every home
+ * seed is copied in and home/memories is collected after the run; with
+ * memory off neither: the seeds are listed as skipped, home-relative.
+ */
+export function homeMemoryRecord(
+  plan: Pick<AttemptPlan, 'task' | 'configuration'>,
+): HomeMemoryRecord {
+  const on = plan.configuration.memoryEnabled;
+  return {
+    memory_enabled: on,
+    seeds_skipped: on ? [] : plan.task.homeSeeds.map((seed) => seed.path),
+    memories_collected: on,
+  };
 }
 
 /** Where a home seed may land: `memories/MEMORY.md` and `memories/USER.md`. */
@@ -252,8 +281,10 @@ export async function materialiseTrial(
     await mkdir(skillsHome, { mode: 0o755 });
     for (const skill of plan.configuration.skills) await placeSkill(deps, skillsHome, skill);
   }
+  const homeMemory = homeMemoryRecord(plan);
   const homeSeeds = new Map<string, InputFile>();
-  for (const seed of plan.task.homeSeeds) {
+  // With memory off no seed is copied in (homeMemoryRecord lists them as skipped).
+  for (const seed of homeMemory.memory_enabled ? plan.task.homeSeeds : []) {
     const what = `home seed ${seed.path}`;
     // The loader stores only HOME_SEED_PATHS; anything else would write elsewhere in the home.
     if (!HOME_SEED_TARGETS.has(seed.path)) {
@@ -268,5 +299,5 @@ export async function materialiseTrial(
   await writeFile(join(home, '.no-bundled-skills'), '', { flag: 'wx' });
   await writeFile(join(home, 'task.txt'), plan.task.prompt, { flag: 'wx' });
   await writeFile(join(home, 'config.yaml'), configYaml, { flag: 'wx' });
-  return { inputs, manifest, homeSeeds };
+  return { inputs, manifest, homeSeeds, homeMemory };
 }

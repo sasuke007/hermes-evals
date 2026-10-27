@@ -29,14 +29,14 @@
 #   scripts/phase3-smoke.sh                                     # http://localhost:3000/api
 #   BASE_URL=http://localhost:8080/api scripts/phase3-smoke.sh  # through nginx
 #
-# The stack needs the mock model (profile `test`) with the scripts in
+# The stack needs the mock model (on every start since Phase 8) with the scripts in
 # scripts/phase3-mock-scripts.json, and the LLM judge pointed at it. Compose
 # mounts the file or directory MOCK_SCRIPTS_FILE names into the mock, and
 # reads these from the shell before .env, so no file changes:
 #
 #   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
-#     docker compose --profile test up -d
+#     docker compose up -d
 #
 # (every scripts/*mock-scripts.json, in name order, so the other smoke tests
 # pass on the same stack). The mock plays the first script whose `match`
@@ -320,7 +320,7 @@ if [ "$DOCKER" = 1 ]; then
   if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'Smoke rubric LEDGER-JUDGE' >/dev/null; then
     pass 'the mock model has scripts/phase3-mock-scripts.json' 'its scripts match "Smoke rubric LEDGER-JUDGE", ...'
   else
-    fail 'the mock model has scripts/phase3-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
+    fail 'the mock model has scripts/phase3-mock-scripts.json' 'start it as the header says (MOCK_SCRIPTS_FILE)'
   fi
 else
   skip 'judge settings, keys, workers row, migration, mock scripts' 'docker compose not reachable here (or SMOKE_DOCKER=0)'
@@ -811,7 +811,9 @@ fi
 if [ "$DOCKER" = 1 ] && [ "$SMOKE_RESTART" != 0 ] && [ -n "$ORIG_JUDGE_PROVIDER" ]; then
   if need 're-score 409 while the judge is not ready' "$A_LEDGER" "$EXP"; then
     API_JUDGE_CHANGED=1
-    if api_judge openrouter mock/scripted ''; then
+    # A model OpenRouter does not have, and not the mock's name: env.ts reads
+    # mock/scripted beside a real provider as no model (a 409 of its own).
+    if api_judge openrouter smoke/no-such-model ''; then
       pass 'api recreated with JUDGE_PROVIDER=openrouter (no key)' "$(dc exec -T api sh -c 'echo "$JUDGE_PROVIDER $JUDGE_MODEL"' 2>/dev/null)"
       request GET "/runs/$A_LEDGER"
       check '  the run needs the OpenRouter judge' 200 \

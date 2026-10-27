@@ -270,7 +270,11 @@ describe('ExperimentListPage', () => {
     expect(w.text()).toContain('No experiments yet');
     expect(w.text()).toContain('You need a suite and at least two configurations to start.');
     expect(w.text()).toContain('1 suite loaded · 0 configurations');
-    const links = w.get('[data-testid="empty-state"]').findAll('a');
+    // The sample experiment's own fix link is checked in sampleExperiment.spec.ts.
+    const links = w
+      .get('[data-testid="empty-state"]')
+      .findAll('a')
+      .filter((a) => !a.element.closest('[data-testid="sample-experiment"]'));
     expect(links.map((a) => [a.text(), a.attributes('href')])).toEqual([
       ['New experiment', '/experiments/new'],
       ['Set up configurations', '/configurations'],

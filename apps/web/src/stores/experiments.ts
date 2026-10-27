@@ -10,7 +10,8 @@
  * New experiment: what the form offers (GET /experiments/new-options), the live estimate and
  * the inline configuration diff (each answer is kept only if no newer request was made since),
  * the Duplicate draft, and the launch itself, which rejects with the ApiError for the panel
- * to show (409 reasons, 400 issues per field).
+ * to show (409 reasons, 400 issues per field) and keeps the answer's warnings for the
+ * Overview.
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
@@ -182,19 +183,32 @@ export const useExperimentsStore = defineStore('experiments', () => {
   }
 
   const launching = ref(false);
+  /**
+   * What each launch from this tab went ahead despite (the launch answer's `warnings`, Phase
+   * 8 G2), by experiment id, for its Overview to show until dismissed. Kept in memory only:
+   * the answer is the one place the API says it.
+   */
+  const launchWarnings = ref<Record<string, string[]>>({});
 
   /**
-   * POST /experiments. Resolves with the new experiment's id; rejects with the ApiError,
-   * which the summary panel shows (the form keeps its values).
+   * POST /experiments. Resolves with the new experiment's id and keeps the answer's warnings
+   * for its Overview; rejects with the ApiError, which the summary panel shows (the form
+   * keeps its values).
    */
   async function launch(input: LaunchExperimentInput): Promise<string> {
     launching.value = true;
     try {
-      const { id } = await launchExperiment(input);
+      const { id, warnings } = await launchExperiment(input);
+      if (warnings.length > 0) launchWarnings.value[id] = warnings;
       return id;
     } finally {
       launching.value = false;
     }
+  }
+
+  /** The Overview's Dismiss on the launch's warnings. */
+  function dismissLaunchWarnings(id: string): void {
+    delete launchWarnings.value[id];
   }
 
   /** Leaving the form: drop what belongs to it so the next visit starts clean. */
@@ -239,6 +253,8 @@ export const useExperimentsStore = defineStore('experiments', () => {
     loadDuplicate,
     launching,
     launch,
+    launchWarnings,
+    dismissLaunchWarnings,
     resetNewExperiment,
   };
 });

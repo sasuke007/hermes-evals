@@ -287,12 +287,13 @@ const LAUNCH_VIEW: LaunchRecordView = {
   configNote: null,
   homeSeeds: [{ path: 'memories/USER.md', sha256: hash('f') }],
   backgroundReview: { memoryNudgeInterval: 0, skillCreationNudgeInterval: 0 },
+  homeMemory: { memoryEnabled: true, seedsSkipped: [], memoriesCollected: true },
 };
 
 describe('the launch record view (P1, P3, P5)', () => {
   it('shows the home seeds, the loading mode and the review intervals', () => {
     expect(LaunchRecordViewSchema.parse(LAUNCH_VIEW)).toEqual(LAUNCH_VIEW);
-    const older = { ...LAUNCH_VIEW, homeSeeds: [], backgroundReview: null };
+    const older = { ...LAUNCH_VIEW, homeSeeds: [], backgroundReview: null, homeMemory: null };
     expect(LaunchRecordViewSchema.parse(older)).toEqual(older);
     const { skillLoading: _, ...noMode } = LAUNCH_VIEW.container;
     expect(
@@ -410,6 +411,7 @@ describe('unset MCP variables (Phase 5 decision #13)', () => {
       configHash: hash('a'),
       model: 'mock/scripted',
       provider: 'custom',
+      mockModel: true,
       memoryEnabled: false,
       skills: [],
       skillLoading: 'preload',

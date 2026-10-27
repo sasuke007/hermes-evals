@@ -191,6 +191,7 @@ const DETAIL: RunDetail = {
     extracted: { start: 14, end: 32 },
     fence: { start: 6, end: 36 },
     extraction: 'found',
+    unfenced: false,
     parsed: { duplicates: [] },
     parseError: null,
     reference: { duplicates: [['INV-1042', 'INV-1107']] },
@@ -235,6 +236,7 @@ const DETAIL: RunDetail = {
     configNote: null,
     homeSeeds: [],
     backgroundReview: { memoryNudgeInterval: 0, skillCreationNudgeInterval: 0 },
+    homeMemory: { memoryEnabled: false, seedsSkipped: [], memoriesCollected: false },
   },
   counterpart: {
     runId: 'run_01JB7X4K3P',

@@ -13,8 +13,9 @@
  * files, which are skipped (collect-files.ts isMemoryLockFile, Phase 6 #2).
  * Each is labelled against the home seeds the way workspace files are
  * labelled against the fixtures: `home_seed_unchanged`, `home_seed_modified`,
- * or `agent` for a file no seed placed. A missing memories/ folder (memory
- * off, nothing written, no seed) is no artifact and no error.
+ * or `agent` for a file no seed placed. A missing memories/ folder (nothing
+ * written, no seed) is no artifact and no error. With memory off this is not
+ * called at all (collect.ts, Phase 8 G9): nothing in the home is memory then.
  */
 import { lstat, readlink } from 'node:fs/promises';
 import { join } from 'node:path';

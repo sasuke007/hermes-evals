@@ -412,6 +412,38 @@ export const LaunchContainerRecordSchema = z.object({
 });
 export type LaunchContainerRecord = z.infer<typeof LaunchContainerRecordSchema>;
 
+/** LaunchRecord `home_memory`: the memory setting, and what it kept out of the run. */
+export const HomeMemoryRecordSchema = z
+  .object({
+    /** The configuration's memory setting. */
+    memory_enabled: z.boolean(),
+    /**
+     * The task's home seeds left out because memory is off, relative to the
+     * home (`memories/USER.md`). Empty with memory on: the copied seeds are
+     * the `inputs` of source `home_seed`.
+     */
+    seeds_skipped: z.array(z.string()),
+    /** Whether home/memories was collected after the run: exactly when memory is on. */
+    memories_collected: z.boolean(),
+  })
+  .superRefine((home, ctx) => {
+    if (home.memories_collected !== home.memory_enabled) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['memories_collected'],
+        message: 'home/memories is collected exactly when memory is on',
+      });
+    }
+    if (home.memory_enabled && home.seeds_skipped.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['seeds_skipped'],
+        message: 'with memory on every home seed is copied in',
+      });
+    }
+  });
+export type HomeMemoryRecord = z.infer<typeof HomeMemoryRecordSchema>;
+
 export const LaunchRecordSchema = z.object({
   argv: z.array(z.string()),
   cwd: z.string(),
@@ -468,6 +500,15 @@ export const LaunchRecordSchema = z.object({
   background_review: z
     .object({ memory_nudge_interval: count, skill_creation_nudge_interval: count })
     .optional(),
+  /**
+   * What the run did with memory in the home (Phase 8 G9). Home seeds are
+   * copied in, and home/memories collected after the run, only when the
+   * configuration's memory is on: with memory off nothing there is memory,
+   * and the agent could read the seeds with its file tools. Absent on
+   * records from before Phase 8, which seeded and collected either way.
+   * Read leniently, like `container`.
+   */
+  home_memory: HomeMemoryRecordSchema.optional().catch(undefined),
   limits: z.object({
     max_turns: z.number().int(),
     run_budget_seconds: z.number().int(),
@@ -490,16 +531,38 @@ export type LaunchRecord = z.infer<typeof LaunchRecordSchema>;
  * The answer pulled out of the agent's final text: the last fenced JSON block.
  * Offsets are UTF-16 code-unit indices into the final text, half-open, and
  * bound the block body only. `missing` and `invalid` make answer keys ungradable.
+ *
+ * Since Phase 8 (G5) a reply with no ```json block at all, closed or not,
+ * whose trimmed text is exactly one JSON object, is the answer too: `found`
+ * with `unfenced: true`, `block_count` 0, and the trimmed reply as its range.
+ * Anything else without a fence stays `missing`. The flag is absent on every
+ * fenced answer, so an extraction stored before Phase 8 reads the same.
  */
 export const ExtractedAnswerSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('missing'), block_count: z.literal(0) }),
-  z.object({
-    status: z.literal('found'),
-    block_count: z.number().int().positive(),
-    start: count,
-    end: count,
-    value: JsonValueSchema,
-  }),
+  z
+    .object({
+      status: z.literal('found'),
+      /** Closed ```json blocks in the text; 0 exactly when the answer is unfenced. */
+      block_count: count,
+      start: count,
+      end: count,
+      value: JsonValueSchema,
+      /** The reply itself was the answer, one JSON object without a fence. Absent when fenced. */
+      unfenced: z.literal(true).optional(),
+    })
+    .superRefine((answer, ctx) => {
+      if ((answer.unfenced === true) !== (answer.block_count === 0)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['block_count'],
+          message:
+            answer.unfenced === true
+              ? 'an unfenced answer has block_count 0'
+              : 'a fenced answer has at least one block',
+        });
+      }
+    }),
   z.object({
     status: z.literal('invalid'),
     block_count: z.number().int().positive(),

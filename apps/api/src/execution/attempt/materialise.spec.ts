@@ -1,12 +1,13 @@
 /**
- * Home seeds in materialisation (Phase 6 P1): each seed is copied, hash
- * re-checked, to its place under the trial home's memories/, in every arm
- * whatever memoryEnabled says, and listed with its hash among the launch
- * record's inputs; nothing else of the task reaches the home.
+ * Home seeds in materialisation (Phase 6 P1, Phase 8 G9): with memory on
+ * each seed is copied, hash re-checked, to its place under the trial home's
+ * memories/, and listed with its hash among the launch record's inputs;
+ * with memory off none is, and the record's `home_memory` lists them as
+ * skipped. Nothing else of the task reaches the home.
  */
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { LaunchRecordSchema } from '@hermes-evals/shared';
+import { HomeMemoryRecordSchema, LaunchRecordSchema } from '@hermes-evals/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { prepareTrialDirs } from '../../sandbox/trial-runner.js';
 import type { AttemptPlan } from '../contracts.js';
@@ -47,32 +48,52 @@ async function prepared(
 const deps = () => ({ blobs: world.blobs, skillsDir: world.skillsDir });
 
 describe('materialiseTrial with home seeds', () => {
-  it.each([false, true])(
-    'copies each seed into home/memories/ with memory_enabled %s',
-    async (memoryEnabled) => {
-      const plan = await prepared(seeds, memoryEnabled);
-      const built = await materialiseTrial(plan, 'model: {}\n', deps());
-      const memories = join(plan.paths.home, 'memories');
-      expect((await readdir(memories)).sort()).toEqual(['MEMORY.md', 'USER.md']);
-      expect(await readFile(join(memories, 'USER.md'), 'utf8')).toBe(USER_MD);
-      expect(await readFile(join(memories, 'MEMORY.md'), 'utf8')).toBe(MEMORY_MD);
-      // Listed with their hashes after the workspace inputs, home-relative.
-      expect(built.inputs.filter((i) => i.source === 'home_seed')).toEqual(
-        seeds.map((s) => ({ path: s.path, sha256: s.sha256, source: 'home_seed' })),
-      );
-      expect(LaunchRecordSchema.shape.inputs.parse(built.inputs).map((i) => i.source)).toEqual([
-        'fixture',
-        'document',
-        'home_seed',
-        'home_seed',
-      ]);
-      expect([...built.homeSeeds]).toEqual(
-        seeds.map((s) => [s.path, { source: 'home_seed', sha256: s.sha256, size: s.size }]),
-      );
-      // Seeds never land in the workspace.
-      expect(await readdir(plan.paths.workspace)).not.toContain('memories');
-    },
-  );
+  it('with memory on copies each seed into home/memories/', async () => {
+    const plan = await prepared(seeds, true);
+    const built = await materialiseTrial(plan, 'model: {}\n', deps());
+    const memories = join(plan.paths.home, 'memories');
+    expect((await readdir(memories)).sort()).toEqual(['MEMORY.md', 'USER.md']);
+    expect(await readFile(join(memories, 'USER.md'), 'utf8')).toBe(USER_MD);
+    expect(await readFile(join(memories, 'MEMORY.md'), 'utf8')).toBe(MEMORY_MD);
+    // Listed with their hashes after the workspace inputs, home-relative.
+    expect(built.inputs.filter((i) => i.source === 'home_seed')).toEqual(
+      seeds.map((s) => ({ path: s.path, sha256: s.sha256, source: 'home_seed' })),
+    );
+    expect(LaunchRecordSchema.shape.inputs.parse(built.inputs).map((i) => i.source)).toEqual([
+      'fixture',
+      'document',
+      'home_seed',
+      'home_seed',
+    ]);
+    expect([...built.homeSeeds]).toEqual(
+      seeds.map((s) => [s.path, { source: 'home_seed', sha256: s.sha256, size: s.size }]),
+    );
+    expect(HomeMemoryRecordSchema.parse(built.homeMemory)).toEqual({
+      memory_enabled: true,
+      seeds_skipped: [],
+      memories_collected: true,
+    });
+    // Seeds never land in the workspace.
+    expect(await readdir(plan.paths.workspace)).not.toContain('memories');
+  });
+
+  it('with memory off copies no seed, and says which it left out', async () => {
+    // Phase 8 G9: the real model read a seeded USER.md with its file tools while memory was off.
+    const plan = await prepared(seeds, false);
+    const built = await materialiseTrial(plan, 'model: {}\n', deps());
+    expect(await readdir(plan.paths.home)).not.toContain('memories');
+    expect(await readdir(plan.paths.workspace)).not.toContain('memories');
+    expect(built.homeSeeds.size).toBe(0);
+    expect(LaunchRecordSchema.shape.inputs.parse(built.inputs).map((i) => i.source)).toEqual([
+      'fixture',
+      'document',
+    ]);
+    expect(HomeMemoryRecordSchema.parse(built.homeMemory)).toEqual({
+      memory_enabled: false,
+      seeds_skipped: ['memories/MEMORY.md', 'memories/USER.md'],
+      memories_collected: false,
+    });
+  });
 
   it('leaves the home without memories/ when the task has no seed', async () => {
     const plan = await prepared([], true);

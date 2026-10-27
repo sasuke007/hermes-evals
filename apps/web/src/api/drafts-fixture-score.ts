@@ -68,17 +68,32 @@ export function answerValueAt(
   return node;
 }
 
-/** The last ```json block of a reply (plan 9.1). */
+/**
+ * The last ```json block of a reply (plan 9.1), else the whole trimmed reply when it is
+ * exactly one JSON object (the unfenced answer of Phase 8 G5, as the API reads it).
+ */
 export function extractAnswerBlock(reply: string): NonNullable<TryCheckResult['extraction']> {
   const blocks = [...reply.matchAll(/```json\s*\n([\s\S]*?)```/gi)];
   const last = blocks[blocks.length - 1];
-  if (!last) return { status: 'missing', block: null, error: null };
+  if (!last) return unfencedAnswer(reply) ?? { status: 'missing', block: null, error: null };
   const block = last[1]!.trim();
   try {
     JSON.parse(block);
     return { status: 'found', block, error: null };
   } catch (err) {
     return { status: 'invalid', block, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The trimmed reply when it starts with `{` and parses whole; null otherwise. */
+function unfencedAnswer(reply: string): NonNullable<TryCheckResult['extraction']> | null {
+  const block = reply.trim();
+  if (!block.startsWith('{') || reply.includes('```json')) return null;
+  try {
+    JSON.parse(block);
+    return { status: 'found', block, error: null };
+  } catch {
+    return null;
   }
 }
 

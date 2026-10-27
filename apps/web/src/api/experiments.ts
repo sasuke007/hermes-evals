@@ -17,6 +17,7 @@ import {
   ExperimentListRowSchema,
   LaunchExperimentResultSchema,
   missingSecretsConflictMessage,
+  mockJudgeWarning,
   NewExperimentDraftSchema,
   NewExperimentOptionsSchema,
 } from '@hermes-evals/shared';
@@ -56,9 +57,13 @@ function seedOrThrow(w: FixtureWorld, request: string, id: string): ExperimentSe
 /** GET /experiments: newest first. */
 export function listExperiments(): Promise<ExperimentListRow[]> {
   if (apiMode === 'live') return apiGet('/experiments', ExperimentListRowSchema.array());
+  // samples-seeded is a fresh clone: no experiment yet, so the list offers the sample one.
+  // Its launch still opens the running sample experiment, which the scenario keeps.
   return fixture(
     ({ experiments }) =>
-      experiments.experimentSeeds(hasScenario).map(experiments.experimentListRowFixture),
+      hasScenario('samples-seeded')
+        ? []
+        : experiments.experimentSeeds(hasScenario).map(experiments.experimentListRowFixture),
     {
       request: 'GET /api/experiments',
     },
@@ -134,15 +139,34 @@ export function estimateExperiment(query: EstimateQuery): Promise<ExperimentEsti
   );
 }
 
+/** The fixture options' configurations a launch chose, baseline first. */
+function chosenOptions(w: FixtureWorld, input: LaunchExperimentInput) {
+  const options = w.experiments.newExperimentOptionsFixture(hasScenario).configurations;
+  return [input.baselineVersionId, ...input.candidateVersionIds].flatMap(
+    (id) => options.find((c) => c.versionId === id) ?? [],
+  );
+}
+
+/**
+ * The launch answer's warnings, as the API gives them (Phase 8 G2): the mock judge's, when a
+ * chosen configuration runs a real model and a chosen task has an llm_judge check.
+ */
+function launchWarnings(w: FixtureWorld, input: LaunchExperimentInput): string[] {
+  const options = w.experiments.newExperimentOptionsFixture(hasScenario);
+  const tasks =
+    options.suites
+      .find((s) => s.suiteId === input.suiteId)
+      ?.tasks.filter((t) => input.taskKeys.includes(t.key)) ?? [];
+  const warning = mockJudgeWarning(options.judge, chosenOptions(w, input), tasks);
+  return warning === null ? [] : [warning];
+}
+
 /**
  * The launch 409's message when a chosen configuration's MCP servers name variables that are
  * not set (Phase 6 S7), worded as the API words it, or null: the fixture options say which.
  */
 function missingSecretsRefusal(w: FixtureWorld, input: LaunchExperimentInput): string | null {
-  const options = w.experiments.newExperimentOptionsFixture(hasScenario).configurations;
-  const chosen = [input.baselineVersionId, ...input.candidateVersionIds].flatMap(
-    (id) => options.find((c) => c.versionId === id) ?? [],
-  );
+  const chosen = chosenOptions(w, input);
   const byConfiguration = chosen.map((c) => ({ configuration: c.name, missing: c.missingSecrets }));
   return byConfiguration.some((c) => c.missing.length > 0)
     ? missingSecretsConflictMessage(byConfiguration)
@@ -154,8 +178,10 @@ function missingSecretsRefusal(w: FixtureWorld, input: LaunchExperimentInput): s
  * its Overview. Rejects with an ApiError: 409 when a provider or the LLM
  * judge is not ready, no proven worker is connected, a chosen configuration's
  * MCP variables are not set, or a configuration changed since the form
- * loaded; 400 with issues per field. The form keeps its values. In fixtures a
- * launch opens the running sample experiment.
+ * loaded; 400 with issues per field. The form keeps its values. The answer
+ * carries what the launch went ahead despite (`warnings`): the mock judge's
+ * warning (Phase 8 G2), which the Overview shows. In fixtures a launch opens
+ * the running sample experiment.
  */
 export async function launchExperiment(
   input: LaunchExperimentInput,
@@ -177,7 +203,10 @@ export async function launchExperiment(
   const w = await fixtureWorld();
   const unset = missingSecretsRefusal(w, input);
   if (unset) return fixtureFailure(request, 409, unset);
-  return fixture({ id: w.experiments.EXPERIMENT_IDS.mcpVsBaseline }, { request, latencyMs: 600 });
+  return fixture(
+    { id: w.experiments.EXPERIMENT_IDS.mcpVsBaseline, warnings: launchWarnings(w, input) },
+    { request, latencyMs: 600 },
+  );
 }
 
 /** POST /experiments/:id/pause: stops dispatching; in-flight runs finish. */

@@ -17,13 +17,14 @@
  * newer-version); New experiment's options also read secret-not-set and
  * mcp-test-failed (with-mcp's unset INVOICE_DB_URL) and skills-on-demand.
  */
-import type {
-  ExecutionErrorCategory,
-  ExperimentStatus,
-  NotComputableReason,
-  RunStatus,
-  ScoreStatus,
-  ScorerType,
+import {
+  isMockModelRoute,
+  type ExecutionErrorCategory,
+  type ExperimentStatus,
+  type NotComputableReason,
+  type RunStatus,
+  type ScoreStatus,
+  type ScorerType,
 } from '@hermes-evals/shared';
 import type {
   ConfigAggregate,
@@ -58,6 +59,8 @@ import {
   MODEL,
   PRICE_TABLE,
 } from './configurations';
+import { sampleConfigOptions } from './samples';
+import { judgeFixture } from './setup';
 import { gateOf, intervalOf, type TaskCounts, verdictOf } from './statistics';
 import {
   addSeconds,
@@ -1697,7 +1700,9 @@ export function newExperimentOptionsFixture(
   active: (name: string) => boolean,
 ): NewExperimentOptions {
   const state = suiteStateFrom(active);
-  const noConfigs = active('empty') || active('first-launch');
+  // samples-seeded: a fresh clone, where only the seeded sample configurations exist.
+  const seeded = active('samples-seeded');
+  const noConfigs = active('empty') || active('first-launch') || seeded;
   const noHistory = active('no-history');
   const configs = noConfigs ? [] : CONFIG_NAMES;
   // openrouter-in-use: every configuration runs on OpenRouter, which has no key (the
@@ -1729,44 +1734,52 @@ export function newExperimentOptionsFixture(
                 verificationCount: t.verificationTypes.length,
                 valid: t.valid,
                 invalidReason: t.valid ? null : LATE_FEES_INVALID_REASON,
+                hasLlmJudge: t.verificationTypes.includes('llm_judge'),
               })),
             },
           ]
         : [],
     ),
-    configurations: configs.map((name) => {
-      const c = configVersionIn(active, name);
-      const per = noHistory ? BUDGET_ESTIMATE : PER_RUN[name];
-      const estimate = {
-        seconds: per.seconds,
-        costUsd: per.costUsd,
-        tokens: per.tokens,
-        basis: noHistory ? ('budget' as const) : ('history' as const),
-        pastRuns: noHistory ? 0 : 192,
-      };
-      return {
-        configurationId: c.configurationId,
-        versionId: c.versionId,
-        name: c.name,
-        version: c.version,
-        configHash: c.configHash,
-        model: c.model,
-        provider: onOpenRouter ? ('openrouter' as const) : c.provider,
-        memoryEnabled: c.memoryEnabled,
-        skills: c.skills.map((s) => `${s.name}@${s.version}`),
-        skillLoading: c.skillLoading,
-        mcpServers: c.mcpServers.map((m) => `${m.name} (${m.transport})`),
-        missingSecrets:
-          invoiceDbUrlMissing && c.mcpServers.some((m) => m.name === 'invoice-db')
-            ? [{ server: 'invoice-db', name: 'INVOICE_DB_URL', transport: 'stdio' as const }]
-            : [],
-        estimates: Object.fromEntries(suites.flatMap((s) => (s ? [[s.suiteId, estimate]] : []))),
-      };
-    }),
+    configurations: [
+      ...configs.map((name) => {
+        const c = configVersionIn(active, name);
+        const per = noHistory ? BUDGET_ESTIMATE : PER_RUN[name];
+        const estimate = {
+          seconds: per.seconds,
+          costUsd: per.costUsd,
+          tokens: per.tokens,
+          basis: noHistory ? ('budget' as const) : ('history' as const),
+          pastRuns: noHistory ? 0 : 192,
+        };
+        return {
+          configurationId: c.configurationId,
+          versionId: c.versionId,
+          name: c.name,
+          version: c.version,
+          configHash: c.configHash,
+          model: c.model,
+          provider: onOpenRouter ? ('openrouter' as const) : c.provider,
+          mockModel: !onOpenRouter && isMockModelRoute(c),
+          memoryEnabled: c.memoryEnabled,
+          skills: c.skills.map((s) => `${s.name}@${s.version}`),
+          skillLoading: c.skillLoading,
+          mcpServers: c.mcpServers.map((m) => `${m.name} (${m.transport})`),
+          missingSecrets:
+            invoiceDbUrlMissing && c.mcpServers.some((m) => m.name === 'invoice-db')
+              ? [{ server: 'invoice-db', name: 'INVOICE_DB_URL', transport: 'stdio' as const }]
+              : [],
+          estimates: Object.fromEntries(suites.flatMap((s) => (s ? [[s.suiteId, estimate]] : []))),
+        };
+      }),
+      ...(seeded ? sampleConfigOptions(suites.flatMap((s) => (s ? [s.suiteId] : []))) : []),
+    ],
     defaults: { repetitions: 5, concurrency: 3 },
     maxConcurrency: 4,
     workerCount: 1,
     priceTable: PRICE_TABLE,
+    // Nous with JUDGE_MODEL set, as the run fixtures assume; the mock under judge-mock and
+    // samples-seeded (./setup.ts, which System reads too).
+    judge: judgeFixture(active),
   };
 }
 

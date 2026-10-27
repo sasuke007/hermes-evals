@@ -7,17 +7,26 @@
  * variables it needs that are not set (Phase 6 S7: the form shows them and
  * disables Launch, as launch would answer 409), the concurrency the proven
  * workers allow, and the price table.
+ *
+ * Also what the mock-judge warning needs (Phase 8 G2): each task's
+ * `hasLlmJudge`, each configuration's `mockModel` and the platform judge, so
+ * the form computes the shared mockJudgeWarning as the user chooses, with
+ * the values the launch uses for its own warning.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import type {
-  NewExperimentConfigOption,
-  NewExperimentOptions,
-  NewExperimentSuiteOption,
-  PriceTable,
+import { ConfigService } from '@nestjs/config';
+import {
+  isMockModelRoute,
+  type NewExperimentConfigOption,
+  type NewExperimentOptions,
+  type NewExperimentSuiteOption,
+  type PriceTable,
 } from '@hermes-evals/shared';
+import type { Env } from '../../config/env.js';
 import { buildVersions, loadLatestPairs } from '../../configurations/views.js';
 import { DB } from '../../database/db.provider.js';
 import type { AppDb } from '../../database/types.js';
+import { hasLlmJudge, judgeViewFrom } from '../../providers/judge-view.js';
 import { MAX_RUN_BUDGET_SECONDS } from '../../queue/queues.js';
 import { unsetMcpVariablesByVersion } from '../../resources/secrets/unset-variables.js';
 import { currentSuites, tasksOf } from '../../suites/suites.queries.js';
@@ -59,6 +68,7 @@ export class NewOptionsService {
   constructor(
     @Inject(DB) private readonly db: AppDb,
     private readonly estimates: EstimatesService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   async options(): Promise<NewExperimentOptions> {
@@ -103,6 +113,7 @@ export class NewOptionsService {
           verificationCount: t.verification.length,
           valid: t.valid,
           invalidReason: t.valid ? null : (t.invalidReason ?? 'invalid'),
+          hasLlmJudge: hasLlmJudge(t.verification),
         })),
       };
     });
@@ -115,6 +126,7 @@ export class NewOptionsService {
       configHash: view.configHash,
       model: view.model,
       provider: view.provider,
+      mockModel: isMockModelRoute(row),
       memoryEnabled: view.memoryEnabled,
       skills: view.skills.map((s) => `${s.name}@${s.version}`),
       skillLoading: view.skillLoading,
@@ -136,6 +148,7 @@ export class NewOptionsService {
       maxConcurrency: workersNow.capacity,
       workerCount: workersNow.live.length,
       priceTable: priceEntries(prices),
+      judge: judgeViewFrom(this.config),
     };
   }
 }

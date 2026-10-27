@@ -9,9 +9,8 @@
 # cached tokens are priced at the input rate. `checked_at` is the date the
 # price was last checked against the provider's public price page.
 #
-# Only prices verified from a public page belong here. None of the real
-# models is listed yet: add one with its source and checked_at when it has
-# been checked, for the provider route the experiment uses.
+# Only prices verified from a public page belong here, each with its source
+# and checked_at.
 models:
   # The scripted mock model (apps/egress/src/mock-model.ts) that every test
   # and check runs against: it costs nothing.
@@ -19,3 +18,16 @@ models:
     input_per_1m: 0
     output_per_1m: 0
     checked_at: '2026-10-24'
+  # GPT-6.1 Sol at OpenAI's published standard-tier rates for requests up to
+  # 272K input tokens (https://developers.openai.com/api/docs/pricing,
+  # checked 27 Oct 2026): input $2.00, cached input $0.10, 30-minute cache
+  # write $2.50, output $10.00 per 1M tokens. Every run here stays far below
+  # 272K tokens a request. The platform reaches this model through Nous
+  # Portal (provider `nous`), whose own price page could not be read on that
+  # date, so costs on that route are estimates at OpenAI's list price.
+  openai/gpt-6.1-sol:
+    input_per_1m: 2.0
+    output_per_1m: 10.0
+    cache_read_per_1m: 0.1
+    cache_write_per_1m: 2.5
+    checked_at: '2026-10-27'

@@ -2,7 +2,7 @@
 
 An evaluation platform for [Hermes Agent](https://github.com/NousResearch/hermes-agent). You write tasks and say how each is scored, define the agent configurations you want to compare (model, skills, memory, toolsets, MCP servers, documents), and run every task under every configuration several times, each run in a locked-down container of its own. You get a verdict, `better`, `worse` or `inconclusive`, with a 95% confidence interval, and the evidence behind every run: the agent's timeline of model and tool calls, its answer, each check's score and the files it wrote.
 
-It runs on your machine with Docker Compose: a NestJS API and worker, a Vue 3 web app, PostgreSQL with pg-boss for durable jobs, and three small services that keep trials isolated. TypeScript throughout, in a pnpm and Turborepo monorepo. Five sample suites and a scripted mock model come with it, so everything can be tried without a model account and without spending money.
+It runs on your machine with Docker Compose: a NestJS API and worker, a Vue 3 web app, PostgreSQL with pg-boss for durable jobs, and three small services that keep trials isolated. TypeScript throughout, in a pnpm and Turborepo monorepo. Five sample suites, the skills, documents, MCP servers and configurations they use, and a scripted mock model come with it. One command starts it all, so everything can be tried without a model account and without spending money.
 
 ## Requirements
 
@@ -12,23 +12,22 @@ It runs on your machine with Docker Compose: a NestJS API and worker, a Vue 3 we
 - **Disk**: the first build leaves about 10 GB in the Docker VM on Colima and 15 GB on Docker Desktop: the images (the Hermes trial image alone is 4.5 GB) and about 4 GB of build cache that `docker builder prune` gives back. Each run adds little: its home is deleted when it ends and its workspace after `TRIAL_RETENTION_DAYS` (7). A 60 GB VM disk was tested; Colima's default is 100 GB.
 - **Network** for the first build: Docker Hub (the pinned Hermes image is a 1.1 GB download), the npm registry and Debian's package mirrors. The first `up --build` took 11 minutes on Colima over a 3 MB/s connection and 2 minutes on Docker Desktop over a faster one, most of it downloading; the worker was online, its sandbox proven, within 35 s of that. A rebuild after a code change takes about a minute.
 - **Free ports on 127.0.0.1**: 8080 (web app), 3000 (API) and 5432 (Postgres). All three are bound to loopback only.
-- **On Colima, keep the clone under your home directory.** Colima shares only your home with its VM unless told otherwise, and Compose bind-mounts `./suites`, `./config` and the mock's scripts from the clone. Docker Desktop shares `/Users`, `/private` and `/tmp` by default.
+- **On Colima, keep the clone under your home directory.** Colima shares only your home with its VM unless told otherwise, and Compose bind-mounts `./suites`, `./config`, `./samples` and the mock's scripts from the clone. Docker Desktop shares `/Users`, `/private` and `/tmp` by default.
 
 ## Quick start with the mock model
 
 ```bash
 git clone https://github.com/sasuke007/hermes-evals.git && cd hermes-evals
-cp .env.example .env
-cat >> .env <<'ENV'
-MOCK_SCRIPTS_FILE=./scripts
-JUDGE_PROVIDER=custom
-JUDGE_MODEL=mock/scripted
-JUDGE_BASE_URL=http://mock-model:8090/v1
-ENV
-docker compose --profile test up -d --build
+docker compose up -d --build
 ```
 
-The `test` profile adds `mock-model`, a scripted OpenAI-compatible model; without it (`docker compose up -d --build`) the stack is the same minus the mock, and runs need a real model (below). `MOCK_SCRIPTS_FILE` names the file, or the directory of `*.json` files, it plays from; `./scripts` holds the scripts of every sample suite and smoke test, each matching phrases only its own runs hold. The `JUDGE_*` lines make the mock the LLM judge too, which `invoices-v1` and `knowledge-v1` each need for one check. Compose reads all of these from your shell first, then `.env`.
+No `.env` and no profile are needed. The first start builds the images (see Requirements for the time it takes) and starts every service: the platform, `mock-model`, a scripted OpenAI-compatible model that plays the scripts in `./scripts` and costs nothing, and the two sample MCP servers. The mock is also the LLM judge, which `invoices-v1` and `knowledge-v1` each need for one check. The worker loads the five suites, and the api adds the samples the database lacks:
+
+- the four skills of `samples/skills` and the eight documents of `samples/documents`;
+- the MCP servers `invoice-db` and `vendor-directory` ([below](#the-sample-mcp-servers));
+- each suite's recommended configurations, declared in `samples/configurations.yaml`, twice: `<suite>-<arm>-mock` on the mock model, free, and `<suite>-<arm>` on Nous Portal with `openai/gpt-6.1-sol`, which needs the Nous login and costs money ([Real models](#real-models)). 26 configurations in all.
+
+The seed runs at every api start and skips what exists (configurations and MCP servers by name, skills and documents by name and content), so it never changes what you edited. `SEED_SAMPLES=false` in `.env` turns it off.
 
 | What     | Where                                                     |
 | -------- | --------------------------------------------------------- |
@@ -36,32 +35,29 @@ The `test` profile adds `mock-model`, a scripted OpenAI-compatible model; withou
 | API      | http://localhost:3000/api (OpenAPI docs at `/api/docs`)   |
 | Postgres | localhost:5432, user and password `hermes`, loopback only |
 
-Open http://localhost:8080 and go to **System**. A healthy stack shows Sandbox "Isolation proven · 16 of 16 checks", Hermes `hermes-agent v0.22.4 @ 4d04303`, and one worker online with its sandbox proven. Model access lists Nous Portal as not connected until you log in (below); the mock needs nothing there.
+Open http://localhost:8080 and go to **System**. A healthy stack shows Sandbox "Isolation proven · 16 of 16 checks", Hermes `hermes-agent v0.22.4 @ 4d04303`, and one worker online with its sandbox proven. Judge and samples shows the judge (the mock model) and what the seed created and skipped: 40 samples created on a first start. Model access lists Nous Portal as not connected until you log in (below); the mock needs nothing there.
 
-Then try an experiment on the mock, which costs nothing:
+Then go to **Experiments** and press **Run a sample experiment** (New experiment has it under its title too). It launches `invoices-v1` with `invoices-v1-baseline-mock` as the baseline against `invoices-v1-with-skill-mock`, every task, 2 repetitions: 48 runs on the mock, which cost nothing.
 
-1. **Configurations › New configuration**: name `baseline`, model `mock/scripted`, provider `custom`, base URL `http://mock-model:8090/v1`, toolsets `file` and `terminal`, memory off, max turns 10, time budget 180 s. Save.
-2. **Resources › Skills › Upload skill**: a zip of `samples/skills/invoice-method` with its files at the zip's root (`cd samples/skills/invoice-method && zip -r ../../../invoice-method.zip .`).
-3. Duplicate `baseline` as `with-skill` and add the skill.
-4. **Experiments › New experiment**: suite `invoices-v1`, both configurations with `baseline` as the baseline, 2 repetitions. Launch 48 runs.
+It takes about two minutes and reads `better`, Δ +0.667: without the skill the mock falls into eight of the twelve tasks' traps, with it into none (pass rates 8/24 → 24/24). Click any cell of the comparison to open that run in the inspector. To launch the same by hand: **Experiments › New experiment**, suite `invoices-v1`, the configurations `invoices-v1-baseline-mock` (the baseline) and `invoices-v1-with-skill-mock`, 2 repetitions.
 
-With the mock it takes about two minutes and reads `better`, Δ +0.667: without the skill the mock falls into eight of the twelve tasks' traps, with it into none (pass rates 8/24 → 24/24). Click any cell of the comparison to open that run in the inspector.
+`.env` is optional. Copy `.env.example` to `.env` only for what the defaults cannot know: a real provider's API key, `NOUS_HOST_PROXY` to reuse this machine's Nous login (or Connect Nous Portal on System instead), and a real LLM judge ([Real models](#real-models)). Compose reads each setting from your shell first, then `.env`.
 
 ## The five suites and the samples
 
 A suite is a directory under `suites/`; the worker loads every one at start and on Suites › Reload all from disk. Each of the five measures one thing a configuration can vary, and its `suite.yaml` names the experiment that measures it: configurations that differ only there. Every task has a trap, and every task can be answered in every arm; the dimension decides how well.
 
-| Suite          | Tasks | Recommended experiment (baseline first)                               | What the arms need                                                                                                                                                                                                              |
-| -------------- | ----- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoices-v1`  | 12    | `baseline` · `with-skill`                                             | the skill `invoice-method`, preloaded                                                                                                                                                                                           |
-| `mcp-v1`       | 8     | `docs-export` · `with-mcp`                                            | the documents `samples/documents/mcp-v1/invoices.csv` and `vendors.json` (under exactly those names) in `docs-export`; the MCP servers `invoice-db` and `vendor-directory` (named so, with the definitions below) in `with-mcp` |
-| `memory-v1`    | 8     | memory off · memory on                                                | nothing: every task seeds the same memory files in both arms                                                                                                                                                                    |
-| `knowledge-v1` | 8     | none · documents · skills preloaded · skills on demand                | the six documents of `samples/documents/knowledge-v1/`, or the skills `bx7-format`, `house-style` and the decoy `bx6-format`                                                                                                    |
-| `tools-v1`     | 6     | `file` · `file` + `terminal` · `file` + `terminal` + `code_execution` | nothing                                                                                                                                                                                                                         |
+| Suite          | Tasks | Recommended experiment (baseline first)                 | What the arms need                                                                                                                                                                                                              |
+| -------------- | ----- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoices-v1`  | 12    | `baseline` · `with-skill`                               | the skill `invoice-method`, preloaded                                                                                                                                                                                           |
+| `mcp-v1`       | 8     | `docs-export` · `with-mcp`                              | the documents `samples/documents/mcp-v1/invoices.csv` and `vendors.json` (under exactly those names) in `docs-export`; the MCP servers `invoice-db` and `vendor-directory` (named so, with the definitions below) in `with-mcp` |
+| `memory-v1`    | 8     | `memory-off` · `memory-on`                              | nothing: every task seeds the same memory files, which go into the home only with memory on                                                                                                                                     |
+| `knowledge-v1` | 8     | `none` · `docs` · `skills-preload` · `skills-on-demand` | the six documents of `samples/documents/knowledge-v1/`, or the skills `bx7-format`, `house-style` and the decoy `bx6-format`                                                                                                    |
+| `tools-v1`     | 6     | `file` · `file-terminal` · `file-terminal-code`         | nothing: the arms are the toolsets `file`, `file` + `terminal` and `file` + `terminal` + `code_execution`                                                                                                                       |
 
-Apart from what the table names, the arms are alike: toolsets `file` and `terminal` (`tools-v1` varies only them), memory off (`memory-v1` varies only it), no skills, documents or MCP servers, and max turns 10 (30 for `mcp-v1`, where one task makes 18 model calls). With the mock model every recommended experiment reads `better`: `invoices-v1` Δ +0.667, `mcp-v1` Δ +1.000, `memory-v1` Δ +0.625, `knowledge-v1` Δ +0.875 for each knowledge arm, `tools-v1` Δ +0.833 for each tool arm.
+The seed makes each arm twice, `<suite>-<arm>-mock` on the mock model and `<suite>-<arm>` on a real one (for example `memory-v1-memory-on-mock` and `memory-v1-memory-on`). Apart from what the table names, the arms are alike: toolsets `file` and `terminal` (`tools-v1` varies only them), memory off (`memory-v1` varies only it), no skills, documents or MCP servers. The `-mock` arms have max turns 10 and a 180 s budget (30 turns and 600 s for `mcp-v1`, where one task makes 18 model calls), the real arms 30 turns and 600 s. With the mock model every recommended experiment reads `better`: `invoices-v1` Δ +0.667, `mcp-v1` Δ +1.000, `memory-v1` Δ +0.625, `knowledge-v1` Δ +0.875 for each knowledge arm, `tools-v1` Δ +0.833 for each tool arm.
 
-The samples the arms use live under `samples/`: the skills in `samples/skills/` (upload each as a zip with its files at the zip's root, as in the quick start) and the documents in `samples/documents/` (upload each in Resources › Documents under its own file name: the prompts name the files, and the workspace's `docs/` keeps the names).
+The samples the arms use live under `samples/`: the skills in `samples/skills/`, the documents in `samples/documents/` (each stored under its own file name: the prompts name the files, and the workspace's `docs/` keeps the names), and the arms in `samples/configurations.yaml`. The api seeds them at start. To upload a skill by hand, zip its folder with its files at the zip's root:
 
 ```bash
 for s in invoice-method bx7-format house-style bx6-format; do (cd samples/skills/$s && zip -r ../../../$s.zip .); done
@@ -74,28 +70,28 @@ node scripts/fixtures/invoices-v1.ts               # also mcp-v1.ts, memory-v1.t
 node scripts/fixtures/mcp-v1.ts --check
 ```
 
-### The sample MCP servers and the `samples` profile
+### The sample MCP servers
 
-Two sample MCP servers serve generated data that agrees (every vendor in the ledger is in the directory). `mcp-v1` needs both, under these names, so that its tool names come out as `mcp__invoice_db__*` and `mcp__vendor_directory__*`:
+Two sample MCP servers serve generated data that agrees (every vendor in the ledger is in the directory). `mcp-v1` needs both, under these names, so that its tool names come out as `mcp__invoice_db__*` and `mcp__vendor_directory__*`. Both run on every start, and the api defines both at its first start (Resources › MCP servers):
 
-- `invoice-db`, stdio, baked into the trial image: a ledger of 120 invoices, `list_invoices(status?, vendor_name?, cursor?)` 20 rows a page, `get_invoice`, and `update_invoice` and `delete_invoice`, which never write. Define it in Resources › MCP servers (Define MCP server) with command `invoice-db-mcp` and the variable `INVOICE_DB_URL`, which `.env.example` already sets (`file:///opt/mcp/invoice-db/invoices.csv`).
-- `vendor-directory`, http and read-only, in the Compose profile `samples`: `list_vendors(status?, cursor?)` and `get_vendor(name)` on a network only egress shares, so a trial reaches it only through egress's MCP gateway. It answers 401 without `Authorization: Bearer <token>`. Set `VENDOR_DIRECTORY_TOKEN` in `.env` to any random string (`openssl rand -hex 16`), then `docker compose --profile test --profile samples up -d`. Compose gives egress the raw token and blanks it for the api and the worker. Define it with URL `http://vendor-directory:8000/mcp` and the header `Authorization` with the prefix `Bearer ` from `VENDOR_DIRECTORY_TOKEN`.
+- `invoice-db`, stdio, baked into the trial image: a ledger of 120 invoices, `list_invoices(status?, vendor_name?, cursor?)` 20 rows a page, `get_invoice`, and `update_invoice` and `delete_invoice`, which never write. Defined with command `invoice-db-mcp` and the variable `INVOICE_DB_URL`, which Compose gives the worker as `file:///opt/mcp/invoice-db/invoices.csv` unless your shell or `.env` sets it.
+- `vendor-directory`, http and read-only: `list_vendors(status?, cursor?)` and `get_vendor(name)` on a network only egress shares, so a trial reaches it only through egress's MCP gateway. It answers 401 without `Authorization: Bearer <token>`. Unless `VENDOR_DIRECTORY_TOKEN` is set, Compose gives vendor-directory and egress the same fixed sample token, `hermes-evals-sample-token`: enough for a sample server on an internal network, but set your own for anything real: `VENDOR_DIRECTORY_TOKEN` in `.env`, any random string such as the output of `openssl rand -hex 16`, then `docker compose up -d egress vendor-directory`. Compose gives egress the raw token and blanks it for the api and the worker. Defined with URL `http://vendor-directory:8000/mcp` and the header `Authorization` with the prefix `Bearer ` from `VENDOR_DIRECTORY_TOKEN`.
 
 ## Real models
 
-Every model call a trial makes goes through egress, which holds the credentials; nothing secret enters a trial. Prices for cost and the spend guard come from `config/prices.yaml` (an experiment freezes it at launch; a model it does not list shows its cost as unknown, never zero).
+Every model call a trial makes goes through egress, which holds the credentials; nothing secret enters a trial. Prices for cost and the spend guard come from `config/prices.yaml` (an experiment freezes it at launch; a model it does not list shows its cost as unknown, never zero). The seeded configurations without `-mock` (`invoices-v1-baseline`, `memory-v1-memory-on`, …) run `openai/gpt-6.1-sol` on Nous Portal: they need the login below, and every run costs money.
 
-- **Nous Portal, one-time login**: System › Model access › Connect, then approve in the browser. `nous-login` writes the login into the `nous-home` volume and `nous-proxy` serves model calls from it; the token never leaves that volume, and the login survives restarts. Without a browser: `docker compose run --rm --entrypoint /opt/hermes/.venv/bin/hermes nous-proxy auth add nous --type oauth --no-browser`.
+- **Nous Portal, one-time login**: System › Model access › Connect, then approve in the browser. `nous-login` writes the login into the `nous-home` volume and `nous-proxy` serves model calls from it; the token never leaves that volume, and the login survives restarts. Until there is a login, `nous-proxy` only checks for one every 5 s, without starting Hermes. Without a browser: `docker compose run --rm --entrypoint /opt/hermes/.venv/bin/hermes nous-proxy auth add nous --type oauth --no-browser`.
 - **Nous Portal, reusing this machine's Hermes login** (development): run `hermes proxy start --provider nous` on the host and set `NOUS_HOST_PROXY=host.docker.internal:8645` in `.env`. Nothing is copied; egress forwards Nous calls to the host proxy, Model access shows Nous as `host`, and Connect is refused. Any container in the Docker VM can reach that proxy, so do this only on a machine you trust.
-- **API keys**: `OPENROUTER_API_KEY`, `NOUS_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`, then `docker compose up -d egress worker`. Only egress reads them; Compose blanks them for every other service.
+- **API keys**: `OPENROUTER_API_KEY`, `NOUS_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env` (`cp .env.example .env` first), then `docker compose up -d egress worker`. Only egress reads them; Compose blanks them for every other service.
 - **Any OpenAI-compatible endpoint**: a configuration with provider `custom` and its base URL (that is how the mock is used); egress sends `CUSTOM_API_KEY` from `.env` when it is set.
-- **The LLM judge** (`llm_judge` checks) uses a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset). Launch answers 409 for a task whose judge has no model, or while the judge's provider is not ready.
+- **The LLM judge** (`llm_judge` checks) uses a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER`. Compose makes the mock model the judge unless your shell or `.env` sets one: free, and right for the `-mock` configurations, but its scores mean nothing on a real model's answers. New experiment warns when an experiment would have the mock judge a real model, and so does the launch's answer; neither blocks it. For a real judge set both `JUDGE_PROVIDER` and `JUDGE_MODEL` in `.env` (for example `nous` and `openai/gpt-6.1-sol`), then `docker compose up -d api worker`: `JUDGE_MODEL` alone keeps the mock, `JUDGE_PROVIDER` alone leaves the judge no model (the default `mock/scripted` is ignored beside any provider but `custom`), and `JUDGE_BASE_URL` is used only with `JUDGE_PROVIDER=custom`, where System and New experiment warn if `JUDGE_MODEL` is still `mock/scripted`. System › Judge and samples shows which judge is in use. Launch answers 409 for a task whose judge has no model, or while the judge's provider is not ready.
 
 The model gateway serves one attempt at most `MODEL_TOKEN_CAP_PER_ATTEMPT` tokens (2,000,000 by default) and then refuses, so a runaway agent stops at once. `.env.example` lists every setting with its default.
 
 ## How it works
 
-The services: `postgres`; `api` (HTTP and live updates); `worker` (loads and saves suites, runs every trial in its own container, scores runs, recovers lost ones); `web` (nginx serving the app and proxying `/api`); `docker-guard`, the only holder of the Docker socket, which lets the worker start nothing but trial and verifier containers; `egress`, the trials' only way out (forward proxy, model gateway, MCP gateway); `nous-proxy` and `nous-login` (Nous Portal); and `trial-image`, which builds the pinned Hermes image and exits.
+The services: `postgres`; `api` (HTTP and live updates); `worker` (loads and saves suites, runs every trial in its own container, scores runs, recovers lost ones); `web` (nginx serving the app and proxying `/api`); `docker-guard`, the only holder of the Docker socket, which lets the worker start nothing but trial and verifier containers; `egress`, the trials' only way out (forward proxy, model gateway, MCP gateway); `nous-proxy` and `nous-login` (Nous Portal); `mock-model`, the scripted model, which is also the default LLM judge; `vendor-directory`, the sample http MCP server; and `trial-image`, which builds the pinned Hermes image and exits.
 
 - **Isolation.** Every trial runs Hermes v0.22.4 in its own container from a read-only image, as an unprivileged user, seeing only that attempt's home and workspace, on an internal network whose only reachable host is egress. Egress refuses every private, loopback, host and Docker address. A suite's verifier scripts run the same way, each in a container with no network at all. The worker proves this with an isolation self-test on every start and refuses to run experiments if a check fails; System › Sandbox shows each check. To run the checks by hand: `docker compose run --rm --no-deps worker node dist/sandbox-cli.js selftest`.
 - **Scoring.** A task's checks can be any of eight types: `numeric_tolerance`, `json_match`, `exact_match`, `text_match`, `file_check`, `verifier_script` (Python), `trajectory_match` (the agent's tool calls) and `llm_judge`. The worker scores each run from its stored evidence, never by running Hermes again, and Re-score grades runs again as a new generation.
@@ -108,14 +104,7 @@ Design and decisions in detail: `IMPLEMENTATION_PLAN.md`; what each phase built 
 
 ## Checking a stack end to end
 
-The smoke scripts drive a running stack over HTTP, with real Hermes in real trial containers against the mock model, and print one PASS/FAIL line per step. They write to the stack they check (names start with `smoke-<timestamp>`, suite folders `suites/zz-smoke-…` are removed again), so use a development stack. One start serves them all:
-
-```bash
-export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
-MOCK_SCRIPTS_FILE=./scripts \
-JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
-  docker compose --profile test --profile samples up -d --build
-```
+The smoke scripts drive a running stack over HTTP, with real Hermes in real trial containers against the mock model, and print one PASS/FAIL line per step. They write to the stack they check (names start with `smoke-<timestamp>`, suite folders `suites/zz-smoke-…` are removed again), so use a development stack. The quick start's `docker compose up -d --build` serves them all, as long as neither your shell nor `.env` changes the defaults they rely on: the mock judge (`JUDGE_*`), the mock's scripts (`MOCK_SCRIPTS_FILE=./scripts`), `INVOICE_DB_URL` and a `VENDOR_DIRECTORY_TOKEN` that is not empty.
 
 | Script                     | Checks                                                                                                                         |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -127,7 +116,7 @@ JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model
 | `scripts/phase6b-smoke.sh` | every sample suite's recommended experiment (212 runs) and its predicted verdict                                               |
 | `scripts/phase5b-smoke.sh` | suite authoring through the API: a suite from nothing to an experiment, conflicts, imports, round trips, verifier containers   |
 
-`SMOKE_RESTART=1 scripts/phase6-smoke.sh` also recreates egress without `VENDOR_DIRECTORY_TOKEN` and then with it; run it from the shell that exported the token. `BASE_URL=http://localhost:8080/api` runs any of them through nginx. To walk the design's flows in the browser instead: `scripts/flows-setup.sh` and the checklist in [`docs/flows.md`](docs/flows.md).
+`SMOKE_RESTART=1 scripts/phase6-smoke.sh` also recreates egress without `VENDOR_DIRECTORY_TOKEN` and then with it; run it from a shell that gives Compose the same token as the start did (none, for the sample token or one in `.env`). `BASE_URL=http://localhost:8080/api` runs any of them through nginx. To walk the design's flows in the browser instead: `scripts/flows-setup.sh` and the checklist in [`docs/flows.md`](docs/flows.md).
 
 ## Development
 
@@ -142,15 +131,16 @@ pnpm --filter @hermes-evals/api dev:worker     # the worker, in a second termina
 
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` run across every package through Turbo (`pnpm turbo run typecheck lint test build`). `pnpm test` runs the unit tests and the integration tests on PGlite (the real migrations and triggers, in process), every generator's `--check`, and the five suites through the real loader.
 - `packages/shared` holds the zod contracts both apps use, consumed through its built `dist`: after editing it, `pnpm --filter @hermes-evals/shared build` (the Turbo tasks do this for you).
+- The api's samples seed reads `SAMPLES_DIR`, `./samples` from where the api runs: under `pnpm dev` that is `apps/api`, so set `SAMPLES_DIR=../../samples` in `.env`, or `SEED_SAMPLES=false`. Otherwise System shows the seed failed, with "no samples folder".
 - The web dev server proxies `/api` to :3000. `VITE_API_MODE=fixtures pnpm --filter @hermes-evals/web dev` serves the sample data in `apps/web/src/fixtures` instead of the API, and `?scenario=<name>` on any URL shows a designed state (`apps/web/src/fixtures/scenarios.ts`). How pages are built: `apps/web/CONTRIBUTING.md`.
 - **Postgres 17 end-to-end tests** boot the whole API and worker on a fresh database per spec, against a throwaway server, never the Compose database (the run refuses port 5432 and stops without `TEST_DATABASE_URL`):
 
   ```bash
-  docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine
+  docker run -d --name hermes-evals-pg-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55433:5432 postgres:17-alpine -c max_connections=200
   TEST_DATABASE_URL=postgres://postgres:test@localhost:55433/postgres pnpm --filter @hermes-evals/api test:e2e
   ```
 
-  They run two files at a time on the server's default 100 connections (four with `-c max_connections=200`).
+  The run sizes its parallelism from the server's `max_connections`: with 200 it runs four files at a time (about 90 s), on the default 100 two (about 3 minutes).
 
 - **Gated tests** that start real containers run only with `RUN_SANDBOX_TESTS=1`: the trial image, verifier and MCP containers through a docker-guard socket (`DOCKER_SOCKET`, `TRIALS_DIR`, `TRIAL_IMAGE`, `TRIAL_VOLUME`; `docs/phases/phase-1.md` section 6.1 shows a host guard), and, with the Docker CLI alone, Hermes's MCP renderer and the Nous login against a fake portal on an internal network. The worker started with `pnpm dev:worker` and no guard cannot run verifier scripts, so a suite with one records a load error.
 
@@ -168,6 +158,11 @@ sudo setfacl -R -m u:10000:rwX,d:u:10000:rwX,d:u:$(id -u):rwX suites
 - **The suites list is empty, or `mock-model` will not start ("bind source path does not exist")**: the Docker VM cannot see your clone. On Colima keep it under your home directory, or start Colima with `--mount <dir>:w`.
 - **A port is taken**: another service holds 8080, 3000 or 5432 on 127.0.0.1. Stop it, or change the left-hand side of that service's `ports:` in `docker-compose.yml`.
 - **System › Sandbox reads not proven**: the worker refuses experiments until its isolation self-test passes. The failing check's detail says why; `docker compose logs worker` has the rest.
+- **System › Judge and samples reads the seed failed**, or **Run a sample experiment** is disabled: the reason is on the page. "no samples folder at /samples" means the Docker VM cannot see your clone (as above); "the database was not reachable at start" goes away with `docker compose restart api`, which seeds again. A single sample that failed is listed with its reason, and `docker compose logs api` has the rest.
+
+## Upgrading a stack from Phase 7
+
+Pull, then `docker compose up -d --build`. `mock-model` and `vendor-directory` now run on every start: `--profile test` and `--profile samples` are still accepted and change nothing. The four lines Phase 7's quick start appended to `.env` (`MOCK_SCRIPTS_FILE` and `JUDGE_*`) are now the defaults and can go. An `.env` copied from Phase 7's `.env.example` holds `VENDOR_DIRECTORY_TOKEN=` with no value, which now means no token: vendor-directory stops at start and `mcp-v1`'s `with-mcp` arm cannot launch. Give it a value, or delete the line for the sample token. At its next start the api seeds the samples, skipping what exists by name, so `invoice-db` and `vendor-directory` as you defined them are kept.
 
 ## Upgrading a stack from before Phase 7
 
@@ -184,7 +179,7 @@ apps/egress       The trials' only way out: forward proxy, model gateway, MCP ga
 apps/web          Vue 3, Vite, Pinia, vue-router, Tailwind CSS v4
 packages/shared   Domain types and the zod contracts both apps use
 suites/           Task suites, loaded by the worker; edited on disk or in the web app
-samples/          The skills (samples/skills) and documents (samples/documents) the suites' recommended arms use
+samples/          The skills (samples/skills), documents (samples/documents) and recommended arms (configurations.yaml) the api seeds
 scripts/          Smoke scripts and mock-model scripts; scripts/fixtures: the suite generators
 config/           prices.yaml: model prices an experiment freezes at launch
 docker/           Dockerfiles, nginx config, nous-login.py, mcp/: the sample MCP servers

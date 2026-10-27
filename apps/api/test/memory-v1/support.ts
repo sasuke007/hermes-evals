@@ -221,6 +221,11 @@ export interface RecordedRun {
   /** Memory files the agent left (`memories/USER.md`), on top of the task's seeds. */
   home?: Record<string, string>;
   calls?: { name: string; input: Record<string, unknown> }[];
+  /**
+   * A run with memory off (Phase 8 G9): no seed was copied in and
+   * home/memories was not collected, so its home is rebuilt empty.
+   */
+  memoryOff?: true;
 }
 
 async function writeAll(root: string, files: Record<string, string> | undefined): Promise<void> {
@@ -236,7 +241,11 @@ const exists = (dir: string) =>
     () => false,
   );
 
-/** The task's fixtures and seeds with the run's files on top: the folders the worker would rebuild. */
+/**
+ * The task's fixtures and seeds with the run's files on top: the folders the
+ * evaluation would rebuild. With memory off the home stays empty: the seeds
+ * never entered the run, and nothing was collected from it (Phase 8 G9).
+ */
 async function withFolders<T>(
   key: string,
   run: RecordedRun,
@@ -252,9 +261,11 @@ async function withFolders<T>(
     for (const dir of Object.values(dirs)) await mkdir(dir);
     const fixtures = join(SUITE_DIR, key, 'fixtures');
     if (await exists(fixtures)) await cp(fixtures, dirs.workspace, { recursive: true });
-    await cp(join(SUITE_DIR, key, 'home'), dirs.home, { recursive: true });
     await writeAll(dirs.workspace, run.files);
-    await writeAll(dirs.home, run.home);
+    if (!run.memoryOff) {
+      await cp(join(SUITE_DIR, key, 'home'), dirs.home, { recursive: true });
+      await writeAll(dirs.home, run.home);
+    }
     return await use(dirs);
   } finally {
     await rm(root, { recursive: true, force: true });

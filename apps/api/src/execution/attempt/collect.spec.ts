@@ -214,6 +214,7 @@ describe('collectTrialFiles: the memory tool’s lock files (Phase 6 #2)', () =>
       home,
       manifest: new Map(),
       homeSeeds: [{ path: 'memories/USER.md', sha256: sha(SEED), size: SEED.length }],
+      memoryEnabled: true,
       blobs,
     });
     expect(artifacts.map((a) => [a.root, a.path, a.origin])).toEqual([
@@ -242,6 +243,7 @@ describe('collectTrialFiles: the memory tool’s lock files (Phase 6 #2)', () =>
       home,
       manifest: new Map(),
       homeSeeds: [],
+      memoryEnabled: true,
       blobs,
     });
     expect(artifacts).toEqual([]);

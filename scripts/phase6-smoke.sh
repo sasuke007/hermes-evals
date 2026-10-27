@@ -38,10 +38,10 @@
 #   scripts/phase6-smoke.sh                                     # http://localhost:3000/api
 #   BASE_URL=http://localhost:8080/api scripts/phase6-smoke.sh  # through nginx
 #
-# The stack needs the Phase 6 images, the mock model (profile `test`) with
+# The stack needs the Phase 6 images, the mock model (on every start since Phase 8) with
 # scripts/phase6-mock-scripts.json, the mock as the judge (disputed has an
 # llm_judge key), INVOICE_DB_URL for the worker (the ledger checks), and,
-# for the vendors checks, the sample http MCP server (profile `samples`)
+# for the vendors checks, the sample http MCP server (on every start since Phase 8)
 # with VENDOR_DIRECTORY_TOKEN (any random string; without it those checks
 # expect the launch 409 instead). Compose reads every one of them from the
 # shell before .env, so no file changes. Give the mock every
@@ -54,13 +54,14 @@
 #   export VENDOR_DIRECTORY_TOKEN="$(openssl rand -hex 16)" INVOICE_DB_URL=file:///opt/mcp/invoice-db/invoices.csv
 #   MOCK_SCRIPTS_FILE=./scripts \
 #   JUDGE_PROVIDER=custom JUDGE_MODEL=mock/scripted JUDGE_BASE_URL=http://mock-model:8090/v1 \
-#     docker compose --profile test --profile samples up -d --build
+#     docker compose up -d --build
 #
 # (Compose mounts the directory MOCK_SCRIPTS_FILE names into the mock, which
 # reads every *.json file in it in name order.)
 #
 # With SMOKE_RESTART=1, run the smoke from a shell with the same
-# VENDOR_DIRECTORY_TOKEN (or none, when .env holds it): the step that
+# VENDOR_DIRECTORY_TOKEN (or none, when .env holds it or neither sets it and
+# Compose gives its sample value): the step that
 # recreates egress puts the value back from there, and only after checking,
 # by hash, that it is the one egress has. Without it that step is skipped,
 # since a smoke test should not recreate a service unless asked.
@@ -364,7 +365,7 @@ if [ "$DOCKER" = 1 ] && docker image inspect hermes-evals/vendor-directory >/dev
     fail 'docker/mcp/check_samples.py in the vendor-directory image' "$(tail -3 "$WORK/samples.out" | tr '\n' ' ')"
   fi
 else
-  skip 'docker/mcp/check_samples.py in the vendor-directory image' 'no docker here, or build it: docker compose --profile samples build vendor-directory'
+  skip 'docker/mcp/check_samples.py in the vendor-directory image' 'no docker here, or build it: docker compose build vendor-directory'
 fi
 
 # ---------------------------------------------------------------------------
@@ -385,7 +386,7 @@ if [ "$DOCKER" = 1 ]; then
   if dc exec -T mock-model node dist/mock-model.js --print-scripts 2>/dev/null | grep 'smoke-phase6-codeword' >/dev/null; then
     pass 'the mock model has scripts/phase6-mock-scripts.json' 'its scripts match smoke-phase6-codeword, the skill sentence, ...'
   else
-    fail 'the mock model has scripts/phase6-mock-scripts.json' 'start it as the header says (profile test, MOCK_SCRIPTS_FILE)'
+    fail 'the mock model has scripts/phase6-mock-scripts.json' 'start it as the header says (MOCK_SCRIPTS_FILE)'
   fi
   ROOT_COL="$(psql_ro "select count(*) from information_schema.columns where table_name = 'artifacts' and column_name = 'root'")"
   LOADING_COL="$(psql_ro "select count(*) from information_schema.columns where table_name = 'configuration_versions' and column_name = 'skill_loading'")"
@@ -595,7 +596,7 @@ if [ "$TOKEN_SET" = true ] && need "Test start $VENDOR_SERVER" "$VENDORS_ID"; th
     'd["status"] == "passed" and sorted(t["name"] for t in d["tools"]) == ["get_vendor", "list_vendors"]' \
     '"{} in {} ms · tools: {}".format(d["status"], d["startedMs"], ", ".join(t["name"] for t in d["tools"]))'
 elif [ "$TOKEN_SET" != true ]; then
-  skip "Test start $VENDOR_SERVER through egress" 'VENDOR_DIRECTORY_TOKEN is not set in egress (profile samples, see the header)'
+  skip "Test start $VENDOR_SERVER through egress" 'VENDOR_DIRECTORY_TOKEN is not set in egress (see the header)'
 fi
 if [ "$INVOICE_DB_SET" = true ] && need "Test start $INVOICE_SERVER" "$LEDGER_ID"; then
   send_json POST "/resources/mcp-servers/$LEDGER_ID/test"
@@ -796,11 +797,12 @@ if need 'memory experiment' "$MEMORY_EXP" && settles 'memory' "$MEMORY_EXP" 4 "$
     '"off {} · on {}".format(primary(d, "remember", env["PREFIX"] + "-memory-off"), primary(d, "remember", env["PREFIX"] + "-memory-on"))'
   for ARM in off on; do
     RUN="$(run_of "$WORK/memory.json" currency "$PREFIX-memory-$ARM")"
-    if need "  currency, memory $ARM: the seed in the home, one model call" "$RUN"; then
+    if need "  currency, memory $ARM: the seed, one model call" "$RUN"; then
       request GET "/runs/$RUN"
-      check "  currency, memory $ARM: seed copied in, background review 10/10, 1 model call" 200 \
-        '[s["path"] for s in d["launchRecord"]["homeSeeds"]] == ["memories/USER.md"] and d["launchRecord"]["backgroundReview"] == {"memoryNudgeInterval": 10, "skillCreationNudgeInterval": 10} and "nudge_interval: 10" in d["launchRecord"]["configYaml"] and calls(d) == 1' \
-        '"seeds {} · {} model calls".format([s["path"] for s in d["launchRecord"]["homeSeeds"]], calls(d))'
+      # Phase 8 G9: the seed is copied in only with memory on; with memory off the record lists it as skipped.
+      ARM="$ARM" check "  currency, memory $ARM: seed $([ "$ARM" = on ] && echo 'copied in' || echo 'left out'), background review 10/10, 1 model call" 200 \
+        '([s["path"] for s in d["launchRecord"]["homeSeeds"]], d["launchRecord"]["homeMemory"]) == ((["memories/USER.md"], {"memoryEnabled": True, "seedsSkipped": [], "memoriesCollected": True}) if env["ARM"] == "on" else ([], {"memoryEnabled": False, "seedsSkipped": ["memories/USER.md"], "memoriesCollected": False})) and d["launchRecord"]["backgroundReview"] == {"memoryNudgeInterval": 10, "skillCreationNudgeInterval": 10} and "nudge_interval: 10" in d["launchRecord"]["configYaml"] and calls(d) == 1' \
+        '"seeds {} · skipped {} · {} model calls".format([s["path"] for s in d["launchRecord"]["homeSeeds"]], (d["launchRecord"]["homeMemory"] or {}).get("seedsSkipped"), calls(d))'
       # The memory toolset comes with memory on alone, in the command and config.yaml alike.
       WANT_T="$([ "$ARM" = on ] && echo 'file,memory,terminal' || echo 'file,terminal')" \
         check "  currency, memory $ARM: the launch record's -t list" 200 \
@@ -816,11 +818,11 @@ if need 'memory experiment' "$MEMORY_EXP" && settles 'memory' "$MEMORY_EXP" 4 "$
       '"; ".join("{path} {origin}".format_map(a) for a in d["artifacts"]["items"] if a["root"] == "home") + " · {} model calls (a background review would add some)".format(calls(d))'
   fi
   RUN="$(run_of "$WORK/memory.json" remember "$PREFIX-memory-off")"
-  if need '  remember, memory off: the seed unchanged' "$RUN"; then
+  if need '  remember, memory off: nothing in the home' "$RUN"; then
     request GET "/runs/$RUN"
-    check '  remember, memory off: no memory tool, USER.md as seeded' 200 \
-      'any(a["path"] == "home/memories/USER.md" and a["origin"] == "home_seed_unchanged" for a in d["artifacts"]["items"]) and sc(d, "saved")["status"] == "failed" and sc(d, "used_memory")["status"] == "failed"' \
-      '"; ".join("{path} {origin}".format_map(a) for a in d["artifacts"]["items"] if a["root"] == "home")'
+    check '  remember, memory off: no memory tool, no seed, nothing collected from the home' 200 \
+      'not any(a["root"] == "home" for a in d["artifacts"]["items"]) and d["launchRecord"]["homeMemory"]["memoriesCollected"] is False and sc(d, "saved")["status"] == "failed" and sc(d, "used_memory")["status"] == "failed"' \
+      '"; ".join("{path} {origin}".format_map(a) for a in d["artifacts"]["items"] if a["root"] == "home") or "no home artifact"'
   fi
   if [ "$DOCKER" = 1 ]; then
     # Egress's own connection log, as the worker stored it: every model call

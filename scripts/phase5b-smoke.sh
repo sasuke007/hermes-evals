@@ -35,7 +35,7 @@
 #   BASE_URL=http://localhost:8080/api scripts/phase5b-smoke.sh  # through nginx
 #
 # The stack needs the Phase 5b images (docker-guard, api, worker and web
-# rebuilt together) and the mock model (profile `test`) with
+# rebuilt together) and the mock model (on every start since Phase 8) with
 # scripts/phase5b-mock-scripts.json among its scripts: its two scripts
 # answer the Flow E tasks by their prompts' first line (the answer task with
 # the reference, the file task with a terminal call that writes summary.csv,
@@ -44,7 +44,7 @@
 # reads the variable from the shell before .env, so no file changes; the
 # scripts/ directory gives it every scripts/*mock-scripts.json:
 #
-#   MOCK_SCRIPTS_FILE=./scripts docker compose --profile test up -d
+#   MOCK_SCRIPTS_FILE=./scripts docker compose up -d
 #
 # Every configuration uses provider `custom` with base URL
 # http://mock-model:8090/v1 and model mock/scripted, which config/prices.yaml

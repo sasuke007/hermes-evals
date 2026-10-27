@@ -14,6 +14,7 @@ import {
   LaunchExperimentInputSchema,
   MAX_CONCURRENCY,
   MAX_REPETITIONS,
+  mockJudgeWarning,
 } from '@hermes-evals/shared';
 import type {
   EstimateQuery,
@@ -131,6 +132,17 @@ export function useNewExperimentForm(options: Ref<NewExperimentOptions | null>) 
       ? taskCount.value * configCount.value * state.repetitions
       : null,
   );
+
+  /**
+   * The mock judge's warning (Phase 8 G2), never a block: the judge is the mock model, a
+   * chosen configuration runs a real one, and a selected task has an llm_judge check. The
+   * launch answers with the same warning, from the same values.
+   */
+  const judgeWarning = computed<string | null>(() => {
+    const judge = options.value?.judge;
+    const tasks = suite.value?.tasks.filter((t) => selectedTasks.value.includes(t.key)) ?? [];
+    return judge ? mockJudgeWarning(judge, ordered.value, tasks) : null;
+  });
 
   // ── fields ────────────────────────────────────────────────────────────────
   const nameError = computed(() => {
@@ -335,6 +347,7 @@ export function useNewExperimentForm(options: Ref<NewExperimentOptions | null>) 
     taskCount,
     configCount,
     runs,
+    judgeWarning,
     nameError,
     descriptionError,
     repetitionsError,

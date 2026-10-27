@@ -5,6 +5,7 @@ import { EXPERIMENT_STATUSES, type ExperimentStatus } from '@hermes-evals/shared
 import type { ProviderInfo } from '@/api/types/system';
 import ExperimentListTable from '@/components/experiment-list/ExperimentListTable.vue';
 import KeySetupCard from '@/components/experiment-list/KeySetupCard.vue';
+import SampleExperimentButton from '@/components/experiment-list/SampleExperimentButton.vue';
 import { experimentCount, matchesSearch } from '@/components/experiment-list/listText';
 import PageContainer from '@/components/layout/PageContainer.vue';
 import SetupCard from '@/components/model-access/SetupCard.vue';
@@ -29,7 +30,9 @@ import { useProvidersStore } from '@/stores/providers';
  * Above the toolbar: SetupCard when no provider is connected (merged into the empty state when
  * there are no experiments yet), or the API-key card when the only provider the
  * configurations use has no key. A failed refresh keeps the rows, dimmed, under an
- * ErrorBanner; a failed first load shows the banner alone.
+ * ErrorBanner; a failed first load shows the banner alone. With no experiment yet, the empty
+ * state offers "Run a sample experiment" (Phase 8 G4), disabled with its reason until the
+ * seeded sample configurations and invoices-v1 are there.
  */
 type StatusFilter = 'all' | ExperimentStatus;
 const STATUS_FILTERS = ['all', ...EXPERIMENT_STATUSES] as const;
@@ -179,7 +182,9 @@ onMounted(() => {
       </template>
     </ErrorBanner>
 
-    <SetupCard v-else-if="emptyMerged" variant="empty" />
+    <SetupCard v-else-if="emptyMerged" variant="empty">
+      <SampleExperimentButton align="start" />
+    </SetupCard>
 
     <template v-else>
       <div v-if="!empty || filtered" class="flex flex-wrap items-center gap-12">
@@ -259,6 +264,7 @@ onMounted(() => {
             body="An experiment runs every task in a suite under two or more configurations, several times each, and tells you whether the candidate beat the baseline. You need a suite and at least two configurations to start."
             :panel="false"
           >
+            <SampleExperimentButton class="mt-6" />
             <template #actions>
               <RouterLink :to="{ name: ROUTE_NAMES.experimentNew }" class="btn primary"
                 >New experiment</RouterLink

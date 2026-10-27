@@ -7,6 +7,14 @@
  * inside a longer fence is content, not an answer. An unclosed ```json block
  * after the last complete one makes the answer ungradable, rather than
  * grading an earlier block (often the echoed template).
+ *
+ * A reply with no ```json block at all whose trimmed text is exactly one JSON
+ * object is the answer too, flagged `unfenced` (Phase 8 G5): a real model
+ * left the fence out of a correct answer, and a reply that is only the object
+ * leaves no doubt what the answer is. Prose around it, an array or a scalar
+ * stays missing, since there only a fence says which part is the answer.
+ * Scorer versions did not change for this: a re-score extracts again from
+ * the stored final text, so it applies the rule to runs graded before it.
  */
 import { JsonValueSchema, type ExtractedAnswer } from '@hermes-evals/shared';
 
@@ -108,7 +116,7 @@ export function extractAnswer(finalText: string | null): ExtractedAnswer {
     };
   }
   const last = blocks.at(-1);
-  if (!last) return { status: 'missing', block_count: 0 };
+  if (!last) return unfencedAnswer(finalText) ?? { status: 'missing', block_count: 0 };
   const range = { block_count: blocks.length, start: last.bodyStart, end: last.bodyEnd };
   const body = finalText.slice(last.bodyStart, last.bodyEnd);
   let value: unknown;
@@ -135,6 +143,28 @@ export function extractAnswer(finalText: string | null): ExtractedAnswer {
     };
   }
   return { status: 'found', ...range, value: json.data };
+}
+
+/**
+ * The reply as an unfenced answer: its trimmed text starts with `{` and
+ * parses whole, to a value a JSON column can hold. Null otherwise, including
+ * for an invalid object, which stays missing rather than invalid: without a
+ * fence nothing says the reply meant to be JSON. A valid JSON object has no
+ * line a fence could open on, so callers need not rescan.
+ */
+function unfencedAnswer(text: string): ExtractedAnswer | null {
+  const start = text.length - text.trimStart().length;
+  const end = text.trimEnd().length;
+  if (text[start] !== '{') return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(text.slice(start, end));
+  } catch {
+    return null;
+  }
+  const json = JsonValueSchema.safeParse(value);
+  if (!json.success) return null;
+  return { status: 'found', block_count: 0, start, end, value: json.data, unfenced: true };
 }
 
 /** The comment an answer-based key gets when the answer is missing or invalid. */

@@ -60,8 +60,9 @@ export interface PlannedFixture {
 
 /**
  * A memory file the task seeds the trial home with (Phase 6 P1): a task file
- * of kind `home_seed`, copied before launch, hash re-checked, in every arm
- * whatever memoryEnabled says.
+ * of kind `home_seed`, copied before launch, hash re-checked, only when the
+ * configuration's memory is on (Phase 8 G9, materialise.ts). Planned in
+ * every arm, so the launch record can list the seeds memory off left out.
  */
 export interface PlannedHomeSeed {
   /**
@@ -142,7 +143,10 @@ export interface AttemptPlan {
     /** Written to home/task.txt verbatim. */
     prompt: string;
     fixtures: PlannedFixture[];
-    /** Copied into home/memories/ before launch, sorted by path; empty when the task has none. */
+    /**
+     * Copied into home/memories/ before launch when memory is on, sorted by
+     * path; empty when the task has none.
+     */
     homeSeeds: PlannedHomeSeed[];
   };
   limits: {

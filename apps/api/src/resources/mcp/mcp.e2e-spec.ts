@@ -37,6 +37,10 @@ describe.skipIf(!SERVER_URL)('MCP server saves on Postgres 17', () => {
   }, 60_000);
 
   afterAll(async () => {
+    // pool.end() resolves before its clients' sockets close; the forced drop
+    // below can end one mid-close, which the pool reports as an error of an
+    // idle client (test/support/phase2-app.ts handles it the same way).
+    pool?.on('error', () => {});
     await pool?.end();
     const admin = new pg.Client({ connectionString: SERVER_URL });
     await admin.connect();

@@ -1,10 +1,13 @@
 /**
  * Sandbox and worker contracts (plan sections 8.7 and 11): the isolation
- * self-test a worker reports, worker presence and the running summary.
+ * self-test a worker reports, worker presence and the running summary, and
+ * (Phase 8) the platform's setup: the judge and the samples seed.
  * Model access (providers and the Nous login) is in ./providers.ts.
  */
 import { z } from 'zod';
 import { countView, isoTimeView } from './common.js';
+import { JudgeViewSchema } from './judge.js';
+import { SeedReportSchema } from './samples.js';
 
 // ── Sandbox ──────────────────────────────────────────────────────────────
 
@@ -92,3 +95,18 @@ export type SystemSummary = z.infer<typeof SystemSummarySchema>;
 
 /** A worker counts as present when online with a heartbeat in the last 60 s. */
 export const WORKER_TIMEOUT_MS = 60_000;
+
+// ── Setup ────────────────────────────────────────────────────────────────
+
+/**
+ * GET /system/setup (Phase 8 G2, G3): the API's own settings that decide
+ * what a fresh clone can do, for System. They change only when the API
+ * restarts, except the seed's report while it runs.
+ */
+export const SystemSetupSchema = z.object({
+  /** The platform judge, and whether it is the mock model. */
+  judge: JudgeViewSchema,
+  /** This API start's samples seed. */
+  seed: SeedReportSchema,
+});
+export type SystemSetup = z.infer<typeof SystemSetupSchema>;

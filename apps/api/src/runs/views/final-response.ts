@@ -8,6 +8,10 @@
  * the evaluation. Before the run is scored there is none yet, so the same
  * extraction is computed here from the text; it is deterministic, so scoring
  * will find the same block.
+ *
+ * An unfenced answer (Phase 8 G5: the reply was one JSON object without a
+ * ```json fence) has no fence to draw; `extracted` is the trimmed reply and
+ * `unfenced` makes the inspector say why it counted.
  */
 import type { ExtractedAnswer, FinalResponseView, JsonValue, TextSpan } from '@hermes-evals/shared';
 import { extractAnswer, scanJsonFences } from '../../scoring/extraction.js';
@@ -42,6 +46,7 @@ export function finalResponseView(
         extracted: null,
         fence: null,
         extraction: 'missing',
+        unfenced: false,
         parsed: null,
         parseError: null,
       };
@@ -51,6 +56,7 @@ export function finalResponseView(
         extracted: span(finalText, answer.start, answer.end),
         fence: fenceOf(finalText, answer),
         extraction: 'found',
+        unfenced: answer.unfenced === true,
         parsed: answer.value,
         parseError: null,
       };
@@ -60,6 +66,7 @@ export function finalResponseView(
         extracted: span(finalText, answer.start, answer.end),
         fence: fenceOf(finalText, answer),
         extraction: 'invalid',
+        unfenced: false,
         parsed: null,
         parseError: { message: answer.error, position: answer.position },
       };

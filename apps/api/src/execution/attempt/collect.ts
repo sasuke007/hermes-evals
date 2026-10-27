@@ -19,7 +19,10 @@
  * Phase 6 P2) with what the workspace left of the budget, before the runner
  * deletes the home, and the same event describes both. The memory tool's
  * empty `*.lock` files there are skipped (collect-files.ts isMemoryLockFile);
- * a workspace file of that name is collected like any other.
+ * a workspace file of that name is collected like any other. Only with
+ * memory on (Phase 8 G9): with memory off nothing in the home is memory, so
+ * memories/ is not read at all and the event says `memories_collected:
+ * false`, as the launch record's `home_memory` does.
  *
  * What one attempt may add to the blob store is bounded too
  * (MAX_COLLECTED_BYTES): each file's apparent size, which is what the store
@@ -117,6 +120,8 @@ export interface TrialFilesInput {
   manifest: ReadonlyMap<string, InputFile>;
   /** The home seeds the plan placed (AttemptPlan.task.homeSeeds), by home-relative path. */
   homeSeeds: readonly PlannedHomeSeed[];
+  /** The configuration's memory: home/memories is collected only when it is on (Phase 8 G9). */
+  memoryEnabled: boolean;
   blobs: BlobStore;
   now?: () => number;
   /** MAX_COLLECTED_BYTES by default, shared by both directories, the workspace first. */
@@ -155,10 +160,11 @@ function homeFields(home: HomeCollection | { error: string }): Record<string, un
 /**
  * Collects everything an attempt leaves (plan 8.5, Phase 6 P2): the
  * workspace, with the owner permissions the agent removed restored first,
- * then the home's memories/ with what is left of the budget. Call it after
- * the container is removed and before the home is deleted. A workspace that
- * cannot be collected throws (the runner records it on the event); a home
- * that cannot be collected is `home_error` on the event and no artifact.
+ * then, with memory on, the home's memories/ with what is left of the
+ * budget. Call it after the container is removed and before the home is
+ * deleted. A workspace that cannot be collected throws (the runner records
+ * it on the event); a home that cannot be collected is `home_error` on the
+ * event and no artifact.
  */
 export async function collectTrialFiles(input: TrialFilesInput): Promise<Collection> {
   const now = input.now ?? Date.now;
@@ -172,6 +178,16 @@ export async function collectTrialFiles(input: TrialFilesInput): Promise<Collect
     now,
     budget,
   );
+  if (!input.memoryEnabled) {
+    // Whatever the agent left in home/memories with its file tools is not memory.
+    return {
+      artifacts: workspace.artifacts,
+      event: {
+        ...workspace.event,
+        payload: { ...workspace.event.payload, memories_collected: false },
+      },
+    };
+  }
   const seeds = new Map(input.homeSeeds.map((s) => [s.path, { sha256: s.sha256, size: s.size }]));
   let home: HomeCollection | { error: string };
   try {
@@ -189,7 +205,7 @@ export async function collectTrialFiles(input: TrialFilesInput): Promise<Collect
     artifacts: [...workspace.artifacts, ...homeArtifacts],
     event: {
       ...workspace.event,
-      payload: { ...workspace.event.payload, ...homeFields(home) },
+      payload: { ...workspace.event.payload, memories_collected: true, ...homeFields(home) },
     },
   };
 }

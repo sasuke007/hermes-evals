@@ -195,6 +195,9 @@ export class Phase2World {
       RECOVERY_INTERVAL_MS: '2000',
       LEASE_SECONDS: '30',
       SUITE_RELOAD_TIMEOUT_S: '60',
+      // The samples seed (Phase 8) would add resources and configurations the
+      // specs count; phase8.e2e-spec.ts turns it on where it is under test.
+      SEED_SAMPLES: 'false',
     } satisfies Partial<Record<keyof Env, string>>);
     // Only the values given: Node stores an assigned undefined as the text "undefined".
     for (const [key, value] of Object.entries(this.options.env ?? {})) {

@@ -2,6 +2,7 @@
  * The System page in each state the System, SystemDark and ModelAccessStates boards draw,
  * from fixtures: Model access with every provider and the Used by line, Secrets, the Sandbox
  * (proven, failing), Workers (online, none), and the first load (skeletons, errors, empty).
+ * Judge and samples (Phase 8) has its own spec, SystemSetup.spec.ts.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -42,14 +43,15 @@ const cells = (row: { findAll: VueWrapper['findAll'] }) =>
   row.findAll('td').map((td) => flat(td.text()));
 
 describe('SystemPage', () => {
-  it('draws the header and the four sections in order', async () => {
+  it('draws the header and the five sections in order', async () => {
     const w = await mountPage(null);
     expect(w.get('h1').text()).toBe('System');
     expect(w.text()).toContain(
-      'Model access, the run sandbox and the workers. Read live from the running stack. This page never shows or stores a token or a key.',
+      'Model access, the judge and the samples, the run sandbox and the workers. Read live from the running stack. This page never shows or stores a token or a key.',
     );
     expect(w.findAll('h2').map((h) => h.text())).toEqual([
       'Model access',
+      'Judge and samples',
       'Secrets',
       'Sandbox',
       'Workers',

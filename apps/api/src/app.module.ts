@@ -20,6 +20,7 @@ import { SecretsModule } from './resources/secrets/secrets.module.js';
 import { SkillsModule } from './resources/skills/skills.module.js';
 import { RunCommandsModule } from './runs/commands/run-commands.module.js';
 import { RunViewsModule } from './runs/views/run-views.module.js';
+import { SamplesModule } from './samples/samples.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { SuiteDraftsModule } from './suites/drafts/drafts.module.js';
 import { SuiteDraftsService } from './suites/drafts/drafts.service.js';
@@ -55,6 +56,10 @@ const isDev = process.env.NODE_ENV !== 'production';
  * through the drafts module's DraftImportPort, and the routes that need the
  * worker (DraftSaveModule: a draft task's self-check, the save, the rebase).
  * The API still never reads SUITES_DIR; the worker's save handler writes it.
+ *
+ * SamplesModule (Phase 8) seeds SAMPLES_DIR's samples at each start, after
+ * every module's init (so after the migrations), in the background, and
+ * serves GET /system/setup.
  */
 @Module({
   imports: [
@@ -97,6 +102,7 @@ const isDev = process.env.NODE_ENV !== 'production';
     ExperimentViewsModule,
     ComparisonModule,
     RunViewsModule,
+    SamplesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: RequestedWithGuard },

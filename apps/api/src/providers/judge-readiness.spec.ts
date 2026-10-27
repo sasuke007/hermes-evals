@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Provider, VerificationEntry } from '@hermes-evals/shared';
-import { judgeReadiness, namedKeys } from './judge-readiness.js';
+import { validateEnv } from '../config/env.js';
+import { judgeSettingsOf } from '../scoring/judge/contracts.js';
+import { judgeReadiness, namedKeys, noJudgeModelReason } from './judge-readiness.js';
 import type { ProviderReadiness } from './readiness.js';
 
 const entry = (type: VerificationEntry['type'], params: Record<string, unknown> = {}) => ({
@@ -111,6 +113,32 @@ describe('judgeReadiness', () => {
     );
     expect(mixed).toMatchObject({ ready: false, provider: 'nous', judgeKeys: 2, unconfigured: 1 });
     expect(mixed.reason).toMatch(/^The LLM judge has no model for tone: /);
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses, as with no model, when .env sets only JUDGE_PROVIDER beside Compose's mock defaults", async () => {
+    // JUDGE_PROVIDER=openrouter in .env; Compose still passes the mock's model and base URL.
+    // env.ts reads mock/scripted beside a real provider as unset, so the launch answers 409
+    // instead of sending every judge call to OpenRouter with a model it does not have.
+    const env = validateEnv({
+      JUDGE_PROVIDER: 'openrouter',
+      JUDGE_MODEL: 'mock/scripted',
+      JUDGE_BASE_URL: 'http://mock-model:8090/v1',
+    });
+    const { asked, deps } = readinessOf({});
+    expect(
+      await judgeReadiness(
+        [{ ...entry('llm_judge', { rubric: 'r.md' }), key: 'disputed', task: 'inv_007' }],
+        judgeSettingsOf(env),
+        deps,
+      ),
+    ).toEqual({
+      ready: false,
+      reason: noJudgeModelReason(['inv_007.disputed']),
+      provider: null,
+      judgeKeys: 1,
+      unconfigured: 1,
+    });
     expect(asked).toEqual([]);
   });
 

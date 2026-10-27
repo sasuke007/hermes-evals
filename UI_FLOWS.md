@@ -2,7 +2,7 @@
 
 This document walks through everything a user can do in the UI. For each feature it shows what the user does, which API calls the web app makes, what the API writes to Postgres, which jobs it queues, and what the worker, docker-guard, egress and the trial container do with them.
 
-It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of truth), the design canvas, and the code as it stands on 27 Oct 2026 (Phase 7). Where those three disagree, or where something is not decided, the flow says so and the point is collected in [section 19, Open points](#19-open-points-found-while-writing-this).
+It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of truth), the design canvas, and the code as it stands on 27 Oct 2026 (the first-run setup of Phase 8). Where those three disagree, or where something is not decided, the flow says so and the point is collected in [section 19, Open points](#19-open-points-found-while-writing-this).
 
 ## How to read this
 
@@ -50,7 +50,7 @@ It is written for review. It follows `IMPLEMENTATION_PLAN.md` (the source of tru
 
 ## 1. System map
 
-Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`); the platform additions of Phase 6 (home seeds, the agent's memory files collected, skill loading, the launch check for unset MCP variables) and the two sample MCP servers, `invoice-db` (stdio, in the trial image) and `vendor-directory` (http, Compose profile `samples`, on a network only egress shares; `docs/phases/phase-6.md`); the five sample suites and the skills and documents their arms use (Phase 6b; `docs/phases/phase-6b.md`); suite authoring in the UI, the save jobs and verifier scripts in their own containers (Phase 5b; `docs/phases/phase-5b.md`).
+Status: **Built** (Phases 0 to 5): postgres, the api with every Phase 1 to Phase 5 endpoint, re-score and the comparison included, the worker (isolation self-test, suite loader, MCP test, `execute-run`, `evaluate-run` with all eight scorers and its dead letter, recovery), docker-guard, egress (proxy, model gateway with its per-attempt token cap, MCP gateway, the LLM judge's path on the admin socket), the trial image, nous-proxy and nous-login, and the web app, whose pages are built against the real API and parse every answer with its shared schema (Phase 5; `docs/phases/phase-5.md`); the platform additions of Phase 6 (home seeds, the agent's memory files collected, skill loading, the launch check for unset MCP variables) and the two sample MCP servers, `invoice-db` (stdio, in the trial image) and `vendor-directory` (http, on a network only egress shares; `docs/phases/phase-6.md`); the five sample suites and the skills and documents their arms use (Phase 6b; `docs/phases/phase-6b.md`); suite authoring in the UI, the save jobs and verifier scripts in their own containers (Phase 5b; `docs/phases/phase-5b.md`); the clean install and the packaging fixes (Phase 7; `docs/phases/phase-7.md`); and the first-run setup (Phase 8; `docs/phases/phase-8.md`): `docker compose up -d --build`, with no `.env` and no profile, starts every service, `mock-model` and `vendor-directory` included, each setting at a Compose default, the LLM judge on the mock model; the api adds the samples from `./samples`, mounted read-only, at each start (section 5.4); and nous-proxy starts Hermes only once the `nous-home` volume holds a login (section 6).
 
 ```mermaid
 flowchart LR
@@ -78,6 +78,7 @@ flowchart LR
 
   VC["verifier container (Phase 5b)<br/>network: none, python3, uid 10000<br/>inputs read-only at /check"]
   S[("./suites<br/>read-write for the save of a draft alone")]
+  SM[("./samples<br/>read-only: skills, documents,<br/>configurations.yaml (Phase 8)")]
 
   E["egress<br/>CONNECT proxy :3128<br/>model + MCP gateway :8080"]
 
@@ -95,6 +96,7 @@ flowchart LR
   API -- "SQL, jobs" --> PG
   WK -- "SQL, jobs" --> PG
   API -- "login status, start, cancel" --> NL
+  API -- "reads at each start, seeds<br/>through the pages' services" --> SM
   WK -- "provider guard: status only" --> NL
   WK -- "filtered Docker API<br/>unix socket" --> G
   G -- "Docker socket" --> D
@@ -122,6 +124,7 @@ What the picture enforces:
 - **The worker and the API hold no provider key either.** Compose blanks every key in their environments, and the LLM judge's model calls go through egress's admin socket, one short-lived registration per judge call (section 13).
 - **Only docker-guard can touch Docker**, and it refuses anything that is not a trial container of the pinned image with the hardened settings, or, since Phase 5b, a verifier container of one exact spec: the trial image's python3, no network, its inputs read-only (section 8.5).
 - **`./suites` is written by one job only**: the worker's save of a draft, through a staging folder and renames, under the folder's lock. The loader only reads it, and the API does not mount it (sections 8.1 and 8.6).
+- **`./samples` is only read**, by the api's seed at each start (Phase 8). The seed writes nothing there: it adds what the folder holds and the database lacks through the services the pages use, so a seeded skill or configuration is stored exactly as an upload or a form would store it (section 5.4).
 - The API never talks to Docker. The worker never serves HTTP.
 
 ---
@@ -332,11 +335,12 @@ Notes:
 
 ## 5. System page
 
-Status: **Built** against the API (Phase 5; `docs/phases/phase-5.md`): model access, secrets, sandbox and workers. The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1); since Phase 7 it has a 16th check, a verifier container (`docs/phases/phase-7.md`).
+Status: **Built** against the API (Phase 5; `docs/phases/phase-5.md`): model access, secrets, sandbox and workers. The worker's isolation self-test runs at every worker start, and `GET /system/sandbox` and `GET /system/workers` expose it (Phase 1); since Phase 7 it has a 16th check, a verifier container (`docs/phases/phase-7.md`). Judge and samples, from `GET /system/setup` (Phase 8; `docs/phases/phase-8.md`).
 
-The page has four sections:
+The page has five sections:
 
 - **Model access**: one row per provider `GET /providers` lists, with the configurations that use each.
+- **Judge and samples** (Phase 8): the LLM judge, and what this start's samples seed did (section 5.4).
 - **Secrets**: each name, set or not set, and the MCP servers that read it (`GET /resources/secrets`).
 - **Sandbox**: whether isolation is proven, with the 16 checks.
 - **Workers**: one row per worker.
@@ -417,20 +421,67 @@ sequenceDiagram
   A-->>W: rows: Nous Portal (state), OpenRouter (configured or missing), ...
 ```
 
-| Row            | States the UI draws                                                                                                                   | Action                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Nous Portal    | not connected, waiting, connected, reconnect, expired, declined, subscription, error, this machine (dev), not running (dev host down) | Connect, Open dialog, Disconnect, Reconnect, Get a new code        |
-| OpenRouter etc | configured, missing                                                                                                                   | Copy the `.env` line. No input field: keys never go through the UI |
+| Row             | States the UI draws                                                                                                                   | Action                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Nous Portal     | not connected, waiting, connected, reconnect, expired, declined, subscription, error, this machine (dev), not running (dev host down) | Connect, Open dialog, Disconnect, Reconnect, Get a new code        |
+| OpenRouter etc  | configured, missing                                                                                                                   | Copy the `.env` line. No input field: keys never go through the UI |
+| Custom endpoint | configured, with "Key optional: egress sends CUSTOM_API_KEY when .env sets it · value not shown", since its key is optional (Phase 8) | none                                                               |
 
-**Disconnect**: `ConfirmInline` ("Disconnect Nous Portal? Experiments that use it will pause before their next run."), then `POST /providers/nous/logout`. The API calls nous-login, which does what `hermes logout --provider nous` does. Running experiments are not touched directly: the provider guard pauses them at their next claim (section 15).
+**Disconnect**: `ConfirmInline` ("Disconnect Nous Portal? Experiments that use it will pause before their next run."), then `POST /providers/nous/logout`. The API calls nous-login, which does what `hermes logout --provider nous` does. Running experiments are not touched directly: the provider guard pauses them at their next claim (section 15). Disconnect leaves Hermes's auth store in the volume with no provider, so a proxy started on it exits at once; nous-proxy's loop then starts it again only when the store is rewritten (a Connect) or every 5 minutes (Phase 8, section 6).
 
 **Development host login**: with `NOUS_HOST_PROXY` set in `.env`, egress forwards Nous calls to `hermes proxy start` on the host. The row reads "Using this machine's Hermes login (development)" and hides Connect. If the host proxy is down, it shows `not running` with the command to start it.
+
+### 5.4 Judge and samples
+
+Status: **Built** (Phase 8; `docs/phases/phase-8.md` sections 4.2 and 4.3): the samples seed in the api, `GET /system/setup`, and the section on System.
+
+The seed runs at each api start, after every module's init, in the background, so the api answers at once. It adds what `./samples` holds and the database lacks, through the services the pages use, and never changes or deletes what exists:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as API
+  participant SD as Seed (in the api)
+  participant SM as ./samples (read-only)
+  participant DB as DB
+  participant W as Web (System)
+
+  A->>SD: onApplicationBootstrap: start the seed and return
+  alt SEED_SAMPLES off
+    SD->>SD: report off
+  else migrations not ok, no samples folder, or configurations.yaml unreadable
+    SD->>SD: report failed with the reason, nothing added
+  else
+    SD->>SM: read samples/skills, samples/documents and configurations.yaml (strict)
+    SD->>DB: each skill folder, zipped, through SkillsService validate and confirm<br/>(skipped when a skill with its SKILL.md name and content hash exists)
+    SD->>DB: each document through DocumentsService.upload<br/>(skipped when one with the same file name and sha256 exists)
+    SD->>DB: invoice-db and vendor-directory through McpServersService<br/>(skipped when a server with the name exists)
+    SD->>DB: 26 configurations through ConfigurationWritesService, the form's path<br/>(skipped when the name exists)
+    SD->>SD: report done, each item created, skipped or failed with why
+  end
+  W->>A: GET /system/setup
+  A-->>W: judge (provider, model, mock, mockModelName) and the seed's report
+  loop every 2 s while the seed is running
+    W->>A: GET /system/setup
+  end
+```
+
+The configurations are each suite's recommended arms, declared in `samples/configurations.yaml`, in two families: `<suite>-<arm>` on Nous Portal with `openai/gpt-6.1-sol`, which costs money when launched, and `<suite>-<arm>-mock` on the scripted mock model, free. A first start creates 40 items (4 skills, 8 documents, 2 MCP servers, 26 configurations); every later start skips them. The report lives in the api's memory for the current start only.
+
+What the section shows:
+
+| Row       | Setting                                        | Status chip                                                                                                     | Detail                                                                                                                                                                                                                                                                                                                          |
+| --------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LLM judge | "custom · mock/scripted", or "nous · no model" | mock model (the default); check model (a `custom` judge on a real endpoint left at `mock/scripted`); real model | what its `llm_judge` scores are worth and how to set a real judge ("The scripted mock model grades llm_judge checks: right for the samples on the mock model, meaningless on a real model's answers. For a real judge, set JUDGE_PROVIDER and JUDGE_MODEL in .env."), with `docker compose up -d api worker` for the mock cases |
+| Samples   | "SEED_SAMPLES on" or "off"                     | off, running, done, failed                                                                                      | "40 created · 0 skipped · 0 failed, at 08:33.", the progress while running, or why it stopped, with the error                                                                                                                                                                                                                   |
+
+Under the table, "Show the 40 samples" opens the list of what the seed met: kind, name (a document as `<suite>/<file>`), outcome (created, skipped, failed) and its detail ("version 1.0.0", "a configuration with this name exists", or the service's refusal). The list opens by itself when an item failed. If `GET /system/setup` fails, only this section shows the error with Retry. Neither a failed seed nor a mock judge turns the System dot amber: neither blocks anything.
 
 ---
 
 ## 6. Connecting Nous Portal
 
-Status: **Built** in the web app against the API (dialog, every state, polling, follow-ups; Phase 5), with a `manual` step that shows the terminal command and sends nothing when Nous cannot be connected from the UI (host mode with the proxy down, or the login service `unavailable`); and in the API: the `nous-login` service and the `providers` module (Phase 2), tested against a fake portal. **To run**: a real login approved in the browser (plan spike I14).
+Status: **Built** in the web app against the API (dialog, every state, polling, follow-ups; Phase 5), with a `manual` step that shows the terminal command and sends nothing when Nous cannot be connected from the UI (host mode with the proxy down, or the login service `unavailable`); and in the API: the `nous-login` service and the `providers` module (Phase 2), tested against a fake portal. nous-proxy's loop, which starts Hermes only once the volume holds a login (Phase 8; `docs/phases/phase-8.md` 4.5). **To run**: a real login approved in the browser (plan spike I14).
 
 Nous Portal has no API keys, only an OAuth device login with rotating refresh tokens. The user connects once from the UI, and the login lives in the `nous-home` volume, never in the database or the browser.
 
@@ -466,7 +517,7 @@ sequenceDiagram
     A-->>W: connected
   end
   W->>W: step Connected, offer the follow-up for where it was opened
-  Note over PX,V: nous-proxy re-reads the auth store on every request,<br/>so it serves the new login without a restart
+  Note over PX,V: before the first login nous-proxy runs no Hermes, and its loop<br/>starts the proxy within 5 s of auth.json appearing (Phase 8).<br/>A running proxy re-reads the auth store on every request,<br/>so it serves a new login without a restart
 ```
 
 What the dialog offers when it ends depends on where it was opened:
@@ -490,15 +541,16 @@ Details that matter:
 - **Cancel login** sends `DELETE /providers/nous/login`.
 - **One login at a time.** A second Connect cancels the pending one and starts a new code.
 - **Nothing secret leaves the volume.** The API only ever sees the link, user code, state, expiry and non-secret details.
+- **nous-proxy idles until there is a login** (Phase 8). Its loop, a shell script, tests only whether Hermes's auth store (`$HERMES_HOME/auth.json`) exists and when it last changed, never reads it, and without it sleeps 5 s without starting Python: about 0.04% of a core, where starting Hermes every 5 s used about one. After a Disconnect the store stays with no provider and the proxy exits at once, so the loop waits for the store to be rewritten (a Connect, picked up within 5 s) or tries again every 5 minutes.
 - **CSRF guard.** The API has no authentication, by requirement. The three state-changing calls therefore require `content-type: application/json` and `X-Requested-With`. Another site open in the same browser cannot send those without a CORS preflight, which the API refuses.
 
 ---
 
 ## 7. Nudges: where the UI blocks model work and why
 
-Status: **Built** in the web app against the API (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker; Phase 5), and in the API: the launch 409s and the worker's provider guard (Phase 2), the 409s of launch and re-score when the LLM judge's provider is not ready (Phase 3), and the judge keys with no model in each run's `needs`, so Re-score is disabled with the fix (Phase 5).
+Status: **Built** in the web app against the API (SetupCard, banner, ProviderNotice, BlockedReason, summary blocker; Phase 5), and in the API: the launch 409s and the worker's provider guard (Phase 2), the 409s of launch and re-score when the LLM judge's provider is not ready (Phase 3), and the judge keys with no model in each run's `needs`, so Re-score is disabled with the fix (Phase 5); the judge warning on New experiment and in the launch answer, and Run a sample experiment disabled with its reason (Phase 8; `docs/phases/phase-8.md`).
 
-The rule: a user should never find out at launch, or halfway through an experiment, that no model is reachable. Every place that leads to a model call checks the providers of the configurations involved.
+The rule: a user should never find out at launch, or halfway through an experiment, that no model is reachable. Every place that leads to a model call checks the providers of the configurations involved. Since Phase 8 one nudge warns rather than blocks: when the LLM judge is the mock model, its `llm_judge` scores mean nothing on a real model's answers, but the run itself works, so Launch stays enabled.
 
 ```mermaid
 flowchart TD
@@ -511,6 +563,8 @@ flowchart TD
   where -- "Retry, Resume, Re-score with an llm_judge whose judge is on Nous" --> BR["Control disabled through BlockedReason,<br/>with a Connect link"]
   where -- "Experiment already running" --> PG["Worker's provider guard pauses it:<br/>pause_reason provider_disconnected,<br/>no attempt spent"]
   where -- "Suites, reload, self-checks" --> NO["No nudge: they never call a model"]
+  where -- "New experiment, the judge is the mock, a chosen configuration is not,<br/>and a selected task has an llm_judge key (Phase 8)" --> JW["Amber note above Launch, which stays enabled:<br/>'The LLM judge is the mock model, so llm_judge checks<br/>will not mean anything on a real model. Set JUDGE_PROVIDER<br/>and JUDGE_MODEL in .env.' The launch answer repeats it,<br/>and the Overview shows it until dismissed"]
+  where -- "Run a sample experiment (Phase 8)" --> SX["Button disabled with the reason and a link:<br/>the suite or a seeded configuration missing (Suites, System),<br/>or the first launch blocker (no worker, sandbox not proven)"]
 
   SC --> CD["ConnectDialog"]
   PN --> CD
@@ -642,7 +696,7 @@ sequenceDiagram
 
 The reference answer is shown to the user (it is their own task) but marked "Hidden from the agent": it is never copied into a trial. Only task files of kind `fixture` ever enter a workspace, and only those of kind `home_seed` the home.
 
-**Home files on Task detail** (Phase 6). A task that seeds the agent's memory (`home/memories/MEMORY.md`, `USER.md`) shows a **Home seeds** panel after Fixtures, marked visible to the agent: "Copied into the agent's memories/ before every run, in every configuration; read only with memory on". A task that declares `self_check.expected_home` shows an **Expected home** panel after the reference answer, marked hidden: what a home check expects the memory files to hold, laid over the seeds, never copied into a run. Each row has the path in the task folder, its kind, where it sits in the home (`memories/USER.md`, as the API works it out), size, hash, and the file's text (up to 16 KB), the first one open. A `file_check` with `root: home` carries a `root: home` tag, and its sentence reads "file_check: memories/USER.md in the home exists …". A home check's self-check reads "passes on the expected home; fails on the home seeds alone, as it should"; one that passes on the seeds alone makes the task invalid, "passes on the home seeds alone too, so it would pass any agent". A verifier's contract now reads `--answer <file> --workspace <dir> --home <dir>`.
+**Home files on Task detail** (Phase 6). A task that seeds the agent's memory (`home/memories/MEMORY.md`, `USER.md`) shows a **Home seeds** panel after Fixtures, marked visible to the agent: "Copied into the agent's memories/ before every run, in every configuration; read only with memory on". Since Phase 8 the seeds are copied only when the configuration's memory is on (section 12.2), and the panel's sentence still says the Phase 6 rule (open point 18). A task that declares `self_check.expected_home` shows an **Expected home** panel after the reference answer, marked hidden: what a home check expects the memory files to hold, laid over the seeds, never copied into a run. Each row has the path in the task folder, its kind, where it sits in the home (`memories/USER.md`, as the API works it out), size, hash, and the file's text (up to 16 KB), the first one open. A `file_check` with `root: home` carries a `root: home` tag, and its sentence reads "file_check: memories/USER.md in the home exists …". A home check's self-check reads "passes on the expected home; fails on the home seeds alone, as it should"; one that passes on the seeds alone makes the task invalid, "passes on the home seeds alone too, so it would pass any agent". A verifier's contract now reads `--answer <file> --workspace <dir> --home <dir>`.
 
 ### 8.3 Authoring: a new suite
 
@@ -1133,7 +1187,7 @@ The form shows the versioning rule before saving: on a configuration an experime
 
 A configuration version is turned into the trial's `config.yaml` and command line (section 12.2): model and provider pointed at the egress gateway, toolsets plus one `-t` entry per MCP server name, the skills copied into the home and, with preload, `-s` per skill (on demand: no `-s`, and the `skills` toolset added once, so the agent lists the skills and opens one with `skill_view`), memory on or off, max turns and time budget. The platform adds the rest itself so arms differ only where the user intended: bundled Hermes skills off, update checks off, approvals off, and the background review's intervals written at Hermes's defaults (10 and 10), the same in every arm; a one-shot run is a finite turn, for which Hermes starts no review.
 
-Memory on puts the task's home seeds in the prompt and adds Hermes's `memory` toolset to the run, so the agent can also save (Phase 6 #1, built in Phase 6b; the launch record's `-t` list shows it).
+Memory on puts the task's home seeds in the prompt and adds Hermes's `memory` toolset to the run, so the agent can also save (Phase 6 #1, built in Phase 6b; the launch record's `-t` list shows it). Memory off leaves the seeds out of the home altogether, and nothing in the home is collected after the run (Phase 8, section 12.2).
 
 Hermes always installs its own `hermes-agent` skill in every home and it cannot be turned off. So `baseline` has "no added skills", not "no skills": every arm has that one skill.
 
@@ -1141,7 +1195,7 @@ Hermes always installs its own `hermes-agent` skill in every home and it cannot 
 
 ## 11. New experiment and launch
 
-Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2); the page against the real API (Phase 5); the 409 and the per-configuration tags and blocker for MCP variables that are not set (Phase 6, Phase 5 #13; `docs/phases/phase-6.md`).
+Status: **Built**: tables, the launch trigger, transactional job sending, and the endpoints: `GET /experiments/new-options`, the estimate and `POST /experiments` with its 409 checks (Phase 2); the page against the real API (Phase 5); the 409 and the per-configuration tags and blocker for MCP variables that are not set (Phase 6, Phase 5 #13; `docs/phases/phase-6.md`); the judge warning, the launch answer's `warnings`, and Run a sample experiment, under the page title and on the empty Experiments list (Phase 8; `docs/phases/phase-8.md`).
 
 ### 11.1 Filling the form
 
@@ -1153,7 +1207,7 @@ sequenceDiagram
   participant A as API
   participant DB as DB
 
-  W->>A: GET /experiments/new-options: suites with valid tasks, configurations with latest versions,<br/>config hashes, skill loading and the MCP variables not set where they are read
+  W->>A: GET /experiments/new-options: suites with valid tasks (each with hasLlmJudge), configurations with latest versions,<br/>config hashes, skill loading, the MCP variables not set where they are read, mockModel,<br/>and the judge (provider, model, mock, mockModelName), Phase 8
   W->>A: GET /providers
   U->>W: picks suite invoices-v1 v5, tasks (invalid ones disabled with the reason)
   U->>W: picks baseline + candidate(s)
@@ -1164,6 +1218,7 @@ sequenceDiagram
   A->>DB: median duration and cost of past attempts on this suite and config_hash
   A-->>W: 120 runs, 40 waves, about 36 min, $1.69 (or basis budget when no history)
   W->>W: ExperimentSummaryPanel: runs, time, cost, blockers
+  W->>W: mockJudgeWarning(judge, chosen configurations, selected tasks):<br/>the amber judge warning above Launch, or none (Phase 8)
 ```
 
 The summary panel decides whether **Launch** is enabled:
@@ -1180,8 +1235,11 @@ flowchart TD
   SB -- no --> D3["Launch disabled: runs cannot start until the sandbox passes"]
   SB -- yes --> SP{"Estimate over the spend ceiling?"}
   SP -- yes --> WARN["Warning, Launch still allowed:<br/>the spend guard will pause at the ceiling"]
-  SP -- no --> OK["Launch enabled"]
-  WARN --> OK
+  SP -- no --> JG{"Judge the mock model, a chosen configuration not,<br/>and a selected task with an llm_judge key? (Phase 8)"}
+  WARN --> JG
+  JG -- yes --> JWN["Warning, Launch still allowed:<br/>the mock judge's llm_judge scores mean nothing on a real model"]
+  JG -- no --> OK["Launch enabled"]
+  JWN --> OK
 ```
 
 ### 11.2 Launch: one transaction
@@ -1219,13 +1277,15 @@ sequenceDiagram
   A->>DB: INSERT tasks x versions x repetitions runs, all queued (12 x 2 x 5 = 120)
   A->>Q: send one execute-run job per run, key runId:1, trigger initial
   A->>DB: COMMIT (rows and jobs together, or nothing)
-  A-->>W: experiment id
-  W->>W: go to the Overview tab, open the SSE stream
+  A-->>W: experiment id and warnings (Phase 8: the judge warning, or an empty list)
+  W->>W: go to the Overview tab, show the warnings there, open the SSE stream
 ```
 
 If the response is a 409, the form keeps everything entered and shows the reason where the panel's error sits ("Launch refused… POST /api/experiments → 409").
 
 **MCP variables that are not set** (Phase 6). `GET /experiments/new-options` gives each configuration its `missingSecrets`: every variable its MCP server versions name that is not set where it is read, a stdio env name in the live worker's environment, an http header variable in egress's. The row carries one amber tag per variable ("INVOICE_DB_URL not set · invoice-db", the full sentence on hover). Choosing such a configuration adds a blocker with the reason ("with-mcp: INVOICE_DB_URL (invoice-db, read by the worker) is not set.", or "… (vendor-directory, added by egress) …" for an http header), the hint "Set each in .env, then recreate the worker (stdio) or egress (http) so it reads them.", the command (`docker compose up -d worker`, `egress`, or both), **Check again**, which reloads the options, and **Open Secrets**; Launch is disabled with the same reason. While no worker is live, the tags and these blockers are hidden: the no-worker blocker explains. If the state changed after the form loaded, `POST /experiments` answers 409 `MissingSecretsConflict`, one issue per variable on the field that chose its configuration (`baselineVersionId`, `candidateVersionIds.<i>`), and writes nothing; the form shows "Launch refused: an MCP server's variables are not set." and reloads the options. The Skills column reads "1 · on demand" for a configuration whose skills load on demand.
+
+**The judge warning** (Phase 8). The options carry each task's `hasLlmJudge` (any `llm_judge` key), each configuration's `mockModel` (provider `custom` with a base URL whose host is `mock-model`) and the judge. As the user chooses, the form calls the shared `mockJudgeWarning` on them: when a selected task has an `llm_judge` key, the judge is the mock and the baseline or a candidate is not, an amber note above Launch says "The LLM judge is the mock model, so llm_judge checks will not mean anything on a real model. Set JUDGE_PROVIDER and JUDGE_MODEL in .env." A `custom` judge on a real endpoint whose model is still `mock/scripted` gets its own sentence, whatever the configurations. Launch stays enabled. `POST /experiments` works out the same warning on the same values and answers `{ id, warnings }`; the store keeps the warnings by experiment id, and the Overview shows them until Dismiss. They live in that tab only, so a reload clears them.
 
 ### 11.3 Duplicate, and running on a newer suite version
 
@@ -1251,11 +1311,49 @@ sequenceDiagram
   U->>W: Launch (section 11.2)
 ```
 
+### 11.4 Run a sample experiment
+
+Status: **Built** (Phase 8; `docs/phases/phase-8.md`). A new user's first experiment: `invoices-v1`, `invoices-v1-baseline-mock` against `invoices-v1-with-skill-mock`, every valid task, 2 repetitions, on the scripted mock model, so it costs nothing. It is a button on the empty Experiments list (and in the setup card shown there when no model is connected), and a line under New experiment's title: "New here? Run a sample experiment: invoices-v1, its baseline against its with-skill arm on the scripted mock model: every valid task, 2 repetitions."
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant W as Web (SampleExperimentButton)
+  participant A as API
+
+  W->>A: GET /experiments/new-options, GET /providers, GET /system/workers
+  W->>W: sampleExperimentPlan: the suite by name, its valid tasks,<br/>the two seeded configurations by name, the launch blockers
+  alt something is missing or blocks the launch
+    W->>W: button disabled, the reason beside it, a link to the fix
+  else
+    U->>W: Run a sample experiment
+    W->>W: button disabled, Launching…
+    W->>A: POST /experiments (the body the form would send: the configuration hashes,<br/>concurrency from the defaults, no spend ceiling)
+    alt 409
+      A-->>W: the refusal
+      W->>W: show the reason, reload the options
+    else
+      A-->>W: id, warnings [] (both configurations are on the mock)
+      W->>W: open the experiment's Overview
+    end
+  end
+```
+
+| Disabled because                     | It says                                                                                                                                                           | Link        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `invoices-v1` is not loaded          | "The sample suite invoices-v1 is not loaded. It is read from ./suites; Reload on Suites reads it again."                                                          | Open Suites |
+| `invoices-v1` has no valid task      | "invoices-v1 has no valid task: every task fails its self-check."                                                                                                 | Open Suites |
+| A seeded configuration is missing    | "The sample configuration invoices-v1-with-skill-mock does not exist. The API creates them when it starts, unless SEED_SAMPLES is off; System shows what it did." | Open System |
+| No worker, or the sandbox not proven | the first launch blocker New experiment would show                                                                                                                | Open System |
+
+On the mock the sample reads `better`: the baseline passes 8 of 24 runs, the with-skill arm 24 of 24, Δ +0.667 [+0.417, +0.917], in about 2 minutes.
+
 ---
 
 ## 12. What happens to one run: execution
 
-Status: **Built and proven live** (Phase 2): the `execute-run` handler around the trial runner (claim, admission, leases and heartbeat, the cancel watcher, event batching into `run_events`, artifact collection, recovery), run on the Compose stack with real Hermes and the scripted mock model (`docs/phases/phase-2.md` section 6); home seeds copied in, the memory files collected, skill loading and the background review's intervals (Phase 6, proven live; `docs/phases/phase-6.md` section 5.4).
+Status: **Built and proven live** (Phase 2): the `execute-run` handler around the trial runner (claim, admission, leases and heartbeat, the cancel watcher, event batching into `run_events`, artifact collection, recovery), run on the Compose stack with real Hermes and the scripted mock model (`docs/phases/phase-2.md` section 6); home seeds copied in, the memory files collected, skill loading and the background review's intervals (Phase 6, proven live; `docs/phases/phase-6.md` section 5.4); since Phase 8 the home seeds copied in and `home/memories` collected only when the configuration's memory is on, recorded in the launch record's `home_memory` (`docs/phases/phase-8.md` section 4.6).
 
 The user sees none of this directly. They see a run go `queued → running → executed`, its events stream into the inspector, and the counters move. This section is what happens underneath.
 
@@ -1314,9 +1412,11 @@ sequenceDiagram
   WK->>V: create trials/<attempt>/home and /workspace (fresh, lstat-checked)
   WK->>V: copy fixtures (hash re-checked) to workspace, documents to workspace/docs
   WK->>V: copy skills to home/skills/<name>, write home/.no-bundled-skills
-  WK->>V: copy the task's home seeds to home/memories/ (hash re-checked), in every arm
+  opt memory on (Phase 8: with memory off home/memories/ starts empty)
+    WK->>V: copy the task's home seeds to home/memories/ (hash re-checked)
+  end
   WK->>V: write home/task.txt (the prompt) and home/config.yaml<br/>(no key · stdio MCP env as ${NAME} · http MCP url = egress:8080/mcp/<name><br/>· memory and skills review intervals 10 and 10)
-  WK->>DB: write the launch record: argv (-s per skill, or none on demand), container spec,<br/>config.yaml, inputs + hashes (home seeds included), skill loading, Hermes revision
+  WK->>DB: write the launch record: argv (-s per skill, or none on demand), container spec,<br/>config.yaml, inputs + hashes (home seeds included), skill loading, Hermes revision,<br/>home_memory (memory on or off, the seeds left out, whether home/memories is collected)
   WK->>E: register attempt: token, provider, model, max tokens, expiry,<br/>http MCP routes, public mode if web toolsets
   WK->>G: POST /containers/create (trial spec, plus stdio MCP env values)
   G->>G: validate every field, pin the image by id
@@ -1344,8 +1444,10 @@ sequenceDiagram
   WK->>DB: connection log rows as platform events (allowed, refused, Hermes background call)
   WK->>V: walk workspace with lstat, never follow links, read with O_NOFOLLOW
   WK->>DB: blobs for new files, artifacts rows labelled fixture/document unchanged or modified, or agent
-  WK->>V: then home/memories/ only, the same safe walk, with what is left of the budget<br/>skipping the memory tool's empty .lock files
-  WK->>DB: artifacts with root home, labelled home seed unchanged or modified, or agent
+  opt memory on (Phase 8: with memory off the home is not read at all)
+    WK->>V: then home/memories/ only, the same safe walk, with what is left of the budget<br/>skipping the memory tool's empty .lock files
+    WK->>DB: artifacts with root home, labelled home seed unchanged or modified, or agent
+  end
   WK->>DB: BEGIN: final platform events, finish the attempt (classified)
   WK->>DB: if executed: run executed, INSERT evaluation generation 1, send evaluate-run
   WK->>DB: COMMIT
@@ -1356,8 +1458,8 @@ Why each piece is there:
 
 - **A container per trial.** Hermes runs its agent loop in a detached gateway daemon, so killing a process does not stop a run, and it can read any absolute path. A container bounds its files, network and processes, and stopping it ends everything.
 - **The attempt token.** The trial never holds a provider credential. It holds a token that is valid only from its slot network, for one model, until the attempt ends. The only secrets it holds are its stdio MCP servers' env values (section 9.4).
-- **The safe reader.** The agent controls every file name, link and file type in its workspace and its home. The worker never follows a link and never opens a FIFO or device; of the home it reads `memories/` alone, and a `memories/` that is a link is listed, never followed.
-- **Seeds in every arm.** With memory off Hermes builds no memory store and injects nothing, so the same seed in both arms isolates `memory_enabled`.
+- **The safe reader.** The agent controls every file name, link and file type in its workspace and its home. The worker never follows a link and never opens a FIFO or device; of the home it reads `memories/` alone, and only with memory on, and a `memories/` that is a link is listed, never followed.
+- **Seeds only with memory on** (Phase 8, replacing Phase 6's seeds in every arm). Phase 6 put the same seeds in both arms, since with memory off Hermes builds no memory store and puts nothing in the prompt. The first real-model runs showed that this does not isolate `memory_enabled`: with memory off the agent found `/opt/data/memories/USER.md` with its file tools, read it, and passed. So with memory off the home holds no seed and nothing in it is collected: a memory-off arm is an agent with no memory at all. The launch record's `home_memory` and the `collected` event's `memories_collected` say which.
 - **The answer** is always the `result` event's text, never the streamed pieces joined back together: Hermes can drop a newline-only delta.
 
 ### 12.3 How the attempt ends
@@ -1422,7 +1524,7 @@ A missing heartbeat alone never proves the trial stopped. A replacement starts o
 
 ## 13. What happens to one run: scoring
 
-Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`); verdict entries appended by reconcile (Phase 4; `docs/phases/phase-4.md`); `file_check` on the home's memory files (`root: home`) and `--home` for every verifier (Phase 6; `docs/phases/phase-6.md`).
+Status: **Built**: answer extraction, the `numeric_tolerance`, `json_match`, `exact_match`, `file_check` and `verifier_script` scorers (Phase 1); the `evaluate-run` handler with claim, publish and the dead letter (Phase 2); `text_match`, `trajectory_match`, `llm_judge` with its judge path through egress, the claim renewed after each key, and re-score (Phase 3; `docs/phases/phase-3.md`); verdict entries appended by reconcile (Phase 4; `docs/phases/phase-4.md`); `file_check` on the home's memory files (`root: home`) and `--home` for every verifier (Phase 6; `docs/phases/phase-6.md`); unfenced answers, and the judge on the mock model by default under Compose (Phase 8; `docs/phases/phase-8.md`).
 
 Scoring is separate from execution, so a scorer bug is fixed by re-scoring. Hermes is never run again for it.
 
@@ -1442,7 +1544,7 @@ sequenceDiagram
     WK->>Q: already finished: complete the job
   end
   WK->>DB: read attempt final_text, the task's prompt, reference and verification list,<br/>artifacts, rubric files, the experiment's frozen prices
-  WK->>WK: extract the answer: last fenced json block, parse, keep start/end offsets
+  WK->>WK: extract the answer: last fenced json block, parse, keep start/end offsets<br/>(Phase 8: with no json fence at all, a reply that is exactly one JSON object is the answer, flagged unfenced)
   loop each verification key of the task
     alt numeric_tolerance, json_match, exact_match
       WK->>WK: compare the answer (at its path) with the reference
@@ -1471,17 +1573,19 @@ sequenceDiagram
   WK->>DB: COMMIT
 ```
 
-The judge is the platform's, not the run's: a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset). Launch and Re-score answer 409 for a task whose `llm_judge` key has no judge model, with the fix in the message; a key that still has none at scoring time is `error`, never a zero. Each judge call's status and latency are kept in the score's evidence. Its tokens and cost are stored in the score's evidence as grading cost, outside the spend guard.
+**Unfenced answers** (Phase 8). When the final text has no ` ```json ` block, closed or not, and the text, trimmed, is exactly one JSON object (it starts with `{` and parses whole), that object is the answer: stored as found with `block_count` 0 and `unfenced: true`, its range the trimmed text. Prose around the object, two objects, an array or a scalar stay missing, "no fenced JSON block found in final response". No scorer version changed, and a re-score extracts again from the stored final text, so it applies the rule to runs scored before.
+
+The judge is the platform's, not the run's: a check's own `model:`, else `JUDGE_MODEL`, on `JUDGE_PROVIDER` (`nous` when unset). Since Phase 8 Compose sets the mock model by default (`custom`, `mock/scripted`, `http://mock-model:8090/v1`), so the samples' `llm_judge` checks are graded with no key; System shows which judge is set, and New experiment warns when the mock would judge a real model (section 11.1). Launch and Re-score answer 409 for a task whose `llm_judge` key has no judge model, with the fix in the message; a key that still has none at scoring time is `error`, never a zero. Each judge call's status and latency are kept in the score's evidence. Its tokens and cost are stored in the score's evidence as grading cost, outside the spend guard.
 
 What each outcome means, kept apart everywhere in the UI:
 
-| Status            | Meaning                                            | Example                                    |
-| ----------------- | -------------------------------------------------- | ------------------------------------------ |
-| `passed`          | the agent was right                                | total within ±0.01                         |
-| `failed`          | the agent was wrong                                | total off by 1,500                         |
-| `ungradable`      | nothing could be extracted                         | no fenced JSON block in the final response |
-| `error`           | the check itself broke                             | verifier printed no result line            |
-| `execution_error` | (a run status, not a score) no answer was produced | timeout, provider down                     |
+| Status            | Meaning                                            | Example                                                         |
+| ----------------- | -------------------------------------------------- | --------------------------------------------------------------- |
+| `passed`          | the agent was right                                | total within ±0.01                                              |
+| `failed`          | the agent was wrong                                | total off by 1,500                                              |
+| `ungradable`      | nothing could be extracted                         | no fenced JSON block, and the reply is not one bare JSON object |
+| `error`           | the check itself broke                             | verifier printed no result line                                 |
+| `execution_error` | (a run status, not a score) no answer was produced | timeout, provider down                                          |
 
 **Re-score** (`POST /runs/:id/rescore`, or the bulk bar): inserts an evaluation with the next generation and sends `evaluate-run`, in one transaction. Only a `scored` run can be re-scored (409 "run is …, not scored"), and a task with an `llm_judge` key needs a judge model (409 "Re-score needs a judge model for the method judge: …") and the judge's provider ready (409 "Re-score needs Nous Portal for the method judge: …"). The run stays `scored`, and its previous result stays current, until the new generation publishes; the inspector and the Runs tab show the pending re-score. Only one evaluation per run can be queued or running, so double clicks collapse: a second request answers the pending one (`joinedPending`). A re-score grades the experiment's frozen task with the scorers as they are now in code, and the judge settings of the moment. If the experiment was completed, publishing raises the results revision, and reconcile appends a verdict entry per candidate with cause `rescore` (section 13.1).
 
@@ -1516,11 +1620,11 @@ Two workers finishing the last two runs at the same moment append the verdict on
 
 ## 14. Experiment list and overview, live
 
-Status: **Built** in the web app against the API (Phase 5; `docs/phases/phase-5.md`): the list, polled while anything runs, and the Overview, live from the experiment's SSE stream; and in the API: the list, the detail and the SSE stream (Phase 2), and the verdicts read from the verdict history, with the SSE `experiment` event's `verdicts` and `verdictUpdatedAt` (Phase 4).
+Status: **Built** in the web app against the API (Phase 5; `docs/phases/phase-5.md`): the list, polled while anything runs, and the Overview, live from the experiment's SSE stream; and in the API: the list, the detail and the SSE stream (Phase 2), and the verdicts read from the verdict history, with the SSE `experiment` event's `verdicts` and `verdictUpdatedAt` (Phase 4); Run a sample experiment on the empty list, and the launch answer's warnings on the Overview (Phase 8; `docs/phases/phase-8.md`).
 
 ### 14.1 Experiment list
 
-`GET /experiments` returns one row per experiment, newest first: name, status chip, suite and version, configurations, runs done of total, cost, and once completed one verdict chip per candidate, from its last verdict history entry (Δ and interval included). A running, paused or failed experiment has no chip; the SSE `experiment` event carries the same `verdicts`. A verdict that is `not_computable` carries its `reason`, so the chip says why ("No interval (1 rep)"). The web polls `GET /experiments` every 5 s while anything runs and patches the rows in place (Phase 5). A failed experiment shows its failure reason in the row. Clicking a row opens the Overview tab.
+`GET /experiments` returns one row per experiment, newest first: name, status chip, suite and version, configurations, runs done of total, cost, and once completed one verdict chip per candidate, from its last verdict history entry (Δ and interval included). A running, paused or failed experiment has no chip; the SSE `experiment` event carries the same `verdicts`. A verdict that is `not_computable` carries its `reason`, so the chip says why ("No interval (1 rep)"). The web polls `GET /experiments` every 5 s while anything runs and patches the rows in place (Phase 5). A failed experiment shows its failure reason in the row. Clicking a row opens the Overview tab. With no experiment, the empty state offers New experiment and, beside it, Run a sample experiment (section 11.4), disabled with its reason until the seeded configurations and `invoices-v1` are there; when no model is connected, the setup card above carries the same button.
 
 ### 14.2 Overview while running
 
@@ -1559,6 +1663,7 @@ What the overview shows, and where each number comes from:
 | No-worker banner                                     | no worker heartbeat for 60 s while runs are queued                                                                                                            |
 | Paused banners                                       | `pause_reason`: user, spend_ceiling, provider_disconnected                                                                                                    |
 | Failed banner                                        | the circuit breaker's structured failure: category, message, first stderr line, attempt                                                                       |
+| "Launched with a warning"                            | the launch answer's `warnings` (Phase 8), kept by the tab that launched; Dismiss hides them, and a reload does too                                            |
 
 ---
 
@@ -1716,7 +1821,7 @@ sequenceDiagram
 
 ## 18. Run inspector
 
-Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3); the Memory group of home artifacts and the launch record's skill loading, home seeds and background review (Phase 6; `docs/phases/phase-6.md`); the Full log, `json_match` evidence key by key, neutral rows for Hermes's background requests and the 405 event-stream answer, and MCP results' 20,000-character window (Phase 7; `docs/phases/phase-7.md`).
+Status: **Built** in the web app against the API, polling the run while it is live (Phase 5), and in the API: `GET /runs/:id`, its events, artifact content and preview, retry and cancel (Phase 2), and re-score, the run's `evaluation` (current generation, pending re-score, last failure) and the structured `network` field of every network row (Phase 3); the Memory group of home artifacts and the launch record's skill loading, home seeds and background review (Phase 6; `docs/phases/phase-6.md`); the Full log, `json_match` evidence key by key, neutral rows for Hermes's background requests and the 405 event-stream answer, and MCP results' 20,000-character window (Phase 7; `docs/phases/phase-7.md`); the unfenced answer's note, and the launch record's and the timeline's account of what memory off left out (Phase 8; `docs/phases/phase-8.md`).
 
 A right-hand drawer over the experiment, 75% of the window, with its own route (`/experiments/:id/runs/:runId`, or `?run=` from the comparison). Esc closes it back to where it was opened.
 
@@ -1761,13 +1866,13 @@ sequenceDiagram
 
 The five sections and what each proves:
 
-| Section        | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | From                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| Outcome        | run status, each score key with expected vs observed and comment (a `json_match` key as a table, key by key or item by item, "Compared at `<path>` against the reference, key by key."), or the execution error banner with category, stderr tail and **Full log** (the whole log, or its last 1 MB, in place)                                                                                                                                                                                                                                                     | `scores`, `attempts`                        |
-| Timeline       | every event in order with a scrubber: model text, tool calls (an MCP tool's result keeps 20,000 characters, any other's 5,000; Hermes's own client already cuts each at 5,000, which the row's note says), network rows (allowed, refused by sandbox; Hermes's background requests and an MCP server's 405 "MCP event stream not offered" drawn neutral, never as errors)                                                                                                                                                                                          | `run_events`                                |
-| Final response | the recorded final text with the extracted JSON block highlighted, the parsed value, and the reference beside it                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `attempts.final_text`, `evaluations.answer` |
-| Artifacts      | what the agent left in the workspace, labelled by origin, with previews; then a **Memory** group for the home's `memories/` (`home/memories/USER.md` · home seed · modified, or written by agent), shown when the run has home files, a changed file's preview open; the memory tool's empty `*.lock` files are not collected (Phase 6b)                                                                                                                                                                                                                           | `artifacts`, blobs                          |
-| Launch record  | the container (image + digest, mounts, network, limits), the exact Hermes command, `config.yaml`, inputs with hashes; each MCP secret as `<from env NAME>` with its exposure; **Skill loading** (when the run had skills: preload with `-s`, or on demand through the `skills` toolset), **Home seeds** (each `memories/X.md → /opt/data/memories/X.md` with its hash, or that `memories/` started empty) and **Background review** (`memory.nudge_interval` and `skills.creation_nudge_interval`, written the same in every run; a one-shot run starts no review) | `attempts.launch_record`                    |
+| Section        | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | From                                        |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Outcome        | run status, each score key with expected vs observed and comment (a `json_match` key as a table, key by key or item by item, "Compared at `<path>` against the reference, key by key."), or the execution error banner with category, stderr tail and **Full log** (the whole log, or its last 1 MB, in place)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `scores`, `attempts`                        |
+| Timeline       | every event in order with a scrubber: model text, tool calls (an MCP tool's result keeps 20,000 characters, any other's 5,000; Hermes's own client already cuts each at 5,000, which the row's note says), network rows (allowed, refused by sandbox; Hermes's background requests and an MCP server's 405 "MCP event stream not offered" drawn neutral, never as errors); with memory off, the collected row adds "Memory was off, so home/memories was not collected." (Phase 8)                                                                                                                                                                                                                                                                                                                                                                                                                                   | `run_events`                                |
+| Final response | the recorded final text with the extracted JSON block highlighted, the parsed value, and the reference beside it; for an unfenced answer (Phase 8) the note "Unfenced answer: the reply was one JSON object without a ```json fence.", the whole trimmed reply highlighted, and "Parsed answer · the whole reply"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `attempts.final_text`, `evaluations.answer` |
+| Artifacts      | what the agent left in the workspace, labelled by origin, with previews; then a **Memory** group for the home's `memories/` (`home/memories/USER.md` · home seed · modified, or written by agent), shown when the run has home files, a changed file's preview open; the memory tool's empty `*.lock` files are not collected (Phase 6b); since Phase 8 only a memory-on run has home files                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `artifacts`, blobs                          |
+| Launch record  | the container (image + digest, mounts, network, limits), the exact Hermes command, `config.yaml`, inputs with hashes; each MCP secret as `<from env NAME>` with its exposure; **Skill loading** (when the run had skills: preload with `-s`, or on demand through the `skills` toolset), **Home seeds** (each `memories/X.md → /opt/data/memories/X.md` with its hash, or that `memories/` started empty; since Phase 8, from the record's `home_memory`: with memory on, the seeds and that `home/memories` was collected; with memory off, each seed "· left out" and "Memory is off: these seeds were left out of the home, and `home/memories` was not collected, so nothing there counts as memory."; a record from before Phase 8 keeps the old note) and **Background review** (`memory.nudge_interval` and `skills.creation_nudge_interval`, written the same in every run; a one-shot run starts no review) | `attempts.launch_record`                    |
 
 Actions in the drawer:
 
@@ -1785,22 +1890,23 @@ Actions in the drawer:
 
 Each of these needs a decision or a fix before the matching code is written.
 
-| #   | Where               | Point                                                                                                                                                                                                                                                                                                                                                                             | Suggested resolution                                                                                                                           |
-| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).                                                                     | Done. Follow-ups are points 14 to 16.                                                                                                          |
-| 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                                                                                   | Done.                                                                                                                                          |
-| 3   | API surface         | **Resolved.** Phase 1 built its own routes (`GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route); Phase 2 built `GET /experiments/new-options` and the artifact preview route. All are in Swagger and plan section 11. | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 4   | Banner on Resources | **Resolved in Phase 5**, as suggested: the banner shows on Resources and is hidden on Suites only. Before, the web shell hid it on Suites and Resources (designer note), while the plan and the design brief exempt only Suites.                                                                                                                                                  | Done (`docs/phases/phase-5.md` section 2.5).                                                                                                   |
-| 5   | Pause reason        | **Resolved in Phase 2.** `provider_disconnected` is in migration 0004 and `packages/shared`.                                                                                                                                                                                                                                                                                      | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 6   | Network events      | **Resolved in Phase 2.** Subtype `network`, with a defined payload (kind, decision, background, and host, port, reason, status, ms, model, server, method and tokens where known).                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 7   | Host login status   | **Resolved in Phase 2**, as suggested: egress's admin `/health` reports the host forward, the worker records `workers.host_proxy`, and `GET /providers` reports `host` or `host_unreachable`.                                                                                                                                                                                     | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                                                                                              | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2).              |
-| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling is built in Phase 5: the list every 5 s while anything runs, the inspector every 1 s while a run is live.                                                                                                                           | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 10  | Spend ceiling       | **Resolved in Phase 2.** Launch is allowed over the ceiling; the spend guard pauses at it.                                                                                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 11  | Launch and sandbox  | **Resolved in Phase 2.** Launch answers 409 when no connected worker has proven sandbox isolation.                                                                                                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are built in Phase 5.                                                                                                                                                                                                                                                         | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                                                                                    | Done.                                                                                                                                          |
-| 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                                                                                 | Done.                                                                                                                                          |
-| 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                                                                                       | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                                  |
-| 16  | Egress allowlist    | **Resolved in Phase 2.** In allowlist mode egress refuses every CONNECT and plain-http request before any DNS lookup.                                                                                                                                                                                                                                                             | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                   |
-| 17  | Save refusals       | **Open (Phase 5b).** The web fixtures' `save-failed` scenario, after SA.11's sample, shows a save refused at loading for an unknown key in task.yaml ("unknown key prmary"). The API saves a task with an unknown key as invalid (section 8.6) and refuses a save only for a task.yaml or suite.yaml that does not parse, an unsafe file or a taken name.                         | Change the scenario's example to a task.yaml that does not parse, so fixtures mode shows what the API answers (`docs/phases/phase-5b.md` 6.2). |
+| #   | Where               | Point                                                                                                                                                                                                                                                                                                                                                                                                     | Suggested resolution                                                                                                                                                  |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | MCP secrets         | **Resolved 24 Oct 2026.** stdio env values are set in the trial's container environment and are readable by the agent; http header values are added by egress through an MCP gateway and never enter the run. Plan sections 1, 2, 5.3, 5.4, 8.2, 13, 14 and 15 and the design canvas now agree (section 9.4).                                                                                             | Done. Follow-ups are points 14 to 16.                                                                                                                                 |
+| 2   | Sandbox status      | **Resolved in Phase 1.** The last self-test report is stored on the `workers` row (`sandbox`, migration 0002) and served by `GET /system/sandbox`; each worker in `GET /system/summary` and `GET /system/workers` carries `sandboxProven` (docs/phases/phase-1.md section 2.3).                                                                                                                           | Done.                                                                                                                                                                 |
+| 3   | API surface         | **Resolved.** Phase 1 built its own routes (`GET /system/sandbox`, `GET /system/workers`, `GET /configurations/form-options`, `GET /configurations/:id/draft`, `GET /resources/counts`, `POST /resources/mcp-servers/test` and the fixture `preview` route); Phase 2 built `GET /experiments/new-options` and the artifact preview route. All are in Swagger and plan section 11.                         | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 4   | Banner on Resources | **Resolved in Phase 5**, as suggested: the banner shows on Resources and is hidden on Suites only. Before, the web shell hid it on Suites and Resources (designer note), while the plan and the design brief exempt only Suites.                                                                                                                                                                          | Done (`docs/phases/phase-5.md` section 2.5).                                                                                                                          |
+| 5   | Pause reason        | **Resolved in Phase 2.** `provider_disconnected` is in migration 0004 and `packages/shared`.                                                                                                                                                                                                                                                                                                              | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 6   | Network events      | **Resolved in Phase 2.** Subtype `network`, with a defined payload (kind, decision, background, and host, port, reason, status, ms, model, server, method and tokens where known).                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 7   | Host login status   | **Resolved in Phase 2**, as suggested: egress's admin `/health` reports the host forward, the worker records `workers.host_proxy`, and `GET /providers` reports `host` or `host_unreachable`.                                                                                                                                                                                                             | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 8   | Load-time verifiers | **Resolved in Phase 1** (decision D1). The loader runs in the worker as the `load-suites` job, and at worker start. `POST /suites/reload` sends the job and waits for its result. The API no longer mounts `./suites` (section 8.1).                                                                                                                                                                      | Done. Verifiers still run with the worker's privileges, by design for a single trusted user (docs/phases/phase-1.md section 7.2).                                     |
+| 9   | Live updates        | **Resolved in Phase 2** on the API side: SSE for `/system/events` and `/experiments/:id/events`; the list and the inspector poll. The polling is built in Phase 5: the list every 5 s while anything runs, the inspector every 1 s while a run is live.                                                                                                                                                   | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 10  | Spend ceiling       | **Resolved in Phase 2.** Launch is allowed over the ceiling; the spend guard pauses at it.                                                                                                                                                                                                                                                                                                                | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 11  | Launch and sandbox  | **Resolved in Phase 2.** Launch answers 409 when no connected worker has proven sandbox isolation.                                                                                                                                                                                                                                                                                                        | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 12  | Login unavailable   | **Resolved in Phase 2** on the API side: `NOUS_STATUSES` gains `unavailable`. The web chip and text are built in Phase 5.                                                                                                                                                                                                                                                                                 | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 13  | Toolsets source     | **Resolved in Phase 1, differently.** The worker reads the list from `hermes tools list` in the trial image at start (17 toolsets) and stores it on its row. The configuration form reads it from `GET /configurations/form-options`; `GET /system/summary` does not carry it.                                                                                                                            | Done.                                                                                                                                                                 |
+| 14  | MCP header mapping  | **Resolved in Phase 1.** `header_names` became `headers`, a jsonb list of `{header, env}` pairs with a CHECK on each element (migration 0002), and `McpHeaderSchema` in `shared`.                                                                                                                                                                                                                         | Done.                                                                                                                                                                 |
+| 15  | Secret presence     | **Resolved in Phase 1.** Egress's admin socket answers `GET /env-names` (names only). The worker records both name sets on its row every 10 s, and `GET /resources/secrets` joins them with MCP definitions, including versions a configuration still pins.                                                                                                                                               | Done. MCP definitions may not name platform variables or credentials (shared `env-names.ts`).                                                                         |
+| 16  | Egress allowlist    | **Resolved in Phase 2.** In allowlist mode egress refuses every CONNECT and plain-http request before any DNS lookup.                                                                                                                                                                                                                                                                                     | Done (`docs/phases/phase-2.md` section 2.3).                                                                                                                          |
+| 17  | Save refusals       | **Open (Phase 5b).** The web fixtures' `save-failed` scenario, after SA.11's sample, shows a save refused at loading for an unknown key in task.yaml ("unknown key prmary"). The API saves a task with an unknown key as invalid (section 8.6) and refuses a save only for a task.yaml or suite.yaml that does not parse, an unsafe file or a taken name.                                                 | Change the scenario's example to a task.yaml that does not parse, so fixtures mode shows what the API answers (`docs/phases/phase-5b.md` 6.2).                        |
+| 18  | Home seeds panel    | **Open (Phase 8).** Task detail's Home seeds panel says "Copied into the agent's memories/ before every run, in every configuration; read only with memory on" (section 8.2), and the comment on `HOME_SEED_PATHS` in `packages/shared/src/suite-files.ts` says each seed is copied "in every arm whatever `memory_enabled` says". Since Phase 8 the seeds are copied only with memory on (section 12.2). | Panel: "Copied into the agent's memories/ before a run only when its configuration's memory is on"; the comment to match (`docs/phases/phase-8.md` open question 12). |

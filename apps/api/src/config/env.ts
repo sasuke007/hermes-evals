@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HTTP_URL_PATTERN, PROVIDERS } from '@hermes-evals/shared';
+import { HTTP_URL_PATTERN, MOCK_MODEL_NAME, PROVIDERS } from '@hermes-evals/shared';
 import { LOAD_SUITES_EXPIRE_SECONDS } from '../queue/queues.js';
 
 /** An optional setting; an empty value (`JUDGE_MODEL=` in .env) means unset. */
@@ -25,6 +25,27 @@ export const EnvSchema = z
     DATABASE_URL: z.string().url().optional(),
     /** Directory holding suites (each a folder with task folders). */
     SUITES_DIR: z.string().default('./suites'),
+    /**
+     * The samples a fresh clone starts with (Phase 8 G3): skills/<name>/,
+     * documents/<suite>/ and configurations.yaml. The API reads them at
+     * start for the seed alone; Compose mounts ./samples read-only here.
+     */
+    SAMPLES_DIR: z.string().default('./samples'),
+    /**
+     * Whether the API seeds the samples at each start (samples/seed.ts): what
+     * SAMPLES_DIR holds and the database lacks, through the services the
+     * pages use, never failing the start. On by default; `false` or `0` turns
+     * it off. Empty means the default, like the other settings.
+     */
+    SEED_SAMPLES: z.preprocess(
+      (value) =>
+        value === undefined || value === ''
+          ? 'true'
+          : typeof value === 'string'
+            ? value.trim().toLowerCase()
+            : value,
+      z.enum(['true', 'false', '1', '0']).transform((value) => value === 'true' || value === '1'),
+    ),
     /** Directory for trial homes, workspaces and collected artifacts. */
     DATA_DIR: z.string().default('./data'),
     /** Path to the Hermes CLI binary used by the worker. */
@@ -121,12 +142,26 @@ export const EnvSchema = z
      * ready (plan 6.1).
      */
     JUDGE_PROVIDER: optional(z.enum(PROVIDERS)),
+    /**
+     * Read as unset when it is the mock model's name (mock/scripted) and
+     * JUDGE_PROVIDER is not `custom`: Compose defaults each JUDGE_* setting on
+     * its own (Phase 8 G1), so `JUDGE_PROVIDER=openrouter` alone in .env
+     * still has the mock's model beside it, which no real provider serves.
+     * Unset, a launch with an llm_judge check that names no model is refused
+     * (noJudgeModelReason), as before Phase 8, rather than every judge call
+     * failing after the runs were paid for. A `custom` judge keeps the name:
+     * a mock reached at another host answers it, and the pages warn when the
+     * base URL is not the mock's (JudgeView.mockModelName).
+     */
     JUDGE_MODEL: optional(z.string().min(1).max(200)),
     /**
      * A `custom` judge's own base URL, such as the scripted mock model
      * (http://mock-model:8090/v1); egress forwards the judge's calls there.
-     * Set exactly when JUDGE_PROVIDER is `custom`, the rule egress applies to
-     * a custom attempt's upstream.
+     * Required when JUDGE_PROVIDER is `custom`, the rule egress applies to a
+     * custom attempt's upstream, and ignored (read as unset) with any other
+     * provider: Compose defaults all three settings to the mock (Phase 8
+     * G1), so a judge set in .env as JUDGE_PROVIDER and JUDGE_MODEL alone
+     * still has the mock's base URL beside it.
      */
     JUDGE_BASE_URL: optional(z.string().regex(HTTP_URL_PATTERN, 'must be an http(s) URL')),
     /**
@@ -141,14 +176,11 @@ export const EnvSchema = z
     ),
   })
   .superRefine((env, ctx) => {
-    if ((env.JUDGE_PROVIDER === 'custom') !== (env.JUDGE_BASE_URL !== undefined)) {
+    if (env.JUDGE_PROVIDER === 'custom' && env.JUDGE_BASE_URL === undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['JUDGE_BASE_URL'],
-        message:
-          env.JUDGE_PROVIDER === 'custom'
-            ? 'is required when JUDGE_PROVIDER is custom'
-            : 'is only used when JUDGE_PROVIDER is custom',
+        message: 'is required when JUDGE_PROVIDER is custom',
       });
     }
   });
@@ -161,5 +193,14 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     const lines = result.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`);
     throw new Error(`Invalid environment:\n${lines.join('\n')}`);
   }
-  return result.data;
+  // Only a `custom` judge has a base URL of its own (see JUDGE_BASE_URL), and
+  // only a `custom` judge can be the mock model (see JUDGE_MODEL).
+  const env = result.data;
+  if (env.JUDGE_PROVIDER === 'custom') return env;
+  const mockName = env.JUDGE_MODEL?.trim() === MOCK_MODEL_NAME;
+  return {
+    ...env,
+    JUDGE_BASE_URL: undefined,
+    JUDGE_MODEL: mockName ? undefined : env.JUDGE_MODEL,
+  };
 }

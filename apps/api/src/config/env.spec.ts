@@ -88,17 +88,100 @@ describe('Phase 3 settings', () => {
     );
   });
 
-  it('refuse an unknown provider, a base URL that does not match the provider, and a silly cap', () => {
+  it('refuse an unknown provider, a custom judge without a base URL, and a silly cap', () => {
     for (const [raw, message] of [
       [{ JUDGE_PROVIDER: 'gemini' }, /JUDGE_PROVIDER/],
       [{ JUDGE_PROVIDER: 'custom', JUDGE_MODEL: 'm' }, /JUDGE_BASE_URL: is required/],
-      [{ JUDGE_PROVIDER: 'nous', JUDGE_BASE_URL: 'http://x:1/v1' }, /JUDGE_BASE_URL: is only used/],
       [{ JUDGE_PROVIDER: 'custom', JUDGE_BASE_URL: 'http://u:p@x/v1' }, /JUDGE_BASE_URL/],
+      [{ JUDGE_PROVIDER: 'nous', JUDGE_BASE_URL: 'mock-model:8090' }, /JUDGE_BASE_URL/],
       [{ JUDGE_MODEL: 'x'.repeat(201) }, /JUDGE_MODEL/],
       [{ MODEL_TOKEN_CAP_PER_ATTEMPT: '0' }, /MODEL_TOKEN_CAP_PER_ATTEMPT/],
       [{ MODEL_TOKEN_CAP_PER_ATTEMPT: '1500.5' }, /MODEL_TOKEN_CAP_PER_ATTEMPT/],
     ] as const) {
       expect(() => validateEnv(raw), JSON.stringify(raw)).toThrow(message);
     }
+  });
+});
+
+describe('Phase 8 settings', () => {
+  // Compose gives the api and the worker the mock judge's three settings
+  // unless the shell or .env sets them (docker-compose.yml x-judge-settings).
+  const composeDefaults = {
+    JUDGE_PROVIDER: 'custom',
+    JUDGE_MODEL: 'mock/scripted',
+    JUDGE_BASE_URL: 'http://mock-model:8090/v1',
+  };
+
+  it("read Compose's defaults as the mock judge", () => {
+    expect(validateEnv(composeDefaults)).toMatchObject(composeDefaults);
+  });
+
+  it('ignore the base URL beside any provider but custom, so a real judge in .env starts', () => {
+    // `JUDGE_PROVIDER=nous` and `JUDGE_MODEL=...` in .env; Compose still passes the mock's base URL.
+    const real = validateEnv({
+      ...composeDefaults,
+      JUDGE_PROVIDER: 'nous',
+      JUDGE_MODEL: 'openai/gpt-6.1-sol',
+    });
+    expect([real.JUDGE_PROVIDER, real.JUDGE_MODEL, real.JUDGE_BASE_URL]).toEqual([
+      'nous',
+      'openai/gpt-6.1-sol',
+      undefined,
+    ]);
+    // scripts/phase3-smoke.sh recreates the api with JUDGE_PROVIDER=openrouter and an empty base URL.
+    expect(
+      validateEnv({ ...composeDefaults, JUDGE_PROVIDER: 'openrouter' }).JUDGE_BASE_URL,
+    ).toBeUndefined();
+    // A provider left unset is nous (resolveJudgeModel), so the base URL is ignored there too.
+    expect(validateEnv({ JUDGE_BASE_URL: 'http://x:1/v1' }).JUDGE_BASE_URL).toBeUndefined();
+  });
+
+  it("read the mock's model name as unset beside a real provider: JUDGE_PROVIDER=openrouter alone", () => {
+    // .env sets the provider and its key but no JUDGE_MODEL, as Phase 6 and 7 allowed: Compose
+    // still passes mock/scripted, which OpenRouter would answer with an error on every judge
+    // call. Unset, a launch with an llm_judge check that names no model is refused (409).
+    const env = validateEnv({ ...composeDefaults, JUDGE_PROVIDER: 'openrouter' });
+    expect([env.JUDGE_PROVIDER, env.JUDGE_MODEL, env.JUDGE_BASE_URL]).toEqual([
+      'openrouter',
+      undefined,
+      undefined,
+    ]);
+    // The same for nous, for a provider left unset (nous), and with spaces around the name.
+    expect(validateEnv({ ...composeDefaults, JUDGE_PROVIDER: 'nous' }).JUDGE_MODEL).toBeUndefined();
+    expect(validateEnv({ JUDGE_MODEL: 'mock/scripted' }).JUDGE_MODEL).toBeUndefined();
+    expect(
+      validateEnv({ JUDGE_PROVIDER: 'openai', JUDGE_MODEL: ' mock/scripted ' }).JUDGE_MODEL,
+    ).toBeUndefined();
+    // Any other model is kept.
+    expect(
+      validateEnv({ JUDGE_PROVIDER: 'openrouter', JUDGE_MODEL: 'openai/gpt-6.1-sol' }).JUDGE_MODEL,
+    ).toBe('openai/gpt-6.1-sol');
+  });
+
+  it("keep the mock's model name for custom with a real base URL alone: the pages flag it", () => {
+    // `JUDGE_PROVIDER=custom` and `JUDGE_BASE_URL=https://…` in .env, no JUDGE_MODEL. A mock
+    // reached at another host answers mock/scripted, so it is kept (judge-view.ts mockModelName).
+    const env = validateEnv({ ...composeDefaults, JUDGE_BASE_URL: 'https://judge.example.com/v1' });
+    expect([env.JUDGE_PROVIDER, env.JUDGE_MODEL, env.JUDGE_BASE_URL]).toEqual([
+      'custom',
+      'mock/scripted',
+      'https://judge.example.com/v1',
+    ]);
+  });
+
+  it('seed the samples from ./samples by default, and turn the seed off with false or 0', () => {
+    const env = validateEnv({});
+    expect([env.SEED_SAMPLES, env.SAMPLES_DIR]).toEqual([true, './samples']);
+    for (const [value, seed] of [
+      ['', true],
+      ['true', true],
+      ['1', true],
+      [' TRUE ', true],
+      ['false', false],
+      ['0', false],
+    ] as const) {
+      expect(validateEnv({ SEED_SAMPLES: value }).SEED_SAMPLES, value).toBe(seed);
+    }
+    expect(() => validateEnv({ SEED_SAMPLES: 'maybe' })).toThrow(/SEED_SAMPLES/);
   });
 });

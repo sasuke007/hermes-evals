@@ -6,12 +6,15 @@
  * model is ever called. Every HTTP answer is parsed with its shared schema.
  *
  * - Home seeds (P1) and memory files (P2): the phase6 suite's one task seeds
- *   home/memories/MEMORY.md and USER.md. Both memory settings start with the
- *   seeds in the trial home; the run with memory on saves an entry to
- *   MEMORY.md (test/support/phase6-trials.ts), which is collected with root
- *   home and scored by a file_check with `root: home` and a verifier that
- *   reads `--home`. The run detail lists the memory files, the launch
- *   record the seeds and the background review intervals (P3).
+ *   home/memories/MEMORY.md and USER.md. Only memory on starts with the
+ *   seeds in the trial home (Phase 8 G9: with memory off nothing there is
+ *   memory, so no seed goes in and nothing is collected from it); the run
+ *   with memory on saves an entry to MEMORY.md
+ *   (test/support/phase6-trials.ts), which is collected with root home and
+ *   scored by a file_check with `root: home` and a verifier that reads
+ *   `--home`. The run detail lists the memory files, the launch record the
+ *   seeds, the ones memory off left out, and the background review
+ *   intervals (P3).
  * - Skill loading (P5): preload passes `-s`; on demand passes none and adds
  *   the `skills` toolset, the skill still installed in the home.
  * - Unset MCP variables (decision #13 of phase-5.md 6.4): launch answers 409
@@ -296,13 +299,13 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
     expect(refused.issues).toEqual([{ path: 'skillLoading', message: SKILL_LOADING_NEEDS_SKILLS }]);
   });
 
-  it('seeds the home in both memory settings, collects the memory file and scores it', async () => {
+  it('seeds the home with memory on only, collects the memory file and scores it', async () => {
     const id = await world.launch('memory', configs.memoryOff, [configs.memoryOn]);
     const runs = await runsByConfiguration(id);
     const off = runs.get('memory-off')!;
     const on = runs.get('memory-on')!;
 
-    // P1: the same seeds in the home whatever memory_enabled says.
+    // P1, Phase 8 G9: the seeds in the home only with memory on; memory off lists them as skipped.
     for (const [run, memoryEnabled] of [
       [off, false],
       [on, true],
@@ -313,11 +316,20 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
       expect(toolsetsOf(seen.argv)).toEqual(
         memoryEnabled ? ['file', 'memory', 'terminal'] : ['file', 'terminal'],
       );
-      expect(seen.memories).toEqual(SEEDS);
-      expect(run.launchRecord?.homeSeeds).toEqual([
-        { path: 'memories/MEMORY.md', sha256: sha(SEEDS['memories/MEMORY.md']) },
-        { path: 'memories/USER.md', sha256: sha(SEEDS['memories/USER.md']) },
-      ]);
+      expect(seen.memories).toEqual(memoryEnabled ? SEEDS : {});
+      expect(run.launchRecord?.homeSeeds).toEqual(
+        memoryEnabled
+          ? [
+              { path: 'memories/MEMORY.md', sha256: sha(SEEDS['memories/MEMORY.md']) },
+              { path: 'memories/USER.md', sha256: sha(SEEDS['memories/USER.md']) },
+            ]
+          : [],
+      );
+      expect(run.launchRecord?.homeMemory).toEqual({
+        memoryEnabled,
+        seedsSkipped: memoryEnabled ? [] : ['memories/MEMORY.md', 'memories/USER.md'],
+        memoriesCollected: memoryEnabled,
+      });
       // P3: Hermes's defaults written explicitly, the same in every arm.
       expect(run.launchRecord?.backgroundReview).toEqual({
         memoryNudgeInterval: 10,
@@ -327,17 +339,17 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
       expect(run.launchRecord?.configYaml).toMatch(/creation_nudge_interval: 10/);
     }
 
-    // P2: the memory files are collected with root home, labelled against the seeds.
+    // P2: the memory files are collected with root home, labelled against the seeds; with memory off, none.
     const homeOf = (run: RunDetail) =>
       run.artifacts.items.filter((a) => a.root === 'home').map((a) => [a.path, a.origin]);
     expect(homeOf(on)).toEqual([
       ['home/memories/MEMORY.md', 'home_seed_modified'],
       ['home/memories/USER.md', 'home_seed_unchanged'],
     ]);
-    expect(homeOf(off)).toEqual([
-      ['home/memories/MEMORY.md', 'home_seed_unchanged'],
-      ['home/memories/USER.md', 'home_seed_unchanged'],
-    ]);
+    expect(homeOf(off)).toEqual([]);
+    expect(off.timeline.events.find((e) => e.title === 'collected')?.text).toBe(
+      'Memory was off, so home/memories was not collected.',
+    );
     // Memory files are not the workspace: neither run wrote a file there.
     expect([on.artifacts.agentWroteNothing, off.artifacts.agentWroteNothing]).toEqual([true, true]);
     const saved = on.artifacts.items.find((a) => a.path === 'home/memories/MEMORY.md')!;
@@ -355,10 +367,8 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
       .select({ root: artifacts.root, path: artifacts.path, sha256: artifacts.sha256 })
       .from(artifacts)
       .where(and(eq(artifacts.root, 'home'), eq(artifacts.path, 'memories/MEMORY.md')));
-    const byText = (a: string | null, b: string | null) => String(a).localeCompare(String(b));
-    expect(stored.map((a) => a.sha256).sort(byText)).toEqual(
-      [sha(SAVED_MEMORY), sha(SEEDS['memories/MEMORY.md'])].sort(byText),
-    );
+    // Only memory on's: memory off collects nothing from the home (Phase 8 G9).
+    expect(stored.map((a) => a.sha256)).toEqual([sha(SAVED_MEMORY)]);
     const collected = on.timeline.events.find((e) => e.title === 'collected');
     expect(collected?.summary).toMatch(/2 memory files/);
 
@@ -368,7 +378,8 @@ describe.skipIf(!SERVER_URL)('Phase 6 on Postgres 17: the platform additions', (
       { key: 'saved', status: 'failed' },
     ]);
     expect([scoreOf(on, 'kept')?.status, scoreOf(on, 'kept')?.score]).toEqual(['passed', 1]);
-    expect([scoreOf(off, 'kept')?.status, scoreOf(off, 'kept')?.score]).toEqual(['failed', 0.5]);
+    // Memory off leaves no MEMORY.md for the verifier to read: nothing kept, nothing added.
+    expect([scoreOf(off, 'kept')?.status, scoreOf(off, 'kept')?.score]).toEqual(['failed', 0]);
     expect([scoreOf(on, 'count')?.status, scoreOf(off, 'count')?.status]).toEqual([
       'passed',
       'passed',

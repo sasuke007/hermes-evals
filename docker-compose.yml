@@ -19,14 +19,20 @@ x-trial-settings: &trial-settings
   TRIAL_VOLUME: hermes-evals-trials
 
 # The LLM judge's platform default, for llm_judge checks that name no
-# `model:` (unset by default; see .env.example). The worker scores with it;
-# the api reads it to refuse a launch or re-score while the judge's provider
-# is not ready. Judge calls go through egress's admin socket, so neither
-# holds a provider key. Read from the shell, then .env; empty means unset.
+# `model:` (see .env.example). The worker scores with it; the api reads it to
+# refuse a launch or re-score while the judge's provider is not ready, and
+# shows it on System. Judge calls go through egress's admin socket, so
+# neither holds a provider key. Read from the shell, then .env.
+# Unset, the judge is the scripted mock model (Phase 8), so a fresh clone
+# grades its samples' llm_judge checks for free; New experiment warns when
+# it would judge a real model. For a real judge set both JUDGE_PROVIDER and
+# JUDGE_MODEL (each defaults on its own: JUDGE_MODEL alone still goes to the
+# mock); the default JUDGE_BASE_URL is then ignored, since the api and the
+# worker use JUDGE_BASE_URL only for provider `custom` (config/env.ts).
 x-judge-settings: &judge-settings
-  JUDGE_PROVIDER: ${JUDGE_PROVIDER:-}
-  JUDGE_MODEL: ${JUDGE_MODEL:-}
-  JUDGE_BASE_URL: ${JUDGE_BASE_URL:-}
+  JUDGE_PROVIDER: ${JUDGE_PROVIDER:-custom}
+  JUDGE_MODEL: ${JUDGE_MODEL:-mock/scripted}
+  JUDGE_BASE_URL: ${JUDGE_BASE_URL:-http://mock-model:8090/v1}
 
 # Provider keys belong to egress alone. The api and the worker load .env for
 # their settings and the stdio MCP values, so every key .env can hold is
@@ -45,7 +51,7 @@ x-no-provider-keys: &no-provider-keys
 # http MCP header values belong to egress alone (plan 5.3): blanked for the
 # api and the worker the same way, so a verifier script cannot read them.
 # Nothing in either process needs the value; the launch check asks egress
-# which names it holds. The sample vendor-directory's token (profile samples).
+# which names it holds. The sample vendor-directory's token.
 x-egress-only-values: &egress-only-values
   VENDOR_DIRECTORY_TOKEN: ''
 
@@ -90,11 +96,20 @@ services:
       PRICES_FILE: /config/prices.yaml
       # Connect Nous Portal from the UI (plan 6.1), over provider-admin.
       NOUS_LOGIN_URL: http://nous-login:8650
+      # At each start the api adds what ./samples holds and the database
+      # lacks (Phase 8): its skills and documents, the sample MCP servers and
+      # each suite's recommended configurations (samples/configurations.yaml),
+      # through the services the pages use. Read from the shell, then .env;
+      # false turns it off. System shows what it created and skipped.
+      SEED_SAMPLES: ${SEED_SAMPLES:-true}
+      SAMPLES_DIR: /samples
     # No suites mount: the worker loads suites (verifiers are user code) and
     # the API serves what it stored, from Postgres and the blobs in evaldata.
+    # The samples are data the seed validates as an upload, read-only.
     volumes:
       - evaldata:/data
       - ./config:/config:ro
+      - ./samples:/samples:ro
     ports:
       - '127.0.0.1:3000:3000'
     networks: [backend, provider-admin]
@@ -124,10 +139,11 @@ services:
         required: false
     environment:
       <<: [*trial-settings, *judge-settings, *no-provider-keys, *egress-only-values]
-      # The sample stdio MCP server invoice-db's file (see .env.example), read
-      # from the shell, then .env, like the judge settings, so a smoke start
-      # can set it without editing .env. Empty means unset.
-      INVOICE_DB_URL: ${INVOICE_DB_URL:-}
+      # The sample stdio MCP server invoice-db's file, read from the shell,
+      # then .env, like the judge settings, so a smoke start can set it
+      # without editing .env. Unset, the file baked into the trial image
+      # (Phase 8); set but empty (`INVOICE_DB_URL=`), unset for the worker.
+      INVOICE_DB_URL: ${INVOICE_DB_URL-file:///opt/mcp/invoice-db/invoices.csv}
       # Total tokens the model gateway serves one attempt (sent as the
       # registration's maxTokens); empty means 2000000.
       MODEL_TOKEN_CAP_PER_ATTEMPT: ${MODEL_TOKEN_CAP_PER_ATTEMPT:-}
@@ -250,11 +266,13 @@ services:
          "openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY"},
          "anthropic":{"baseUrl":"https://api.anthropic.com/v1","apiKeyEnv":"ANTHROPIC_API_KEY"},
          "mock":{"baseUrl":"http://mock-model:8090/v1"}}
-      # The sample vendor-directory's token (profile samples), as .env holds
-      # it. Its http definition maps Authorization to VENDOR_DIRECTORY_TOKEN
-      # with the prefix `Bearer `, which egress writes before the value
-      # (Phase 7). Empty when unset, which egress reports as not set.
-      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN:-}
+      # The sample vendor-directory's token, from the shell, then .env. Its
+      # http definition maps Authorization to VENDOR_DIRECTORY_TOKEN with the
+      # prefix `Bearer `, which egress writes before the value (Phase 7).
+      # Unset, the fixed sample value vendor-directory also gets (Phase 8): a
+      # sample server on an internal network, not a secret. Set but empty
+      # (`VENDOR_DIRECTORY_TOKEN=`), egress reports it as not set.
+      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN-hermes-evals-sample-token}
     user: node
     read_only: true
     cap_drop: [ALL]
@@ -278,8 +296,17 @@ services:
   # Serves Nous model calls with the single Nous Portal login in the
   # nous-home volume; egress forwards to it. Connect the login from the UI
   # (System > Model access > Connect), which nous-login writes into the
-  # volume. Without a login `hermes proxy start` exits, so the loop retries
-  # every 5 s and picks up a new login without a restart.
+  # volume. The loop starts `hermes proxy start` only once the volume holds
+  # Hermes's auth store ($HERMES_HOME/auth.json, hermes_cli/auth.py
+  # _auth_file_path), and otherwise checks again every 5 s without starting
+  # Python (Phase 8): each start costs seconds of CPU, about a core while no
+  # one has logged in. The file outlives the login: Disconnect rewrites it
+  # with no provider (clear_provider_auth), and the proxy then exits at once.
+  # So a proxy that exits within 30 s leaves a stamp in the container's /tmp,
+  # and the loop starts it again only once the auth store is newer than the
+  # stamp (a Connect, or a CLI login, rewrites it) or after 5 minutes, in
+  # case the failure has passed. A proxy that ran longer clears the stamp and
+  # is started again 5 s later. Each start of the container tries once.
   # For development you can instead reuse this machine's Hermes login: run
   # `hermes proxy start --provider nous` on the host and set
   # NOUS_HOST_PROXY=host.docker.internal:8645 in .env (egress then forwards to
@@ -293,10 +320,21 @@ services:
       - -c
       - |
         trap 'kill "$$pid" 2>/dev/null; exit 0' TERM INT
+        auth="$$HERMES_HOME/auth.json"
+        stamp=/tmp/proxy-exited
+        rm -f "$$stamp"
+        idle=0
         while :; do
-          /opt/hermes/.venv/bin/hermes proxy start --provider nous --host 0.0.0.0 --port 8645 &
-          pid=$$!
-          wait "$$pid"
+          if [ -e "$$auth" ] && { [ ! -e "$$stamp" ] || [ "$$auth" -nt "$$stamp" ] || [ "$$idle" -ge 60 ]; }; then
+            idle=0
+            started=$$(date +%s)
+            /opt/hermes/.venv/bin/hermes proxy start --provider nous --host 0.0.0.0 --port 8645 &
+            pid=$$!
+            wait "$$pid"
+            if [ $$(($$(date +%s) - started)) -lt 30 ]; then touch "$$stamp"; else rm -f "$$stamp"; fi
+          else
+            idle=$$((idle + 1))
+          fi
           sleep 5 & wait $$!
         done
     environment:
@@ -342,17 +380,18 @@ services:
   # Scripted OpenAI-compatible model (apps/egress/src/mock-model.ts), for the
   # sandbox smoke test and for test experiments: a configuration with provider
   # `custom` and base URL http://mock-model:8090/v1 runs against it at no cost.
-  # MOCK_STEPS is the default script. MOCK_SCRIPTS_FILE (shell or .env) names
-  # a scripts file or a directory of *.json files, read in name order, which
-  # Compose mounts read-only; ./scripts gives it every smoke test's and
-  # suite's scripts. Unset, it mounts apps/egress/no-mock-scripts.json ([]).
+  # It runs on every start (Phase 8): the seeded `-mock` configurations and
+  # the default judge use it. MOCK_STEPS is the default script.
+  # MOCK_SCRIPTS_FILE (shell or .env) names a scripts file or a directory of
+  # *.json files, read in name order, which Compose mounts read-only; unset,
+  # ./scripts, every smoke test's and sample suite's scripts.
+  # apps/egress/no-mock-scripts.json ([]) leaves MOCK_STEPS alone.
   # MOCK_SCRIPTS (JSON) adds short overrides, played first:
   #   MOCK_SCRIPTS=[{"match":"<phrase>","steps":[{"content":"..."}]}]
   # `docker compose exec mock-model node dist/mock-model.js --print-scripts`
   # prints what it plays.
   mock-model:
     image: hermes-evals/egress
-    profiles: [test]
     command: ['node', 'dist/mock-model.js']
     user: node
     read_only: true
@@ -361,7 +400,7 @@ services:
       # create_host_path false: a mistyped path stops `up` instead of
       # mounting an empty directory.
       - type: bind
-        source: ${MOCK_SCRIPTS_FILE:-./apps/egress/no-mock-scripts.json}
+        source: ${MOCK_SCRIPTS_FILE:-./scripts}
         target: /run/mock-scripts
         read_only: true
         bind:
@@ -379,12 +418,12 @@ services:
   # http://vendor-directory:8000/mcp. Only egress shares its network, so a
   # trial reaches it through egress's MCP gateway, which adds
   # `Authorization: Bearer <VENDOR_DIRECTORY_TOKEN>`. Built FROM the trial
-  # image (it runs on the MCP SDK in Hermes's venv). Without the token it
-  # exits at start, so it stops after three tries with the reason in its log.
-  #   docker compose --profile samples up -d
+  # image (it runs on the MCP SDK in Hermes's venv). It runs on every start
+  # (Phase 8), with the same token as egress: the fixed sample value unless
+  # the shell or .env sets one. Without a token (`VENDOR_DIRECTORY_TOKEN=`)
+  # it exits at start, so it stops after three tries with the reason in its log.
   vendor-directory:
     image: hermes-evals/vendor-directory
-    profiles: [samples]
     build:
       context: docker/mcp/vendor-directory
       additional_contexts:
@@ -392,7 +431,7 @@ services:
       args:
         TRIAL_IMAGE: trial
     environment:
-      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN:-}
+      VENDOR_DIRECTORY_TOKEN: ${VENDOR_DIRECTORY_TOKEN-hermes-evals-sample-token}
     read_only: true
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
@@ -427,8 +466,8 @@ networks:
   # api and worker to nous-login only; no route out.
   provider-admin:
     internal: true
-  # egress to the sample http MCP servers (profile samples); no route out,
-  # and no trial is attached.
+  # egress to the sample http MCP servers; no route out, and no trial is
+  # attached.
   mcp-samples:
     internal: true
   trial-0:

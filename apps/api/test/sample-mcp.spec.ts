@@ -15,7 +15,7 @@
  *   runs the docker CLI itself, not docker-guard: it mounts the repository's
  *   docker/mcp read-only into the vendor-directory image, which the guard's
  *   trial policy refuses. On Colima, set DOCKER_CONTEXT=colima. Build the
- *   image first (`docker compose --profile samples build vendor-directory`,
+ *   image first (`docker compose build vendor-directory`,
  *   which builds the trial image too); the spec also checks that both images
  *   serve the bytes the repository holds, so a stale image fails here
  *   rather than in a suite's run.
@@ -80,7 +80,7 @@ describe.runIf(process.env.RUN_SANDBOX_TESTS === '1')(
         if (inspected.status !== 0) {
           throw new Error(
             `${image} is not built here (${inspected.stderr.trim() || inspected.error?.message}): ` +
-              'docker compose --profile samples build vendor-directory (on Colima with DOCKER_CONTEXT=colima)',
+              'docker compose build vendor-directory (on Colima with DOCKER_CONTEXT=colima)',
           );
         }
       }

@@ -54,6 +54,16 @@ const NOUS_DETAIL: Partial<Record<ProviderStatus, string>> = {
     'The login service failed its startup check: this Hermes version does not offer the device login the platform uses.',
 };
 
+/**
+ * A configured API-key provider's detail. The custom endpoint always reads configured, since
+ * its key is optional (the mock model takes none), so it must not claim a key was found.
+ */
+const keyDetail = computed(() =>
+  props.provider.id === 'custom'
+    ? `Key optional: egress sends ${props.provider.envVar ?? 'CUSTOM_API_KEY'} when .env sets it · value not shown`
+    : 'Key found in the egress environment · value not shown',
+);
+
 const revealed = ref(false);
 /** A long command wraps inside the cell instead of widening the table (ModelAccessStates). */
 const WRAP_COMMAND = '[&_code]:whitespace-normal [&_code]:wrap-anywhere';
@@ -217,9 +227,7 @@ function btnClass(action: RowAction): string[] {
           >
           <CopyCommand v-if="provider.applyCommand" :command="provider.applyCommand" />
         </div>
-        <span v-else class="text-text-2"
-          >Key found in the egress environment · value not shown</span
-        >
+        <span v-else class="text-text-2" data-testid="psr-key-detail">{{ keyDetail }}</span>
       </td>
       <td v-if="isNous">
         <div class="flex flex-wrap items-center gap-6" data-testid="psr-actions">
@@ -300,9 +308,7 @@ function btnClass(action: RowAction): string[] {
           >Add <code>{{ provider.envVar }}=…</code> to <code>.env</code>, then
           <code>{{ provider.applyCommand }}</code></span
         >
-        <span v-else class="text-text-2"
-          >Key found in the egress environment · value not shown</span
-        >
+        <span v-else class="text-text-2" data-testid="psr-key-detail">{{ keyDetail }}</span>
       </span>
       <span class="flex flex-wrap items-center gap-6" data-testid="psr-actions">
         <template v-for="action in actions" :key="action.label">

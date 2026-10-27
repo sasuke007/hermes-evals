@@ -15,7 +15,10 @@
  * Phase 6 records add how the skills loaded (P5), the home seeds copied in
  * (P1, the inputs of source `home_seed`) and the background review intervals
  * config.yaml set (P3). An older record reads as preload, no seeds, and no
- * intervals: it left Hermes's defaults implicit.
+ * intervals: it left Hermes's defaults implicit. Phase 8 records add what
+ * memory decided about the home (G9, `home_memory`): with memory off the
+ * seeds left out and home/memories not collected. An older record has none
+ * (null): it seeded and collected either way.
  */
 import { LaunchRecordSchema, type LaunchRecordView } from '@hermes-evals/shared';
 import { parse, stringify } from 'yaml';
@@ -209,6 +212,13 @@ export function launchRecordView(input: LaunchRecordInput): LaunchRecordView | n
       ? {
           memoryNudgeInterval: record.background_review.memory_nudge_interval,
           skillCreationNudgeInterval: record.background_review.skill_creation_nudge_interval,
+        }
+      : null,
+    homeMemory: record.home_memory
+      ? {
+          memoryEnabled: record.home_memory.memory_enabled,
+          seedsSkipped: record.home_memory.seeds_skipped,
+          memoriesCollected: record.home_memory.memories_collected,
         }
       : null,
   };

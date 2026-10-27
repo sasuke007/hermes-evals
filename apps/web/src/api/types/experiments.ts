@@ -30,6 +30,7 @@ export type {
   ExperimentSuiteSnapshot,
   FeedEntry,
   HermesRevision,
+  JudgeView,
   LaunchExperimentFields,
   LaunchExperimentInput,
   LaunchExperimentResult,
