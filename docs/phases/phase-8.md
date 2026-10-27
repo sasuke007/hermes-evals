@@ -582,4 +582,25 @@ How each question is settled is added here by the reviewer.
 
 ## 9. The real experiment
 
-The reviewer writes this section from `docs/results.md`.
+Written by the reviewer on 27 Oct 2026. The full report is [docs/results.md](../results.md); the costs are in [docs/costs.md](../costs.md).
+
+**The price.** `config/prices.yaml` lists `openai/gpt-6.1-sol` at OpenAI's published standard-tier rates, checked 27 Oct 2026 on developers.openai.com: input $2.00, cached input $0.10, cache write $2.50, output $10.00 per 1M tokens. Nous Portal's own price page answered 429, so costs on the Nous route are estimates at that list price.
+
+**The dry run** (`real-dryrun-invoices`, 3 tasks × 2 configurations × 1 repetition, 6 runs, $0.10) checked prices, prompts and the real path end to end. It found the unfenced answer (G5): `total_due` answered exactly the reference without its fence and was `ungradable`; after G5 a re-score made it `passed` (generation 2) with no new model call.
+
+**The calibration** (plan 18.5; one repetition per task and configuration of the four capability suites, 82 runs, $1.52) ran with the real judge. It found G9 and G10 (seeds readable with memory off; a preference saved as a skill), showed which tasks separate the configurations on this model (tools-v1: 3 tasks need a terminal; knowledge-v1: 2 need the knowledge; memory-v1: 3 need memory; mcp-v1: none), and lost three runs to a Hermes start-up deadline while a full test suite loaded the machine; retried on an idle machine, they passed.
+
+**The official experiment** (`invoices-v1-skill-official`, 12 tasks × 2 configurations × 5 repetitions, 120 runs, $1.02, 14 minutes): baseline 60/60, with the skill 60/60, a difference of +0.000 with a 95% interval of [0.000, 0.000], verdict **inconclusive**. No execution errors, no ungradable runs; every secondary check passed. The skill made the agent read its checklist (one more `read_file` a run) and cost 12% more tokens for no measurable gain: on these tasks GPT-6.1 Sol needs no help.
+
+**The suite changes assigned to Phase 8** in `docs/phases/phase-6b.md` 6.4 were settled from the calibration's data:
+
+| Item                                                                      | Decision                                                                                                                                                                      |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6b #2, a key that `docs/` is unchanged in `read_only` and `injected_note` | Not added: in both docs-export runs both documents were `document_unchanged`, so the key would have passed. Reopen if a model edits the documents.                            |
+| 6b #7, narrower `keep_private` patterns                                   | Not changed: `keep_private` passed in both arms with no false failure.                                                                                                        |
+| 6b #1, #9 and 6 #10                                                       | Reported in `docs/results.md` (the planted note, code execution adding nothing over a terminal) and `docs/limits.md` (money compared exactly; no formatting failure was seen) |
+| 6b #3, 5b #5, 5b #16, 5 #5                                                | In `docs/limits.md`                                                                                                                                                           |
+
+**Not re-run.** The one-command install with the seed was proven on a fresh Colima VM (section 6). Docker Desktop was proven in Phase 7, before the seed and the always-on samples; it was not re-run for Phase 8.
+
+**In the browser.** The reviewer walked the pages against the real stack with Claude in Chrome: the System page with the judge and the seed report; configurations created, duplicated and filtered; the dry run and the official experiment launched from New experiment and followed live; the Comparison and the run inspector on real runs; the suite, task and task-diff pages; an MCP server's Test start through egress; and a suite written in the editor (readiness, Try it with an unfenced reply, Review and save as v1), then run on the real model from "New experiment on v1".

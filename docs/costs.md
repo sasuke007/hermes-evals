@@ -25,7 +25,7 @@ Nous Portal's own price page could not be read on that date, so these are estima
 
 ### What a run costs
 
-Measured on 88 real runs: 6 in the dry run on `invoices-v1` and 82 in the calibration of the four capability suites (one run per task and configuration).
+Measured on 88 real runs: 6 in the dry run on `invoices-v1` and 82 in the calibration of the four capability suites (one run per task and configuration). The official experiment's 120 runs on `invoices-v1` came out a little cheaper: $0.0085 a run on average, median 20 s and about 20,000 tokens.
 
 | Suite                            | Runs   | Median time | Median tokens | Mean cost per run | Highest    |
 | -------------------------------- | ------ | ----------- | ------------- | ----------------- | ---------- |
@@ -50,11 +50,11 @@ What moves the cost:
 
 Runs × mean cost per run, which New experiment estimates before you launch, from the median tokens of earlier runs on the same suite (or from the time budget when there are none):
 
-| Experiment                                                                          | Runs | Measured                     |
-| ----------------------------------------------------------------------------------- | ---- | ---------------------------- |
-| Dry run: `invoices-v1`, 3 tasks × 2 configurations × 1 repetition                   | 6    | $0.10                        |
-| Calibration: the four capability suites, 1 repetition per task and configuration    | 82   | $1.52                        |
-| The official experiment: `invoices-v1`, 12 tasks × 2 configurations × 5 repetitions | 120  | see [results.md](results.md) |
+| Experiment                                                                          | Runs | Measured                                                              |
+| ----------------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------- |
+| Dry run: `invoices-v1`, 3 tasks × 2 configurations × 1 repetition                   | 6    | $0.10                                                                 |
+| Calibration: the four capability suites, 1 repetition per task and configuration    | 82   | $1.52                                                                 |
+| The official experiment: `invoices-v1`, 12 tasks × 2 configurations × 5 repetitions | 120  | $1.02 ($0.48 without the skill, $0.54 with it, $0.02 of it the judge) |
 
 Set a spend ceiling on every real experiment: the worker pauses the experiment when the spent cost reaches it, and you can raise it and resume.
 

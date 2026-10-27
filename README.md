@@ -4,6 +4,16 @@ An evaluation platform for [Hermes Agent](https://github.com/NousResearch/hermes
 
 It runs on your machine with Docker Compose: a NestJS API and worker, a Vue 3 web app, PostgreSQL with pg-boss for durable jobs, and three small services that keep trials isolated. TypeScript throughout, in a pnpm and Turborepo monorepo. Five sample suites, the skills, documents, MCP servers and configurations they use, and a scripted mock model come with it. One command starts it all, so everything can be tried without a model account and without spending money.
 
+## Documents and the real experiment
+
+- [docs/design.md](docs/design.md): architecture, the life of a run, scoring, statistics, key decisions and assumptions.
+- [docs/limits.md](docs/limits.md): what the results can and cannot tell you, and the known limits.
+- [docs/costs.md](docs/costs.md): what runs cost, measured on the real model, and what the machine needs.
+- [docs/results.md](docs/results.md): the real experiment. Does the `invoice-method` skill help GPT-6.1 Sol on `invoices-v1`? 12 tasks × 2 configurations × 5 repetitions: both passed 60 of 60, a difference of +0.000 [0.000, 0.000], **inconclusive**: no measurable gain, at 12% more cost with the skill. The same document reports the four capability suites on the real model, where tools, knowledge and memory did change results.
+- [docs/video-script.md](docs/video-script.md): the shot list for the demo video.
+- [AGENTS.md](AGENTS.md): how a coding agent should work in this repository.
+- [docs/phases/](docs/phases/): one document per build phase, with its decisions, tests and open questions.
+
 ## Requirements
 
 - **macOS** with [Colima](https://github.com/abiosoft/colima) or Docker Desktop. Both were installed from a clean clone and checked on 27 Oct 2026 (Apple silicon, 16 GB: Colima 0.10.3 with Docker Engine 29.5, and Docker Desktop 4.96 with Engine 29.9; Compose 5.6). Linux with native Docker is untested: see [Linux](#linux).
